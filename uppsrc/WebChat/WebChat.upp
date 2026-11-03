@@ -1,0 +1,18 @@
+description "Reusable web chat UI module with token streaming, pair programming, and markdown rendering\377";
+
+uses
+	Core,
+	Skylark,
+	SweAgent;
+
+file
+	AGENTS.md,
+	WebChat.h,
+	Session.h,
+	Session.cpp,
+	Streaming.h,
+	Streaming.cpp,
+	ChatView.h,
+	ChatView.cpp,
+	ChatRoutes.h,
+	ChatRoutes.cpp;

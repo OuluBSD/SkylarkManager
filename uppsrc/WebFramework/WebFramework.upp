@@ -1,0 +1,23 @@
+description "Reusable Skylark web framework with templates, KDE Plasma themes, scalable mega-menu, and density control\377";
+
+uses
+	Core,
+	Skylark;
+
+file
+	AGENTS.md,
+	WebFramework.h,
+	Navigation.h,
+	Navigation.cpp,
+	Tree.h,
+	Tree.cpp,
+	Icons.h,
+	Icons.cpp,
+	Audio.h,
+	Audio.cpp,
+	Theme.h,
+	Theme.cpp,
+	Template.h,
+	Template.cpp,
+	PageBuilder.h,
+	PageBuilder.cpp;

@@ -1,0 +1,10 @@
+LAYOUT(SkylarkGuiExampleLayout, 352, 184)
+	ITEM(Upp::EditString, MessageFromWeb, SetEditable(false).HSizePosZ(116, 96).TopPosZ(40, 19))
+	ITEM(Upp::Button, SendToWeb, SetLabel(t_("Send to Web")).RightPosZ(8, 84).TopPosZ(16, 20))
+	ITEM(Upp::Label, dv___2, SetLabel(t_("Some text:")).SetAlign(Upp::ALIGN_RIGHT).LeftPosZ(8, 104).TopPosZ(16, 19))
+	ITEM(Upp::Button, OpenWebBrowser, SetLabel(t_("Open web browser")).HCenterPosZ(132, 82).BottomPosZ(24, 52))
+	ITEM(Upp::Button, ExitButton, SetLabel(t_("Exit")).HCenterPosZ(132, -86).BottomPosZ(24, 52))
+	ITEM(Upp::EditString, SomeVariable, HSizePosZ(116, 96).TopPosZ(16, 19))
+	ITEM(Upp::Label, dv___6, SetLabel(t_("Message from web:")).SetAlign(Upp::ALIGN_RIGHT).LeftPosZ(8, 104).TopPosZ(40, 19))
+END_LAYOUT
+

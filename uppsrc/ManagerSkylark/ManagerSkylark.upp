@@ -1,0 +1,31 @@
+description "Manager Skylark web application following ../Manager/v2 design\377";
+
+uses
+	Core,
+	Skylark,
+	Manager,
+	SweAgent,
+	WebChat,
+	WebFramework;
+
+file
+	AGENTS.md,
+	V2Model.h,
+	V2Model.cpp,
+	GitHubPlatform.h,
+	GitHubPlatform.cpp,
+	SourceForgePlatform.h,
+	SourceForgePlatform.cpp,
+	AgentPlatform.h,
+	AgentPlatform.cpp,
+	SystemAuth.h,
+	SystemAuth.cpp,
+	HostPlatform.h,
+	HostPlatform.cpp,
+	ManagerSkylark.h,
+	ManagerSkylark.cpp,
+	WebViews.cpp,
+	RestApi.cpp;
+
+mainconfig
+	"" = "MT";
