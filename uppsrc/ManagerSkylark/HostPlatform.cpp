@@ -1,6 +1,8 @@
 #include "HostPlatform.h"
 #include <sys/stat.h>
+#ifdef PLATFORM_POSIX
 #include <sys/statvfs.h>
+#endif
 
 NAMESPACE_UPP
 
@@ -1658,6 +1660,7 @@ String HostPlatformService::RenderStorage(Http& http, const String& node_id)
 	  << "  <table><thead><tr><th>Mount Point</th><th>Total Size</th><th>Used</th><th>Free Space</th><th>Usage Bar</th></tr></thead><tbody>\n";
 
 	if(node.is_local || node.hostname == "192.168.1.106") {
+#ifdef PLATFORM_POSIX
 		const char* check_mounts[] = { "/", "/home", "/yhteinen", "/tmp" };
 		for(int i = 0; i < 4; i++) {
 			struct statvfs sv;
@@ -1676,6 +1679,7 @@ String HostPlatformService::RenderStorage(Http& http, const String& node_id)
 				  << "</tr>\n";
 			}
 		}
+#endif
 	} else {
 		// Remote SSH df -k -P
 		String user = node.ssh_user.IsEmpty() ? "sblo" : node.ssh_user;

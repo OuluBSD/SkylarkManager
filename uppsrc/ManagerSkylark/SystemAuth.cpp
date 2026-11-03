@@ -1,8 +1,11 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+
+#ifdef PLATFORM_POSIX
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 NAMESPACE_UPP
 
@@ -68,6 +71,7 @@ bool SystemAuthService::VerifySystemPassword(const String& username, const Strin
 	String curr_user = GetEnv("USER");
 	if(curr_user.IsEmpty()) curr_user = "sblo";
 
+#ifdef PLATFORM_POSIX
 	// 1. Try unix_chkpwd helper for local system user
 	if(FileExists("/usr/bin/unix_chkpwd") && (username == curr_user || username == "sblo")) {
 		int stdin_pipe[2];
@@ -97,6 +101,7 @@ bool SystemAuthService::VerifySystemPassword(const String& username, const Strin
 				return true;
 		}
 	}
+#endif
 
 	// 2. Check config password file ~/.config/managerskylark/auth.json
 	String conf_file = AppendFileName(GetHomeDirFile(".config/managerskylark"), "auth.json");
