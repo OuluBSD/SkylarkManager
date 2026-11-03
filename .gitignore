@@ -1,6 +1,9 @@
 # Build artifacts
 bin/
+mgr
 mgr/
+tmp
+tmp/
 *.o
 *.obj
 *.lib

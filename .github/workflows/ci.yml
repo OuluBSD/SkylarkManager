@@ -139,6 +139,17 @@ jobs:
           ls -lh SkylarkManager/bin/SkylarkGuiExample
           file SkylarkManager/bin/SkylarkGuiExample
 
+      - name: Build WebShowcase (${{ matrix.bm }})
+        run: |
+          cd SkylarkManager
+          uppbuilder examples/WebShowcase -m ${{ matrix.bm }} -v
+
+      - name: Verify WebShowcase Binary
+        run: |
+          test -f SkylarkManager/bin/WebShowcase
+          ls -lh SkylarkManager/bin/WebShowcase
+          file SkylarkManager/bin/WebShowcase
+
   build-windows:
     name: Windows (windows-latest - MSVC)
     runs-on: windows-latest
@@ -270,3 +281,15 @@ jobs:
         run: |
           if not exist "SkylarkManager\bin\SkylarkGuiExample.exe" exit /b 1
           dir "SkylarkManager\bin\SkylarkGuiExample.exe"
+
+      - name: Build WebShowcase (MSVC)
+        shell: cmd
+        run: |
+          cd SkylarkManager
+          uppbuilder.exe examples/WebShowcase -m MSVS22x64 -v
+
+      - name: Verify WebShowcase Binary
+        shell: cmd
+        run: |
+          if not exist "SkylarkManager\bin\WebShowcase.exe" exit /b 1
+          dir "SkylarkManager\bin\WebShowcase.exe"

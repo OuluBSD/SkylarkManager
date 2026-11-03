@@ -1,0 +1,14 @@
+description "Reference application showcasing WebFramework templates, Vivid Plasma themes, and mega-menu navigation\377";
+
+uses
+	Core,
+	Skylark,
+	WebFramework;
+
+file
+	AGENTS.md,
+	WebShowcase.h,
+	WebShowcase.cpp;
+
+mainconfig
+	"" = "MT";
