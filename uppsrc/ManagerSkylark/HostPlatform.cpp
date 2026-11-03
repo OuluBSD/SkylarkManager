@@ -1104,7 +1104,7 @@ String HostPlatformService::RenderRepos(Http& http, const String& node_id)
 		b << "<tr id=\"repo-" << r.name << "\">"
 		  << "<td><strong><a href=\"" << files_url << "\">" << r.name << "</a></strong></td>"
 		  << "<td>"
-		  << (r.has_git ? ("<span style=\"display:inline-flex; align-items:center; gap:4px; font-weight:600; color:var(--wf-accent-focus,#00a1c5);\">" + VividIcon::Get("git-branch", 14) + " " + (r.branch.IsEmpty() ? "master" : r.branch) + "</span>") : "<span style=\"color:#64748b;\">no git</span>")
+		  << (r.has_git ? (String("<span style=\"display:inline-flex; align-items:center; gap:4px; font-weight:600; color:var(--wf-accent-focus,#00a1c5);\">") + VividIcon::Get("git-branch", 14) + " " + (r.branch.IsEmpty() ? String("master") : r.branch) + "</span>") : "<span style=\"color:#64748b;\">no git</span>")
 		  << "</td>"
 		  << "<td><code style=\"color:var(--wf-fg-inactive,#8b919d);\">" << (r.last_commit_hash.IsEmpty() ? "-" : r.last_commit_hash) << "</code> "
 		  << "<small style=\"color:var(--wf-fg-normal,#d3dae3);\">" << DeHtml(r.last_commit_msg) << "</small></td>"

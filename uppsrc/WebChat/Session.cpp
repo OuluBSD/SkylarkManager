@@ -177,7 +177,7 @@ ChatSession& ChatSessionManager::CreateSession(const String& title,
 	intro.id = Format("msg-%d-0", (int64)s.created_at);
 	intro.role = "assistant";
 	intro.sender = "AI Pair Programmer";
-	intro.content = "Hello! I am your AI pair-programming partner for `" + (repo.IsEmpty() ? "this workspace" : repo) + "`.\n\n"
+	intro.content = String("Hello! I am your AI pair-programming partner for `") + (repo.IsEmpty() ? String("this workspace") : repo) + "`.\n\n"
 	                "You can discuss architecture, review diffs, draft implementations, or instruct me to make changes.\n"
 	                "What would you like to work on together today?";
 	intro.timestamp = s.created_at;
