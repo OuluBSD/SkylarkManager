@@ -1,0 +1,11 @@
+description "Official-SourceForge adapter for the forge suite: IForgeBackend over the Allura REST API with injectable SSL transport and credential-gated writes\377";
+
+uses
+	Core,
+	Core/SSL,
+	ForgeCore;
+
+file
+	AGENTS.md,
+	SourceForgeForge.h,
+	SourceForgeForge.cpp;

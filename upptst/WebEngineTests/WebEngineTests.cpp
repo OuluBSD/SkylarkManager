@@ -5,6 +5,7 @@
 #include <MetaAccount/MetaAccountSite.h>
 #include <ForgeCore/ForgeCore.h>
 #include <GitHubForge/GitHubForge.h>
+#include <SourceForgeForge/SourceForgeForge.h>
 
 using namespace Upp;
 
@@ -619,6 +620,95 @@ CONSOLE_APP_MAIN
 		GitHubForgeBackend missing("/no/such/gh/binary");
 		ForgeResult mf = missing.GetIssue("owner/repo", "1", got);
 		Check(!mf.ok && mf.provenance == ForgeProvenance::Unavailable, "missing gh reports unavailable provenance");
+	}
+
+	// --- unit level: SourceForgeForge over a stub Allura transport ---
+	{
+		SfConfig cfg;
+		cfg.project = "myproj";
+		cfg.api_key = "k-test";
+		cfg.api_token = "t-test";
+		cfg.author = "sf-tester";
+
+		// Stub transport: canned Allura responses, captures posted forms.
+		struct StubTransport : ISfTransport {
+			Vector<String> requests; // "METHOD path|form"
+			SfHttpResponse Request(const String& method, const String& path,
+			                       const String& form_body) override {
+				requests.Add(method + " " + path + "|" + form_body);
+				SfHttpResponse r;
+				if(path.Find("/tickets?") >= 0) {
+					r.ok = true; r.status = 200;
+					r.body = "{\"tickets\":[{\"ticket_num\":5,\"summary\":\"Crash on start\",\"status\":\"open\",\"reported_by\":\"alice\",\"ticket_date\":\"2026-11-08T09:00:00Z\",\"mod_date\":\"2026-11-08T09:30:00Z\"},{\"ticket_num\":6,\"summary\":\"Docs\",\"status\":\"closed\",\"reported_by\":\"bob\",\"ticket_date\":\"2026-11-08T10:00:00Z\",\"mod_date\":\"2026-11-08T10:10:00Z\"}],\"count\":2}";
+					return r;
+				}
+				if(path.Find("/5/") >= 0 && path.Find("save_") < 0) {
+					r.ok = true; r.status = 200;
+					r.body = "{\"ticket\":{\"ticket_num\":5,\"summary\":\"Crash on start\",\"description\":\"segv\",\"status\":\"open\",\"reported_by\":\"alice\",\"ticket_date\":\"2026-11-08T09:00:00Z\",\"mod_date\":\"2026-11-08T09:30:00Z\"},\"thread\":{\"posts\":[{\"_id\":\"c1\",\"text\":\"repro attached\",\"author\":{\"username\":\"bob\"},\"posted_date\":\"2026-11-08T09:40:00Z\"}]}}";
+					return r;
+				}
+				if(path.Find("save_ticket") >= 0) {
+					r.ok = true; r.status = 200;
+					r.body = "{\"status\":\"ok\",\"ticket\":{\"ticket_num\":9,\"summary\":\"new\",\"status\":\"open\"}}";
+					return r;
+				}
+				if(path.Find("save_comment") >= 0) {
+					r.ok = true; r.status = 200;
+					r.body = "{\"status\":\"ok\"}";
+					return r;
+				}
+				r.ok = false; r.status = 404; r.error = "stub: no such path";
+				return r;
+			}
+		};
+		StubTransport *stub = new StubTransport;
+		SourceForgeForgeBackend sfb(cfg, stub);
+
+		Check(sfb.BackendId() == "sourceforge", "sourceforge adapter id");
+		Vector<ForgeIssue> tickets;
+		ForgeResult lr = sfb.ListIssues("myproj", tickets);
+		Check(lr.ok && lr.provenance == ForgeProvenance::Remote && tickets.GetCount() == 2,
+		      "sourceforge list over stub transport");
+		Check(tickets[0].issue_id == "5" && tickets[0].title == "Crash on start"
+		   && tickets[0].author == "alice" && tickets[0].open, "sourceforge ticket mapping");
+
+		ForgeIssue got;
+		Check(sfb.GetIssue("myproj", "5", got).ok && got.body == "segv", "sourceforge get ticket");
+		Vector<ForgeComment> cms;
+		Check(sfb.ListComments("myproj", "5", cms).ok && cms.GetCount() == 1
+		   && cms[0].body == "repro attached" && cms[0].author == "bob", "sourceforge thread posts mapping");
+
+		ForgeIssue draft;
+		draft.title = "new";
+		draft.body = "from adapter";
+		ForgeIssue made;
+		Check(sfb.CreateIssue("myproj", draft, made).ok && made.issue_id == "9", "sourceforge create with credentials");
+		bool saw_creds = false, saw_summary = false;
+		for(const String& rq : stub->requests)
+			if(rq.Find("save_ticket") >= 0) {
+				saw_creds = rq.Find("api_key=k-test") >= 0 && rq.Find("api_token=t-test") >= 0;
+				saw_summary = rq.Find("summary=new") >= 0;
+			}
+		Check(saw_creds && saw_summary, "sourceforge write posts credentials and fields");
+		ForgeComment cm;
+		cm.author = "spoofed";
+		cm.body = "adapter comment";
+		ForgeComment saved;
+		Check(sfb.AddComment("myproj", "5", cm, saved).ok && saved.author == "sf-tester",
+		      "sourceforge comment author is authoritative");
+		ForgeIssue closed;
+		Check(sfb.SetIssueState("myproj", "5", false, closed).ok && !closed.open, "sourceforge state via save_ticket");
+
+		// Bound to another project: refused.
+		Check(!sfb.ListIssues("otherproj", tickets).ok, "sourceforge cross-project access refused");
+
+		// Read-only: without credentials, writes are unavailable.
+		SfConfig ro = cfg;
+		ro.api_key.Clear();
+		ro.api_token.Clear();
+		SourceForgeForgeBackend sfb_ro(ro, new StubTransport);
+		ForgeResult wf = sfb_ro.CreateIssue("myproj", draft, made);
+		Check(!wf.ok && wf.provenance == ForgeProvenance::Unavailable, "sourceforge write without credentials is unavailable");
 	}
 
 	// --- three fenced sites ---

@@ -131,7 +131,7 @@ ForgeIssue GitHubForgeBackend::IssueFromJson(const ValueMap& m, const String& pr
 ForgeComment GitHubForgeBackend::CommentFromJson(const ValueMap& m)
 {
 	ForgeComment c;
-	c.comment_id = m.Get("id").IsNull() ? String() : AsString((int64)m.Get("id"));
+	c.comment_id = m.Get("id").IsNull() ? String() : AsString(m.Get("id"));
 	c.author = String();
 	Value user = m.Get("user");
 	if(user.Is<ValueMap>() && !user["login"].IsNull())

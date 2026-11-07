@@ -10,7 +10,8 @@ uses
 	WebEngine,
 	MetaAccount,
 	ForgeCore,
-	GitHubForge;
+	GitHubForge,
+	SourceForgeForge;
 
 file
 	AGENTS.md,
