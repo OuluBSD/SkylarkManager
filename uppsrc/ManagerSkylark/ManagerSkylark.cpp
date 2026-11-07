@@ -1,5 +1,7 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
 #include "HostPlatform.h"
 
 NAMESPACE_UPP
@@ -426,7 +428,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("help", 'h', "Show help options", false);
 	cla.AddArg("port", 'p', "HTTP server port", true, "port");
 	cla.AddArg("site-dir", 0, "Site installation directory (auth.json, data-root.json, v2/, mgr/)", true, "directory");
-	cla.AddArg("set-site-password", 0, "Create or update a site account using MANAGERSKYLARK_SITE_PASSWORD", true, "username");
+	cla.AddArg("set-site-password", 0, "Create/update a site account with hidden prompt (or MANAGERSKYLARK_SITE_PASSWORD)", true, "username");
 	cla.AddArg("demo-site", 0, "Run an isolated synthetic, read-only demo site", false);
 	cla.AddArg("test", 0, "Run automated HTTP and store verification", false);
 
@@ -465,8 +467,14 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	if(!set_site_user.IsEmpty()) {
 		String password = GetEnv("MANAGERSKYLARK_SITE_PASSWORD");
 		if(password.IsEmpty()) {
-			Cerr() << "Set MANAGERSKYLARK_SITE_PASSWORD in the environment before configuring an account.\n";
-			return false;
+			char buffer[4096] = {};
+			if(EVP_read_pw_string(buffer, sizeof(buffer), "New site password: ", 1) != 0) {
+				OPENSSL_cleanse(buffer, sizeof(buffer));
+				Cerr() << "Could not read the site password securely.\n";
+				return false;
+			}
+			password = buffer;
+			OPENSSL_cleanse(buffer, sizeof(buffer));
 		}
 		if(!SystemAuthService::SetSitePassword(site_dir, set_site_user, password)) {
 			Cerr() << "Failed to write site credentials.\n";
