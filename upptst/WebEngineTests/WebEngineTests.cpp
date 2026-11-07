@@ -4,6 +4,7 @@
 #include <WebAccounts/WebAccountsTotp.h>
 #include <MetaAccount/MetaAccountSite.h>
 #include <ForgeCore/ForgeCore.h>
+#include <GitHubForge/GitHubForge.h>
 
 using namespace Upp;
 
@@ -444,6 +445,7 @@ static void WaitPortsUp()
 
 CONSOLE_APP_MAIN
 {
+	setvbuf(stdout, NULL, _IONBF, 0);
 	Cout() << "WebEngineTests: engine fence self-test\n";
 	s_root = GetHomeDirFile(Format("WebEngineTests/run-%d-%d", (int)msecs(), (int)Random(1000000)));
 	RealizeDirectory(s_root);
@@ -546,6 +548,77 @@ CONSOLE_APP_MAIN
 		// Unsupported capabilities fail explicitly as unavailable.
 		ForgeResult u = hub.SetIssueState("org/repo", "1", false, hub_issue);
 		Check(u.ok, "privatehub reference backend supports lifecycle ops");
+	}
+
+	// --- unit level: GitHubForge over a fake gh (argv-only contract) ---
+	{
+		String bindir = AppendFileName(s_root, "fakegh");
+		RealizeDirectory(bindir);
+		String ghpath = AppendFileName(bindir, "gh");
+		String log = AppendFileName(bindir, "argv.log");
+		StringBuffer sh;
+		sh << "#!/bin/sh\n"
+		   << "printf '%s\\n' \"$*\" >> " << log << "\n"
+		   << "sig=\"$1 $2 $3 $4 $5 $6\"\n"
+		   << "case \"$sig\" in\n"
+		   << "  'api repos/owner/repo/issues?state=all&per_page=100 '*) \\\n"
+		   << "    echo '[{\"number\":1,\"title\":\"Bug one\",\"body\":\"first\",\"state\":\"open\",\"user\":{\"login\":\"alice\"},\"created_at\":\"2026-11-08T10:00:00Z\",\"updated_at\":\"2026-11-08T11:00:00Z\",\"labels\":[{\"name\":\"bug\"}]},{\"number\":9,\"pull_request\":{},\"title\":\"PR thing\"},{\"number\":2,\"title\":\"Wish\",\"body\":\"second\",\"state\":\"closed\",\"user\":{\"login\":\"bob\"},\"created_at\":\"2026-11-08T12:00:00Z\",\"updated_at\":\"2026-11-08T12:30:00Z\",\"labels\":[]}]' ;;\n"
+		   << "  'api repos/owner/repo/issues/1 '*) \\\n"
+		   << "    echo '{\"number\":1,\"title\":\"Bug one\",\"body\":\"first\",\"state\":\"open\",\"user\":{\"login\":\"alice\"},\"created_at\":\"2026-11-08T10:00:00Z\",\"updated_at\":\"2026-11-08T11:00:00Z\",\"labels\":[{\"name\":\"bug\"}]}' ;;\n"
+		   << "  'api -X POST repos/owner/repo/issues '*) \\\n"
+		   << "    echo '{\"number\":3,\"title\":\"from -f\",\"body\":\"created\",\"state\":\"open\",\"user\":{\"login\":\"tester\"},\"created_at\":\"2026-11-08T13:00:00Z\",\"updated_at\":\"2026-11-08T13:00:00Z\",\"labels\":[]}' ;;\n"
+		   << "  'api -X POST repos/owner/repo/issues/1/comments '*) \\\n"
+		   << "    echo '{\"id\":777,\"body\":\"looks good\",\"user\":{\"login\":\"tester\"},\"created_at\":\"2026-11-08T14:00:00Z\"}' ;;\n"
+		   << "  'api repos/owner/repo/issues/1/comments?per_page=100 '*) \\\n"
+		   << "    echo '[{\"id\":777,\"body\":\"looks good\",\"user\":{\"login\":\"tester\"},\"created_at\":\"2026-11-08T14:00:00Z\"}]' ;;\n"
+		   << "  'api -X PATCH repos/owner/repo/issues/1 '*) \\\n"
+		   << "    echo '{\"number\":1,\"title\":\"Bug one\",\"body\":\"first\",\"state\":\"closed\",\"user\":{\"login\":\"alice\"},\"created_at\":\"2026-11-08T10:00:00Z\",\"updated_at\":\"2026-11-08T15:00:00Z\",\"labels\":[]}' ;;\n"
+		   << "  *) echo \"fake gh: unknown args\" >&2; exit 1 ;;\n"
+		   << "esac\n";
+		SaveFile(ghpath, String(sh));
+		system(~String("chmod +x \"" + ghpath + "\""));
+
+		GitHubForgeBackend ghb(ghpath);
+		Check(ghb.BackendId() == "github" && ghb.Capabilities().create_issue, "github adapter capabilities declared");
+
+		Vector<ForgeIssue> issues;
+		ForgeResult lr = ghb.ListIssues("owner/repo", issues);
+		Check(lr.ok && lr.provenance == ForgeProvenance::Remote, "github list via fake gh succeeds");
+		if(issues.GetCount() == 2) {
+			Check(issues[0].issue_id == "1" && issues[0].author == "alice" && issues[0].labels.GetCount() == 1
+			   && issues[0].created.year == 2026, "github issue mapping (fields, labels, time)");
+			Check(issues[1].issue_id == "2" && !issues[1].open, "github closed-state mapping");
+		}
+		else
+			Check(false, "github list filters pull requests");
+
+		ForgeIssue got;
+		Check(ghb.GetIssue("owner/repo", "1", got).ok && got.title == "Bug one", "github get issue");
+
+		ForgeIssue draft;
+		draft.title = "from -f";
+		draft.body = "created";
+		ForgeIssue made;
+		ForgeResult crr = ghb.CreateIssue("owner/repo", draft, made);
+		Check(crr.ok && made.issue_id == "3", "github create issue");
+		// The user data must have been passed as a separate -f argv entry.
+		String argvlog = LoadFile(log);
+		Check(argvlog.Find("-f") >= 0 && argvlog.Find("title=from -f") >= 0, "create passes data as argv -f entries");
+
+		ForgeComment cm;
+		cm.author = "tester";
+		cm.body = "looks good";
+		ForgeComment saved;
+		Check(ghb.AddComment("owner/repo", "1", cm, saved).ok && saved.comment_id == "777", "github add comment");
+		Vector<ForgeComment> cms;
+		Check(ghb.ListComments("owner/repo", "1", cms).ok, "github list comments");
+		ForgeIssue closed;
+		Check(ghb.SetIssueState("owner/repo", "1", false, closed).ok && !closed.open, "github set state");
+
+		Check(!ghb.ListIssues("bad slug/x", issues).ok, "invalid slug rejected");
+		GitHubForgeBackend missing("/no/such/gh/binary");
+		ForgeResult mf = missing.GetIssue("owner/repo", "1", got);
+		Check(!mf.ok && mf.provenance == ForgeProvenance::Unavailable, "missing gh reports unavailable provenance");
 	}
 
 	// --- three fenced sites ---

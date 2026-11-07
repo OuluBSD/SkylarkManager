@@ -1,0 +1,10 @@
+description "Official-github adapter for the forge suite: IForgeBackend over argv-only gh api calls with remote provenance and no synthetic fallback\377";
+
+uses
+	Core,
+	ForgeCore;
+
+file
+	AGENTS.md,
+	GitHubForge.h,
+	GitHubForge.cpp;

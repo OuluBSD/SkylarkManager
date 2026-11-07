@@ -176,7 +176,7 @@ public:
 	virtual ForgeResult ListComments(const String& project, const String& issue_id,
 	                                 Vector<ForgeComment>& out) = 0;
 
-protected:
+	// Shared result factories (public: free helpers in adapter packages use them).
 	static ForgeResult Unsupported(const char *op, const String& project);
 	static ForgeResult Failed(const char *op, const String& project, const String& error);
 	static ForgeResult Ok(const char *op, const String& project, ForgeProvenance prov);
