@@ -1,0 +1,11 @@
+description "PrivateHub workspace backend: live local-repo inspection via argv-only git, site-scoped JSON issue records, strict path containment\377";
+
+uses
+	Core,
+	ForgeCore,
+	WebStorage;
+
+file
+	AGENTS.md,
+	PrivateHubWorkspace.h,
+	PrivateHubWorkspace.cpp;

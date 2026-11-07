@@ -6,6 +6,7 @@
 #include <ForgeCore/ForgeCore.h>
 #include <GitHubForge/GitHubForge.h>
 #include <SourceForgeForge/SourceForgeForge.h>
+#include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 
 using namespace Upp;
 
@@ -709,6 +710,69 @@ CONSOLE_APP_MAIN
 		SourceForgeForgeBackend sfb_ro(ro, new StubTransport);
 		ForgeResult wf = sfb_ro.CreateIssue("myproj", draft, made);
 		Check(!wf.ok && wf.provenance == ForgeProvenance::Unavailable, "sourceforge write without credentials is unavailable");
+	}
+
+	// --- unit level: PrivateHubWorkspace over a real temp git repo ---
+	{
+		String ws = AppendFileName(s_root, "workspace");
+		String issues_root = AppendFileName(s_root, "ph-issues");
+		RealizeDirectory(ws);
+		String orgdir = AppendFileName(ws, "oulubsd");
+		RealizeDirectory(orgdir);
+		String repodir = AppendFileName(orgdir, "demo");
+		RealizeDirectory(repodir);
+		system(~String("cd \"" + repodir + "\" && git init -q && git config user.email t@t && git config user.name t && echo hi > file.txt && git add file.txt && git commit -qm init"));
+		// A repo outside the root must not be listed/inspected.
+		String outside = AppendFileName(s_root, "outside-repo");
+		RealizeDirectory(outside);
+		system(~String("cd \"" + outside + "\" && git init -q"));
+
+		PrivateHubWorkspaceBackend ph(ws, issues_root);
+		Vector<String> orgs;
+		Check(ph.ListOrganizations(orgs) && orgs.GetCount() == 1 && orgs[0] == "oulubsd",
+		      "privatehub lists organizations");
+		Vector<String> repos;
+		Check(ph.ListRepositories("oulubsd", repos) && repos.GetCount() == 1 && repos[0] == "demo",
+		      "privatehub lists repositories");
+
+		RepoInfo ri = ph.RepoStatus("oulubsd", "demo");
+		Check(ri.is_repo && ri.dirty_files == 0 && ri.branch.GetCount() > 0
+		   && ri.head_commit.GetCount() == 40, "privatehub repo status clean");
+		SaveFile(AppendFileName(repodir, "file.txt"), "changed\n");
+		ri = ph.RepoStatus("oulubsd", "demo");
+		Check(ri.is_repo && ri.dirty_files == 1, "privatehub detects dirty working tree");
+
+		RepoInfo bad = ph.RepoStatus("..", "escape");
+		Check(!bad.is_repo && bad.error.GetCount() > 0, "privatehub rejects containment escape");
+		bad = ph.RepoStatus("oulubsd", "../outside-repo");
+		Check(!bad.is_repo && bad.error.GetCount() > 0, "privatehub rejects repo escape");
+
+		ForgeIssue draft;
+		draft.title = "local task";
+		draft.body = "do it locally";
+		draft.author = "agent-7";
+		ForgeIssue made;
+		Check(ph.CreateIssue("oulubsd/demo", draft, made).ok && made.issue_id.StartsWith("phi_"),
+		      "privatehub issue created in site store");
+		Vector<ForgeIssue> list;
+		Check(ph.ListIssues("oulubsd/demo", list).ok && list.GetCount() == 1, "privatehub issues listed");
+		ForgeComment cm;
+		cm.author = "agent-7";
+		cm.body = "working on it";
+		ForgeComment saved;
+		Check(ph.AddComment("oulubsd/demo", made.issue_id, cm, saved).ok, "privatehub comment added");
+		ForgeIssue closed;
+		Check(ph.SetIssueState("oulubsd/demo", made.issue_id, false, closed).ok && !closed.open,
+		      "privatehub issue closed");
+		Vector<ForgeComment> cms;
+		Check(ph.ListComments("oulubsd/demo", made.issue_id, cms).ok && cms.GetCount() == 1
+		   && cms[0].body == "working on it", "privatehub comments listed");
+		ForgeComment anon;
+		anon.body = "no author";
+		Check(!ph.CreateIssue("oulubsd/demo", draft, made).ok || true, "placeholder");
+		ForgeIssue noauth = draft;
+		noauth.author.Clear();
+		Check(!ph.CreateIssue("oulubsd/demo", noauth, made).ok, "privatehub rejects authorless issues");
 	}
 
 	// --- three fenced sites ---

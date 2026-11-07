@@ -11,7 +11,8 @@ uses
 	MetaAccount,
 	ForgeCore,
 	GitHubForge,
-	SourceForgeForge;
+	SourceForgeForge,
+	PrivateHubWorkspace;
 
 file
 	AGENTS.md,
