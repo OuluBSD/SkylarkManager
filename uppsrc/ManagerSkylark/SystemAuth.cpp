@@ -278,7 +278,12 @@ UserSession SystemAuthService::LoginSession(Http& http, const String& username, 
 		UserSession sess = CreateSession(username);
 		if(!sess.is_authenticated)
 			return sess;
-		http.SetHeader("Set-Cookie", "wf_auth_session=" + sess.token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
+		// SetHeader("Set-Cookie", ...) is silently dropped on a redirect
+		// response (Skylark's Dispatch::Finalize only flushes the dedicated
+		// `cookies` vector, not generic headers, when `redirect` is set) --
+		// SetCookie populates that vector, so the cookie survives the
+		// post-login redirect.
+		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, false, true);
 		return sess;
 	}
 	UserSession failed;
@@ -294,7 +299,7 @@ void SystemAuthService::Logout(Http& http)
 		Mutex::Lock lock(SessionMutex());
 		Sessions().RemoveKey(token);
 	}
-	http.SetHeader("Set-Cookie", "wf_auth_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+	http.SetCookie("wf_auth_session", "", GetSysTime() - 3600, "/", NULL, false, true);
 }
 
 bool SystemAuthService::RequireAuth(Http& http)
