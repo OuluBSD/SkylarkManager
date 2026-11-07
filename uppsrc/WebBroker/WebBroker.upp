@@ -1,0 +1,9 @@
+description "Transport-independent communication bus between fenced websites: versioned contracts, in-process transport, diagnostics ledger\377";
+
+uses
+	Core;
+
+file
+	AGENTS.md,
+	WebBroker.h,
+	WebBroker.cpp;

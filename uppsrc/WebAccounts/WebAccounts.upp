@@ -1,0 +1,12 @@
+description "Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens\377";
+
+uses
+	Core,
+	Core/SSL,
+	WebAuth,
+	WebStorage;
+
+file
+	AGENTS.md,
+	WebAccounts.h,
+	WebAccounts.cpp;

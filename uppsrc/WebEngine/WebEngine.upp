@@ -1,0 +1,25 @@
+description "Composable website engine: fenced virtual websites with per-site accounts, sessions, cookies, storage and routers inside one Skylark process\377";
+
+uses
+	Core,
+	Skylark,
+	WebStorage,
+	WebBroker,
+	WebAccounts;
+
+file
+	AGENTS.md,
+	WebEngine.h,
+	Model readonly separator,
+	Router.h,
+	Router.cpp,
+	Site.h,
+	Site.cpp,
+	Request.h,
+	Request.cpp,
+	Engine readonly separator,
+	Engine.h,
+	WebEngine.cpp,
+	Host readonly separator,
+	Host.h,
+	Host.cpp;

@@ -1,0 +1,14 @@
+description "Engine fence self-test host: multiple fenced sites with identical paths, site-stamped sessions, CSRF/origin fence, broker diagnostics\377";
+
+uses
+	Core,
+	Core/SSL,
+	Skylark,
+	WebStorage,
+	WebBroker,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	WebEngineTests.cpp;

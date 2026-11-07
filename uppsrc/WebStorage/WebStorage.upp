@@ -1,0 +1,9 @@
+description "Generic site-scoped record persistence: JSON file stores, memory stores, schema registry\377";
+
+uses
+	Core;
+
+file
+	AGENTS.md,
+	WebStorage.h,
+	WebStorage.cpp;

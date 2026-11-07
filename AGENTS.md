@@ -14,6 +14,11 @@
 | `uppsrc/WebFramework` | Library | Reusable web framework: KDE Plasma-inspired themes, PageBuilder, mega-menu navigation, tree views, SVG icons, and audio feedback. |
 | `uppsrc/WebAuth` | Library | Shared, storage-agnostic session/bearer auth: password hashing, session/token resolution, login/settings view fragments. Reused by CompanySkylark's `CompanyAuth` and this repo's `ManagerSkylark`/`SystemAuth`. |
 | `uppsrc/WebChat` | Module / Subsystem | Real-time SSE streaming web chat view and session manager connecting to `SweAgent` LLM backends. |
+| `uppsrc/WebStorage` | Library | Generic site-scoped record persistence: JSON file stores (inter-process lock, atomic writes, quarantine, revisions), memory stores, schema registry. Core-only; no Skylark dependency. |
+| `uppsrc/WebBroker` | Library | Transport-independent communication bus between fenced websites: versioned request/result contracts, in-process transport, bounded diagnostics ledger; TCP transport is an explicit stub. |
+| `uppsrc/WebAccounts` | Library | Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens; crypto reuses `WebAuth` primitives. |
+| `uppsrc/WebEngine` | Library | Composable website engine: independently fenced virtual websites (own accounts, sessions, cookies, storage, routers) inside one Skylark process via per-port engine listeners and gateway catch-alls. |
+| `upptst/WebEngineTests` | Test | Engine fence self-test host: multiple fenced sites with identical paths, site-stamped session isolation, CSRF/origin fence, broker diagnostics. Run the binary directly; exit 0 = all checks passed. |
 | `examples/SkylarkGuiExample` | Example | Bi-directional desktop integration combining U++ `CtrlLib` GUI with an embedded `Skylark` HTTP server. |
 | `examples/WebShowcase` | Example | Standalone reference showcase application for `WebFramework` components, themes, and navigation widgets. |
 
