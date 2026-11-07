@@ -1190,9 +1190,9 @@ CONSOLE_APP_MAIN
 {
 	const Vector<String>& args = CommandLine();
 	if(args.GetCount() > 0 && (args[0] == "test" || args[0] == "--test")) {
-		if(!ManagerSkylarkApp::RunSelfTests(18080))
-			_exit(1);
-		_exit(0);
+		bool ok = ManagerSkylarkApp::RunSelfTests(18080);
+		fflush(stdout);
+		_exit(ok ? 0 : 1);
 	}
 
 	ManagerSkylarkApp app;
