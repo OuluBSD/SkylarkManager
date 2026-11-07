@@ -1,4 +1,5 @@
 #include "WebAccounts.h"
+#include "WebAccountsTotp.h"
 #include <WebAuth/WebAuthCrypto.h>
 
 NAMESPACE_UPP
@@ -338,6 +339,101 @@ void SiteAccounts::CleanupExpired()
 		catch(...) {}
 	}
 	mutex.Leave();
+}
+
+
+// ---------------------------------------------------------------------------
+// TOTP / recovery codes (meta-account second factor)
+// ---------------------------------------------------------------------------
+
+StoreResult SiteAccounts::BeginTotpEnrollment(const String& user_id, const String& password,
+                                              String& secret_b32, Vector<String>& recovery_plain)
+{
+	recovery_plain.Clear();
+	WebAccountUser u;
+	if(!GetUser(user_id, u))
+		return StoreResult("unknown user");
+	if(u.disabled)
+		return StoreResult("user is disabled");
+	if(!WebAuthVerifyPassword(password, u.password_hash))
+		return StoreResult("password does not match");
+	secret_b32 = TotpSecretGenerate();
+	Vector<String> codes = RecoveryCodesGenerate();
+	recovery_plain <<= codes;
+	WebAccountUser upd = u;
+	upd.totp_secret = secret_b32;
+	upd.totp_enrolled = false;
+	upd.recovery_hashes.Clear();
+	String pepper = user_id + ":" + upd.totp_secret;
+	for(const String& c : codes)
+		upd.recovery_hashes.Add(RecoveryCodeHash(pepper, c));
+	upd.updated = GetSysTime();
+	String json, rev;
+	Users().Get(user_id, json, rev);
+	return Users().Put(user_id, StoreAsJson(upd, true), rev, rev);
+}
+
+StoreResult SiteAccounts::ConfirmTotpEnrollment(const String& user_id, const String& code)
+{
+	WebAccountUser u;
+	if(!GetUser(user_id, u))
+		return StoreResult("unknown user");
+	if(u.totp_secret.IsEmpty())
+		return StoreResult("no pending enrollment");
+	if(!TotpVerify(u.totp_secret, code, TotpUnixNow()))
+		return StoreResult("code does not match");
+	WebAccountUser upd = u;
+	upd.totp_enrolled = true;
+	upd.updated = GetSysTime();
+	String json, rev;
+	Users().Get(user_id, json, rev);
+	return Users().Put(user_id, StoreAsJson(upd, true), rev, rev);
+}
+
+StoreResult SiteAccounts::DisableTotp(const String& user_id, const String& password)
+{
+	WebAccountUser u;
+	if(!GetUser(user_id, u))
+		return StoreResult("unknown user");
+	if(!WebAuthVerifyPassword(password, u.password_hash))
+		return StoreResult("password does not match");
+	WebAccountUser upd = u;
+	upd.totp_secret.Clear();
+	upd.totp_enrolled = false;
+	upd.recovery_hashes.Clear();
+	upd.updated = GetSysTime();
+	String json, rev;
+	Users().Get(user_id, json, rev);
+	return Users().Put(user_id, StoreAsJson(upd, true), rev, rev);
+}
+
+bool SiteAccounts::VerifyTotpOrRecovery(const String& user_id, const String& code)
+{
+	WebAccountUser u;
+	if(!GetUser(user_id, u) || u.totp_secret.IsEmpty())
+		return false;
+	if(TotpVerify(u.totp_secret, code, TotpUnixNow()))
+		return true;
+	// Single-use recovery code: consume the matching hash.
+	String pepper = user_id + ":" + u.totp_secret;
+	for(int i = 0; i < u.recovery_hashes.GetCount(); i++) {
+		if(RecoveryCodeVerify(pepper, u.recovery_hashes[i], code)) {
+			WebAccountUser upd = u;
+			upd.recovery_hashes.Remove(i);
+			upd.updated = GetSysTime();
+			String json, rev;
+			if(Users().Get(user_id, json, rev).ok)
+				Users().Put(user_id, StoreAsJson(upd, true), rev, rev);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool SiteAccounts::TotpEnrolled(const String& user_id)
+{
+	WebAccountUser u;
+	return GetUser(user_id, u) && u.totp_enrolled;
 }
 
 // ---------------------------------------------------------------------------

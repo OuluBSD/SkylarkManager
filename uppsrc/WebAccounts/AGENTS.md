@@ -11,7 +11,9 @@ uses `WebStorage`.
 
 | File | Role |
 |------|------|
-| `WebAccounts.h/.cpp` | `WebAccountUser`, `WebAccountSession` (site-stamped), `SiteAccounts` (per-site user/session/CSRF management), `WebAccountsSelfTest` helpers |
+| `WebAccounts.h/.cpp` | `WebAccountUser`, `WebAccountSession` (site-stamped), `SiteAccounts` (per-site user/session/CSRF/TOTP management), `WebAccountsSelfTest` helpers |
+| `WebAccountsTotp.h/.cpp` | TOTP (RFC 6238, HMAC-SHA256, base32 secrets) and single-use recovery codes |
+| `WebAccountsGrants.h/.cpp` | `WebAccountGrant`/`WebGrants`: explicit, revocable consent grants from a meta-account user to client webapps |
 
 ## Invariants
 
@@ -31,6 +33,14 @@ uses `WebStorage`.
    id itself (it is a bearer-equivalent secret) — rotate by logout/login.
    Password hashes use PBKDF2 from WebAuth; legacy hash formats keep
    verifying via `WebAuthVerifyPassword`.
-6. **TOTP-ready structure**: user records carry `totp_secret`/`totp_enrolled`
-   fields reserved for the meta-account app (WP2); they are unused in WP1 and
-   never consulted for authorization yet.
+6. **TOTP is real and load-bearing for enrolled accounts**: enrollment is
+   pending until a live code confirms it; login of an enrolled account
+   requires password + live code (or one single-use recovery code). Codes
+   are RFC 6238 HMAC-SHA256 (30 s step, ±1 window); secrets are base32;
+   recovery codes are stored only as peppered hashes.
+   **Upp time caveat**: `Time::Get()` is seconds since year 1; always use
+   `TotpUnixNow()` for RFC 6238 counters.
+7. **Consent grants are the cross-site permission primitive**: client webapps
+   obtain scopes only via granted, non-expired `WebAccountGrant` records,
+   requested idempotently through the broker, decided by the subject on the
+   meta site, and revocable at any time.

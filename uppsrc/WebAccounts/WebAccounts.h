@@ -21,8 +21,9 @@ struct WebAccountUser : Moveable<WebAccountUser> {
 	String        password_hash; // pbkdf2_sha256$... (WebAuth format)
 	Vector<String> roles;
 	bool          disabled = false;
-	String        totp_secret;   // reserved (WP2); never consulted for auth in WP1
+	String        totp_secret;   // base32 TOTP secret (empty = not enrolled)
 	bool          totp_enrolled = false;
+	Vector<String> recovery_hashes; // single-use recovery code hashes (totp peppered)
 	Time          created;
 	Time          updated;
 
@@ -32,6 +33,7 @@ struct WebAccountUser : Moveable<WebAccountUser> {
 		: user_id(o.user_id), username(o.username), display_name(o.display_name)
 		, password_hash(o.password_hash), roles(clone(o.roles)), disabled(o.disabled)
 		, totp_secret(o.totp_secret), totp_enrolled(o.totp_enrolled)
+		, recovery_hashes(clone(o.recovery_hashes))
 		, created(o.created), updated(o.updated) {}
 	WebAccountUser& operator=(const WebAccountUser& o) {
 		if(this != &o) {
@@ -43,6 +45,7 @@ struct WebAccountUser : Moveable<WebAccountUser> {
 			disabled = o.disabled;
 			totp_secret = o.totp_secret;
 			totp_enrolled = o.totp_enrolled;
+			recovery_hashes = clone(o.recovery_hashes);
 			created = o.created;
 			updated = o.updated;
 		}
@@ -53,6 +56,7 @@ struct WebAccountUser : Moveable<WebAccountUser> {
 		io("user_id", user_id)("username", username)("display_name", display_name)
 		  ("password_hash", password_hash)("roles", roles)("disabled", disabled)
 		  ("totp_secret", totp_secret)("totp_enrolled", totp_enrolled)
+		  ("recovery_hashes", recovery_hashes)
 		  ("created", created)("updated", updated);
 	}
 };
@@ -121,6 +125,17 @@ public:
 	// --- new session without login (guest session, e.g. to carry a CSRF
 	// token for anonymous forms). Still site-stamped. ---
 	StoreResult CreateGuestSession(String& session_id, String& csrf_token);
+
+	// --- TOTP second factor (meta-account app) ---
+	// Generates a base32 secret + single-use recovery codes; enrollment is
+	// only active after ConfirmTotpEnrollment verifies a live code.
+	StoreResult BeginTotpEnrollment(const String& user_id, const String& password,
+	                                String& secret_b32, Vector<String>& recovery_plain);
+	StoreResult ConfirmTotpEnrollment(const String& user_id, const String& code);
+	StoreResult DisableTotp(const String& user_id, const String& password);
+	// Verifies a live TOTP code or consumes one single-use recovery code.
+	bool        VerifyTotpOrRecovery(const String& user_id, const String& code);
+	bool        TotpEnrolled(const String& user_id);
 
 	static bool ValidUsername(const String& username);
 

@@ -1,4 +1,4 @@
-description "Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens\377";
+description "Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens, TOTP second factor, consent grants\377";
 
 uses
 	Core,
@@ -8,5 +8,12 @@ uses
 
 file
 	AGENTS.md,
+	Core readonly separator,
 	WebAccounts.h,
-	WebAccounts.cpp;
+	WebAccounts.cpp,
+	Totp readonly separator,
+	WebAccountsTotp.h,
+	WebAccountsTotp.cpp,
+	Grants readonly separator,
+	WebAccountsGrants.h,
+	WebAccountsGrants.cpp;

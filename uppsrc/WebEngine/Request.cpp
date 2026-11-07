@@ -96,7 +96,7 @@ WebRequest& WebRequest::EnsureSession()
 	if(site->Accounts().ResolveSession(sid, s)) {
 		session = s;
 		has_session = true;
-		http.SetRawCookie(~site->CookieName(), sid, s.expires, "/", NULL, false, true);
+		http.SetRawCookie(~site->CookieName(), sid, s.expires, "/", NULL, false, true, "Strict");
 	}
 	return *this;
 }
@@ -115,7 +115,7 @@ WebRequest& WebRequest::AdoptSession(const String& session_id)
 			has_user = true;
 		}
 	}
-	http.SetRawCookie(~site->CookieName(), session_id, s.expires, "/", NULL, false, true);
+	http.SetRawCookie(~site->CookieName(), session_id, s.expires, "/", NULL, false, true, "Strict");
 	return *this;
 }
 
@@ -125,7 +125,7 @@ WebRequest& WebRequest::DropSession()
 		site->Accounts().Logout(session.session_id);
 	has_session = false;
 	has_user = false;
-	http.SetRawCookie(~site->CookieName(), "", GetSysTime() - 3600, "/", NULL, false, true);
+	http.SetRawCookie(~site->CookieName(), "", GetSysTime() - 3600, "/", NULL, false, true, "Strict");
 	return *this;
 }
 

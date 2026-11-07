@@ -1,0 +1,15 @@
+description "Meta-account webapp: ecosystem identities with real TOTP two-factor, recovery codes, and explicit consent grants for client webapps\377";
+
+uses
+	Core,
+	Core/SSL,
+	Skylark,
+	WebStorage,
+	WebBroker,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	MetaAccountSite.h,
+	MetaAccountSite.cpp;

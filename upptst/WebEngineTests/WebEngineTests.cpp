@@ -1,6 +1,8 @@
 #include <Core/Core.h>
 #include <Skylark/Skylark.h>
 #include <WebEngine/WebEngine.h>
+#include <WebAccounts/WebAccountsTotp.h>
+#include <MetaAccount/MetaAccountSite.h>
 
 using namespace Upp;
 
@@ -17,6 +19,7 @@ using namespace Upp;
 static const int MAIN_PORT  = 18200;
 static const int ALPHA_PORT = 18201;
 static const int BETA_PORT  = 18202;
+static const int META_PORT  = 18203;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -279,6 +282,27 @@ static void RouteCallNowhere(WebRequest& r)
 	r.Json(m);
 }
 
+static void RouteRequestConsent(WebRequest& r)
+{
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = "meta";
+	BrokerCall call;
+	call.op = "request-consent";
+	call.payload.Add("subject_user_id", r.Param("subject_user_id"));
+	call.payload.Add("client_site", r.Site().id);
+	call.payload.Add("client_id", "test-app");
+	ValueArray scopes;
+	scopes.Add("test.scope");
+	call.payload.Add("scopes", scopes);
+	BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
+	ValueMap m;
+	m.Add("ok", res.ok);
+	m.Add("grant_id", res.ok ? Value(res.payload.Get("grant_id")) : Value());
+	m.Add("error", res.error);
+	r.Json(m, res.ok ? 200 : 502);
+}
+
 static void RegisterSiteHandlers(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
@@ -292,6 +316,7 @@ static void RegisterSiteHandlers(EngineSite& site)
 	rt.Add("greet/*", RouteGreet);
 	rt.Add("call-alpha:POST", RouteCallAlpha);
 	rt.Add("call-nowhere:POST", RouteCallNowhere);
+	rt.Add("request-consent:POST", RouteRequestConsent);
 }
 // Broker service on alpha.
 struct AlphaService : IBrokerService {
@@ -328,6 +353,7 @@ struct AlphaService : IBrokerService {
 // ---------------------------------------------------------------------------
 
 static String s_root;
+static WebGrants *s_meta_grants = NULL;
 
 static void SetupSites()
 {
@@ -349,6 +375,16 @@ static void SetupSites()
 	EngineSite& shell = TheWebEngine().AddSite("shell", "Shell",
 		Format("http://127.0.0.1:%d", MAIN_PORT), AppendFileName(s_root, "shell"));
 	shell.Router().Add("", RouteHome);
+
+	EngineSite& meta = TheWebEngine().AddSite("meta", "Meta",
+		Format("http://127.0.0.1:%d", META_PORT), AppendFileName(s_root, "meta"));
+	s_meta_grants = new WebGrants("meta", AppendFileName(s_root, "meta"));
+	InstallMetaAccountSite(meta, *s_meta_grants);
+	String muid;
+	bool mexisted;
+	Vector<String> mroles;
+	mroles.Add("owner");
+	meta.Accounts().CreateUser("mallory", "pw-meta", "Mallory", mroles, muid, mexisted);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -454,6 +490,27 @@ CONSOLE_APP_MAIN
 		Check(!r.ok && r.error == WebBroker::TCP_NOT_IMPLEMENTED(), "tcp broker transport is an explicit stub");
 	}
 
+	// --- unit level: TOTP (RFC 6238 SHA256 vectors) ---
+	{
+		String secret = TotpBase32Encode("12345678901234567890123456789012");
+		Check(TotpBase32Decode(secret) == "12345678901234567890123456789012", "base32 round trip");
+		Cout() << "[totp] 59=" << TotpCode(secret, 59, 30, 8) << " 1111111109=" << TotpCode(secret, 1111111109, 30, 8)
+		       << " 1234567890=" << TotpCode(secret, 1234567890, 30, 8) << "\n";
+			Check(TotpCode(secret, 59, 30, 8) == "46119246", "RFC 6238 vector T=59");
+		Check(TotpCode(secret, 1111111109, 30, 8) == "68084774", "RFC 6238 vector T=1111111109");
+		Check(TotpCode(secret, 1234567890, 30, 8) == "91819424", "RFC 6238 vector T=1234567890");
+		String code = TotpCode(secret, TotpUnixNow(), 30, 6);
+		Check(TotpVerify(secret, code, TotpUnixNow()), "live code verifies");
+		Check(!TotpVerify(secret, "000000", TotpUnixNow()) || code == "000000", "wrong code rejected");
+		Vector<String> rec = RecoveryCodesGenerate(3);
+		String pepper = "unit-pepper";
+		Vector<String> hashes;
+		for(const String& c : rec)
+			hashes.Add(RecoveryCodeHash(pepper, c));
+		Check(RecoveryCodeVerify(pepper, hashes[1], rec[1]), "recovery code verifies");
+		Check(!RecoveryCodeVerify(pepper, hashes[1], rec[0]), "recovery codes are distinct");
+	}
+
 	// --- three fenced sites ---
 	SetupSites();
 
@@ -462,7 +519,9 @@ CONSOLE_APP_MAIN
 	host.BindDefaultSite("shell");
 	host.BindSite(ALPHA_PORT, "alpha");
 	host.BindSite(BETA_PORT, "beta");
+	host.BindSite(META_PORT, "meta");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
+	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 
 	Thread host_thread;
 	host_thread.Run(HostMain);
@@ -667,6 +726,160 @@ CONSOLE_APP_MAIN
 
 	// 19. second site can log in the same username independently (already shown);
 
+	// --- meta-account app: login, TOTP enrollment, recovery codes ---
+	VectorMap<String, String> origin_meta;
+	origin_meta.Add("Origin", "http://127.0.0.1:18203");
+	VectorMap<String, String> meta_login_f;
+	meta_login_f.Add("username", "mallory");
+	meta_login_f.Add("password", "pw-meta");
+	HttpReply rml = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(meta_login_f));
+	String meta_uid, meta_pair, meta_csrf;
+	{
+		Value v = ParseJSON(rml.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(rml.status == 200 && JsonFlag(m, "ok"), "meta login without second factor");
+		meta_uid = m.Get("user_id").IsNull() ? String() : (String)m.Get("user_id");
+		meta_csrf = m.Get("csrf").IsNull() ? String() : (String)m.Get("csrf");
+	}
+	meta_pair = "wfs_meta=" + CookieOf(rml, "wfs_meta", meta_pair);
+	Check(meta_pair.Find("was_") > 0, "meta session cookie issued");
+
+	VectorMap<String, String> h_meta;
+	h_meta.Add("Cookie", meta_pair);
+	h_meta.Add("X-WF-CSRF", meta_csrf);
+	VectorMap<String, String> begin_f;
+	begin_f.Add("password", "pw-meta");
+	HttpReply mtb = HttpCall("POST", META_PORT, "/totp/begin", h_meta, FormEncode(begin_f));
+	String secret;
+	Vector<String> recovery;
+	{
+		Value v = ParseJSON(mtb.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(JsonFlag(m, "ok"), "totp enrollment begins");
+		secret = m.Get("secret").IsNull() ? String() : (String)m.Get("secret");
+		Value rv = m.Get("recovery");
+		if(rv.Is<ValueArray>())
+			for(const Value& c : (ValueArray)rv)
+				recovery.Add((String)c);
+	}
+	if(recovery.GetCount() < 1) {
+		Check(false, "totp secret + 8 recovery codes issued");
+		fflush(stdout); _Exit(1); // recovery[0] below requires data; fail fast instead of asserting
+	}
+	Check(secret.GetCount() >= 32 && recovery.GetCount() == 8, "totp secret + 8 recovery codes issued");
+
+	VectorMap<String, String> confirm_f;
+	confirm_f.Add("code", TotpCode(secret, TotpUnixNow()));
+	HttpReply mtc = HttpCall("POST", META_PORT, "/totp/confirm", h_meta, FormEncode(confirm_f));
+	{
+		Value v = ParseJSON(mtc.body);
+		Check(JsonFlag(v.Is<ValueMap>() ? (ValueMap)v : ValueMap(), "ok"), "totp enrollment confirmed with live code");
+	}
+
+	// After enrollment, login requires the second factor.
+	HttpCall("POST", META_PORT, "/logout", h_meta, "");
+	VectorMap<String, String> no_code;
+	no_code.Add("username", "mallory");
+	no_code.Add("password", "pw-meta");
+	HttpReply rnc = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(no_code));
+	Check(rnc.status == 401, "enrolled login without code is 401");
+	no_code.GetAdd("code") = "000000";
+	HttpReply rbc = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(no_code));
+	Check(rbc.status == 401, "enrolled login with wrong code is 401");
+	no_code.GetAdd("code") = TotpCode(secret, TotpUnixNow());
+	HttpReply rlc = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(no_code));
+	{
+		Value v = ParseJSON(rlc.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(rlc.status == 200 && JsonFlag(m, "ok"), "enrolled login with live code passes");
+	}
+
+	// Recovery codes: single use.
+	VectorMap<String, String> rec_login;
+	rec_login.Add("username", "mallory");
+	rec_login.Add("password", "pw-meta");
+	rec_login.Add("code", recovery[0]);
+	HttpReply rrr1 = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(rec_login));
+	Check(rrr1.status == 200 && JsonFlag(ParseJSON(rrr1.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rrr1.body) : ValueMap(), "ok"),
+	      "recovery code login passes");
+	HttpReply rrr2 = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(rec_login));
+	Check(rrr2.status == 401, "used recovery code is rejected");
+
+	// --- consent grants across sites via broker ---
+	VectorMap<String, String> consent_f;
+	consent_f.Add("subject_user_id", meta_uid);
+	HttpReply rg = HttpCall("POST", BETA_PORT, "/request-consent", no_headers, FormEncode(consent_f));
+	String grant_id;
+	{
+		Value v = ParseJSON(rg.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(JsonFlag(m, "ok"), "beta requested consent grant via broker");
+		grant_id = m.Get("grant_id").IsNull() ? String() : (String)m.Get("grant_id");
+	}
+	Check(grant_id.GetCount() > 0, "pending grant created");
+
+	// Login on meta again to decide the pending grant. The account is
+	// enrolled now, so the second factor is required.
+	VectorMap<String, String> meta_login2;
+	meta_login2.Add("username", "mallory");
+	meta_login2.Add("password", "pw-meta");
+	meta_login2.Add("code", TotpCode(secret, TotpUnixNow()));
+	HttpReply rml2 = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(meta_login2));
+	meta_csrf = String();
+	{
+		Value v = ParseJSON(rml2.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(rml2.status == 200 && JsonFlag(m, "ok"), "meta re-login");
+		meta_csrf = m.Get("csrf").IsNull() ? String() : (String)m.Get("csrf");
+		meta_pair = "wfs_meta=" + CookieOf(rml2, "wfs_meta", meta_pair);
+	}
+	VectorMap<String, String> h_meta2;
+	h_meta2.Add("Cookie", meta_pair);
+	h_meta2.Add("X-WF-CSRF", meta_csrf);
+	VectorMap<String, String> decide_f;
+	decide_f.Add("grant_id", grant_id);
+	decide_f.Add("approve", "1");
+	HttpReply rd = HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(decide_f));
+	{
+		Value v = ParseJSON(rd.body);
+		ValueMap m = v.Is<ValueMap>() ? (ValueMap)v : ValueMap();
+		Check(JsonFlag(m, "ok"), "meta user approves the grant");
+	}
+	VectorMap<String, String> check_f;
+	check_f.Add("subject_user_id", meta_uid);
+	{
+		BrokerCallContext ctx;
+		ctx.from_site = "beta";
+		ctx.to_site = "meta";
+		BrokerCall call;
+		call.op = "check-grant";
+		call.payload.Add("subject_user_id", meta_uid);
+		call.payload.Add("client_site", "beta");
+		ValueArray scopes;
+		scopes.Add("test.scope");
+		call.payload.Add("scopes", scopes);
+		BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
+		Check(res.ok && (bool)res.payload.Get("active"), "approved grant is active via check-grant");
+	}
+	VectorMap<String, String> revoke_f;
+	revoke_f.Add("grant_id", grant_id);
+	revoke_f.Add("approve", "0");
+	HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(revoke_f));
+	{
+		BrokerCallContext ctx;
+		ctx.from_site = "beta";
+		ctx.to_site = "meta";
+		BrokerCall call;
+		call.op = "check-grant";
+		call.payload.Add("subject_user_id", meta_uid);
+		call.payload.Add("client_site", "beta");
+		ValueArray scopes;
+		scopes.Add("test.scope");
+		call.payload.Add("scopes", scopes);
+		BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
+		Check(res.ok && !(bool)res.payload.Get("active"), "revoked grant is inactive via check-grant");
+	}
+
 	host.StopEngines();
 	host.Quit();
 	host_thread.Wait();
@@ -676,6 +889,5 @@ CONSOLE_APP_MAIN
 	if(failures.GetCount())
 		for(const String& f : failures)
 			Cout() << "  FAILED: " << f << "\n";
-	fflush(stdout);
 	_Exit(failures.GetCount() ? 1 : 0);
 }
