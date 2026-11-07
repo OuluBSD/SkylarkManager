@@ -1,0 +1,20 @@
+description "Shared, storage-agnostic session/bearer auth primitives: password hashing, session and scoped-token resolution, login/settings view fragments\377";
+
+uses
+	Core,
+	Core/SSL,
+	Skylark;
+
+file
+	AGENTS.md,
+	WebAuth.h,
+	WebAuthModel.h,
+	WebAuthModel.cpp,
+	WebAuthCrypto.h,
+	WebAuthCrypto.cpp,
+	WebAuthService.h,
+	WebAuthService.cpp,
+	WebAuthViews.h,
+	WebAuthViews.cpp,
+	WebAuthSelfTest.h,
+	WebAuthSelfTest.cpp;

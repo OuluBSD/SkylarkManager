@@ -12,6 +12,7 @@
 |---|---|---|
 | `uppsrc/ManagerSkylark` | Application / Server | Core web app and REST API server following `Manager/v2` multi-repository schemas and local `./mgr/projects` tracking. |
 | `uppsrc/WebFramework` | Library | Reusable web framework: KDE Plasma-inspired themes, PageBuilder, mega-menu navigation, tree views, SVG icons, and audio feedback. |
+| `uppsrc/WebAuth` | Library | Shared, storage-agnostic session/bearer auth: password hashing, session/token resolution, login/settings view fragments. Reused by CompanySkylark's `CompanyAuth` and this repo's `ManagerSkylark`/`SystemAuth`. |
 | `uppsrc/WebChat` | Module / Subsystem | Real-time SSE streaming web chat view and session manager connecting to `SweAgent` LLM backends. |
 | `examples/SkylarkGuiExample` | Example | Bi-directional desktop integration combining U++ `CtrlLib` GUI with an embedded `Skylark` HTTP server. |
 | `examples/WebShowcase` | Example | Standalone reference showcase application for `WebFramework` components, themes, and navigation widgets. |

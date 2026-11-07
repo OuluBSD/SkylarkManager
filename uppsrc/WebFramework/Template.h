@@ -38,6 +38,7 @@ struct TemplateSlots : Moveable<TemplateSlots> {
 	String content;
 	String footer;
 	String modals;
+	String sidebar_footer;  // pinned account widget at the bottom of a left-nav sidebar (SidebarTemplate)
 
 	TemplateSlots() {}
 };
@@ -86,6 +87,19 @@ public:
 class SourceForgeTemplate : public WebTemplate {
 public:
 	SourceForgeTemplate();
+	String Render(const TemplateSlots& slots, const DensityConfig& density) const override;
+	String GetStyles() const override;
+};
+
+// Primary navigation as a left sidebar (header/brand, scrollable nav content,
+// pinned account footer) instead of a top mega-menu bar, with a mobile-only
+// hamburger fallback. `slots.header` is used as a compact brand fragment
+// inside the sidebar header (not a top bar); `slots.left_sidebar` holds the
+// primary nav content (e.g. via TreeGenerators::FromNavigation); the new
+// `slots.sidebar_footer` holds the pinned account/settings/logout widget.
+class SidebarTemplate : public WebTemplate {
+public:
+	SidebarTemplate();
 	String Render(const TemplateSlots& slots, const DensityConfig& density) const override;
 	String GetStyles() const override;
 };

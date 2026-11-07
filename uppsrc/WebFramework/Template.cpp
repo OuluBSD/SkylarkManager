@@ -615,6 +615,75 @@ String SourceForgeTemplate::Render(const TemplateSlots& slots, const DensityConf
 }
 
 // ---------------------------------------------------------------------------
+// SidebarTemplate
+// ---------------------------------------------------------------------------
+
+SidebarTemplate::SidebarTemplate()
+	: WebTemplate("sidebar", "Left Sidebar Web Template")
+{
+}
+
+String SidebarTemplate::GetStyles() const
+{
+	return
+		"  .wf-template-sidebar { min-height: 100vh; display: flex; background: var(--wf-bg-normal, #182030); color: var(--wf-fg-normal, #d3dae3); }\n"
+		"  .wf-sidebar { width: 240px; flex-shrink: 0; height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; background: var(--wf-bg-view, #151d2b); border-right: 1px solid var(--wf-border-color, rgba(0,161,197,0.2)); transition: width 0.2s ease, left 0.2s ease; z-index: 100; }\n"
+		"  .wf-sidebar.wf-sidebar-collapsed { width: 56px; }\n"
+		"  .wf-sidebar.wf-sidebar-collapsed .wf-sidebar-label { display: none; }\n"
+		"  .wf-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px; border-bottom: 1px solid var(--wf-border-color, rgba(255,255,255,0.08)); gap: 8px; }\n"
+		"  .wf-sidebar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; color: var(--wf-fg-normal, #ffffff); text-decoration: none; font-weight: 700; }\n"
+		"  .wf-sidebar-collapse-btn { background: transparent; border: 1px solid var(--wf-border-color, rgba(255,255,255,0.1)); border-radius: 4px; color: var(--wf-fg-inactive, #8b919d); cursor: pointer; padding: 4px 6px; display: flex; align-items: center; flex-shrink: 0; }\n"
+		"  .wf-sidebar-collapse-btn:hover { color: #ffffff; border-color: var(--wf-accent-focus, #00a1c5); }\n"
+		"  .wf-sidebar-content { flex: 1; overflow-y: auto; padding: 8px 10px; }\n"
+		"  .wf-sidebar-footer { padding: 10px; border-top: 1px solid var(--wf-border-color, rgba(255,255,255,0.08)); }\n"
+		"  .wf-template-sidebar .wf-page-body { flex: 1; min-width: 0; width: 100%; max-width: var(--wf-container-width, 1080px); margin: 0 auto; padding: var(--wf-pad-page, 1.5rem 2rem); display: flex; flex-direction: column; gap: var(--wf-gap-grid, 16px); }\n"
+		"  .wf-mobile-header { display: none; align-items: center; gap: 10px; padding: 10px 14px; background: var(--wf-header-bg, #151d2b); border-bottom: 1px solid var(--wf-border-color, rgba(255,255,255,0.08)); position: sticky; top: 0; z-index: 1100; }\n"
+		"  .wf-mobile-header-toggle { background: transparent; border: none; color: var(--wf-fg-normal, #d3dae3); cursor: pointer; display: flex; align-items: center; padding: 4px; }\n"
+		"  @media (max-width: 768px) {\n"
+		"    .wf-template-sidebar { flex-direction: column; }\n"
+		"    .wf-mobile-header { display: flex; }\n"
+		"    .wf-sidebar { position: fixed; left: -100%; top: 0; width: 280px; height: 100vh; }\n"
+		"    body.wf-sidebar-open .wf-sidebar { left: 0; }\n"
+		"  }\n";
+}
+
+String SidebarTemplate::Render(const TemplateSlots& slots, const DensityConfig& density) const
+{
+	String h;
+	h << "<div class=\"wf-template-sidebar\">\n"
+	  << "  <header class=\"wf-mobile-header\">\n"
+	  << "    <button type=\"button\" class=\"wf-mobile-header-toggle\" onclick=\"document.body.classList.toggle('wf-sidebar-open')\" aria-label=\"Toggle navigation\">"
+	  << VividIcon::Get("menu", 20) << "</button>\n"
+	  << "    <span class=\"wf-sidebar-brand\">" << slots.header << "</span>\n"
+	  << "  </header>\n"
+	  << "  <aside class=\"wf-sidebar\" id=\"wf-sidebar\" role=\"navigation\">\n"
+	  << "    <div class=\"wf-sidebar-header\">\n"
+	  << "      <span class=\"wf-sidebar-brand wf-sidebar-label\">" << slots.header << "</span>\n"
+	  << "      <button type=\"button\" class=\"wf-sidebar-collapse-btn\" onclick=\"document.getElementById('wf-sidebar').classList.toggle('wf-sidebar-collapsed')\" title=\"Collapse/expand navigation\">"
+	  << VividIcon::Get("chevron-left", 14) << "</button>\n"
+	  << "    </div>\n"
+	  << "    <div class=\"wf-sidebar-content\">" << slots.left_sidebar << "</div>\n";
+	if(!slots.sidebar_footer.IsEmpty()) {
+		h << "    <div class=\"wf-sidebar-footer\">" << slots.sidebar_footer << "</div>\n";
+	}
+	h << "  </aside>\n"
+	  << "  <main class=\"wf-page-body\">\n";
+	if(!slots.breadcrumb.IsEmpty()) {
+		h << "    <nav class=\"wf-breadcrumb\" aria-label=\"Breadcrumb\">" << slots.breadcrumb << "</nav>\n";
+	}
+	h << slots.content << "\n"
+	  << "  </main>\n";
+	if(!slots.footer.IsEmpty()) {
+		h << "  <footer class=\"wf-footer\">" << slots.footer << "</footer>\n";
+	}
+	if(!slots.modals.IsEmpty()) {
+		h << "  <div class=\"wf-modals\">" << slots.modals << "</div>\n";
+	}
+	h << "</div>\n";
+	return h;
+}
+
+// ---------------------------------------------------------------------------
 // TemplateRegistry
 // ---------------------------------------------------------------------------
 
@@ -632,6 +701,7 @@ void TemplateRegistry::EnsureBuiltIn()
 		Register(new AppWorkspaceTemplate);
 		Register(new GitHubTemplate);
 		Register(new SourceForgeTemplate);
+		Register(new SidebarTemplate);
 	}
 }
 

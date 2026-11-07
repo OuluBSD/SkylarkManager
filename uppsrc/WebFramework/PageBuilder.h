@@ -28,6 +28,7 @@ public:
 	PageBuilder& Breadcrumb(const String& html) { slots.breadcrumb = html; return *this; }
 	PageBuilder& SubNav(const String& html) { slots.sub_nav = html; return *this; }
 	PageBuilder& Footer(const String& html) { slots.footer = html; return *this; }
+	PageBuilder& SidebarFooter(const String& html) { slots.sidebar_footer = html; return *this; }
 	PageBuilder& Modals(const String& html) { slots.modals = html; return *this; }
 	PageBuilder& ExtraHead(const String& html) { extra_head << html << "\n"; return *this; }
 	PageBuilder& ExtraScripts(const String& js) { extra_scripts << js << "\n"; return *this; }
