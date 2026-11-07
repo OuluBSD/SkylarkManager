@@ -10,4 +10,12 @@
 #include "ChatView.h"
 #include "ChatRoutes.h"
 
+NAMESPACE_UPP
+
+using WebChatAuthorizationCallback = bool (*)(Http&);
+
+void SetWebChatAuthorizationCallback(WebChatAuthorizationCallback callback);
+
+END_UPP_NAMESPACE
+
 #endif

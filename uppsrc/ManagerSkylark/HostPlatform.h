@@ -62,10 +62,8 @@ struct DistributedNode : Moveable<DistributedNode> {
 	Time   last_checked;
 
 	DistributedNode() {
-		ssh_user = "sblo";
 		ssh_port = 22;
-		remote_path = "~/Dev";
-		protocol = "ssh";
+		protocol = "disabled";
 		status = "idle";
 	}
 

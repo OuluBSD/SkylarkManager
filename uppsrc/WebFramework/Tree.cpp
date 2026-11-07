@@ -2,6 +2,107 @@
 
 NAMESPACE_UPP
 
+static String EscapeTreeHtml(const String& text)
+{
+	String out;
+	for(int i = 0; i < text.GetCount(); i++) {
+		byte c = (byte)text[i];
+		if(c < 0x20 || c == 0x7f) {
+			out << "&#xfffd;";
+			continue;
+		}
+		switch(text[i]) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(text[i]); break;
+		}
+	}
+	return out;
+}
+
+static bool HasSafeTreeUrlChars(const String& url)
+{
+	for(int i = 0; i < url.GetCount(); i++) {
+		byte c = (byte)url[i];
+		if(c <= 0x20 || c == 0x7f || c == '\\' || c == '"' || c == '\'' || c == '<' || c == '>')
+			return false;
+	}
+	return true;
+}
+
+static String EncodeTreeUrlParts(const String& value, char separator)
+{
+	String out;
+	Vector<String> parts = Split(value, separator);
+	for(int i = 0; i < parts.GetCount(); i++) {
+		if(i) out.Cat(separator);
+		out << UrlEncode(parts[i]);
+	}
+	return out;
+}
+
+static String SafeTreeIcon(const String& icon, const String& fallback)
+{
+	if(icon.IsEmpty())
+		return fallback;
+	for(int i = 0; i < icon.GetCount(); i++) {
+		char c = icon[i];
+		if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		     (c >= '0' && c <= '9') || c == '-'))
+			return fallback;
+	}
+	return icon;
+}
+
+static String SafeTreeUrl(const String& url)
+{
+	if(!HasSafeTreeUrlChars(url))
+		return String();
+	if(url == "#")
+		return url;
+	if(url.StartsWith("https://")) {
+		String authority = url.Mid(8);
+		int end = authority.GetCount();
+		for(int i = 0; i < authority.GetCount(); i++)
+			if(authority[i] == '/' || authority[i] == '?' || authority[i] == '#') {
+				end = i;
+				break;
+			}
+		String host = authority.Left(end);
+		return host.IsEmpty() || host.Find('@') >= 0 ? String() : url;
+	}
+	if(url.StartsWith("//"))
+		return String();
+	if(url.StartsWith("#"))
+		return "#" + EncodeTreeUrlParts(url.Mid(1), '/');
+	if(!url.StartsWith("/"))
+		return String();
+
+	int frag_pos = url.Find('#');
+	String fragment = frag_pos >= 0 ? url.Mid(frag_pos + 1) : String();
+	String before_fragment = frag_pos >= 0 ? url.Left(frag_pos) : url;
+	int query_pos = before_fragment.Find('?');
+	String path = query_pos >= 0 ? before_fragment.Left(query_pos) : before_fragment;
+	String query = query_pos >= 0 ? before_fragment.Mid(query_pos + 1) : String();
+	String out = "/" + EncodeTreeUrlParts(path.Mid(1), '/');
+	if(query_pos >= 0) {
+		out << "?";
+		Vector<String> args = Split(query, '&');
+		for(int i = 0; i < args.GetCount(); i++) {
+			if(i) out << "&";
+			int eq = args[i].Find('=');
+			out << UrlEncode(eq >= 0 ? args[i].Left(eq) : args[i]);
+			if(eq >= 0) out << "=" << UrlEncode(args[i].Mid(eq + 1));
+		}
+	}
+	if(frag_pos >= 0)
+		out << "#" << EncodeTreeUrlParts(fragment, '/');
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // TreeNode Implementation
 // ---------------------------------------------------------------------------
@@ -460,16 +561,16 @@ void TreeRenderer::RenderNode(String& h, const TreeNode& node, int level)
 	if(node.is_expanded) node_classes << " is-expanded";
 	if(node.is_selected) node_classes << " is-selected";
 
-	h << "<li class=\"" << node_classes << "\" data-node-id=\"" << node.id << "\" role=\"treeitem\""
+	h << "<li class=\"" << node_classes << "\" data-node-id=\"" << EscapeTreeHtml(node.id) << "\" role=\"treeitem\""
 	  << (has_children ? Format(" aria-expanded=\"%s\"", node.is_expanded ? "true" : "false") : "")
 	  << ">\n"
-	  << "  <div class=\"wf-tree-row\" onclick=\"TreeNavigator.rowClick(event, this)\""
-	  << (!node.tooltip.IsEmpty() ? " title=\"" + DeHtml(node.tooltip) + "\"" : "")
+	  << "  <div class=\"wf-tree-row\""
+	  << (!node.tooltip.IsEmpty() ? " title=\"" + EscapeTreeHtml(node.tooltip) + "\"" : "")
 	  << ">\n";
 
 	// Chevron toggle button (if node has children) or spacer
 	if(has_children) {
-		h << "    <span class=\"wf-tree-chevron\" onclick=\"TreeNavigator.toggleNode(event, this.parentElement)\" title=\"Toggle branch\">"
+		h << "    <span class=\"wf-tree-chevron\" title=\"Toggle branch\">"
 		  << VividIcon::Get("chevron-right", 12)
 		  << "</span>\n";
 	} else {
@@ -477,23 +578,29 @@ void TreeRenderer::RenderNode(String& h, const TreeNode& node, int level)
 	}
 
 	// Node Icon
-	String ic = !node.icon.IsEmpty() ? node.icon : String(has_children ? "folder" : "file");
-	h << "    <span class=\"wf-tree-icon\" data-icon-closed=\"" << ic << "\""
-	  << (!node.icon_open.IsEmpty() ? " data-icon-open=\"" + node.icon_open + "\"" : "") << ">"
-	  << VividIcon::Get((node.is_expanded && !node.icon_open.IsEmpty()) ? node.icon_open : ic, 15)
+	String ic = SafeTreeIcon(node.icon, has_children ? String("folder") : String("file"));
+	String ic_open = SafeTreeIcon(node.icon_open, "");
+	h << "    <span class=\"wf-tree-icon\" data-icon-closed=\"" << EscapeTreeHtml(ic) << "\""
+	  << (!ic_open.IsEmpty() ? " data-icon-open=\"" + EscapeTreeHtml(ic_open) + "\"" : "") << ">"
+	  << VividIcon::Get((node.is_expanded && !ic_open.IsEmpty()) ? ic_open : ic, 15)
 	  << "</span>\n";
 
 	// Node Label / Anchor
 	String safe_tooltip = !node.tooltip.IsEmpty() ? node.tooltip : node.label;
-	if(!node.url.IsEmpty() && node.url != "#") {
-		h << "    <a href=\"" << node.url << "\" class=\"wf-tree-label\" title=\"" << DeHtml(safe_tooltip) << "\">" << node.label << "</a>\n";
+	String safe_url = SafeTreeUrl(node.url);
+	if(!safe_url.IsEmpty() && safe_url != "#") {
+		h << "    <a href=\"" << EscapeTreeHtml(safe_url) << "\" class=\"wf-tree-label\" title=\"" << EscapeTreeHtml(safe_tooltip) << "\">" << EscapeTreeHtml(node.label) << "</a>\n";
 	} else {
-		h << "    <span class=\"wf-tree-label\" title=\"" << DeHtml(safe_tooltip) << "\">" << node.label << "</span>\n";
+		h << "    <span class=\"wf-tree-label\" title=\"" << EscapeTreeHtml(safe_tooltip) << "\">" << EscapeTreeHtml(node.label) << "</span>\n";
 	}
 
 	// Optional Badge
 	if(!node.badge.text.IsEmpty()) {
-		h << "    <span class=\"wf-badge wf-badge-" << node.badge.style << "\">" << node.badge.text << "</span>\n";
+		String badge_style = node.badge.style;
+		if(badge_style != "cyan" && badge_style != "emerald" && badge_style != "crimson" &&
+		   badge_style != "purple" && badge_style != "neutral")
+			badge_style = "neutral";
+		h << "    <span class=\"wf-badge wf-badge-" << badge_style << "\">" << EscapeTreeHtml(node.badge.text) << "</span>\n";
 	}
 
 	h << "  </div>\n"; // .wf-tree-row
@@ -513,20 +620,20 @@ String TreeRenderer::Render(const TreeModel& tree, const String& tree_id,
                             const String& title, bool show_filter, bool show_actions)
 {
 	String h;
-	h << "<div class=\"wf-tree-container\" id=\"" << tree_id << "\">\n";
+	h << "<div class=\"wf-tree-container\" id=\"" << EscapeTreeHtml(tree_id) << "\" data-tree-id=\"" << EscapeTreeHtml(tree_id) << "\">\n";
 
 	// Tree Header
 	if(!title.IsEmpty() || show_actions) {
 		h << "  <div class=\"wf-tree-header\">\n";
 		if(!title.IsEmpty()) {
-			h << "    <span class=\"wf-tree-title\">" << title << "</span>\n";
+			h << "    <span class=\"wf-tree-title\">" << EscapeTreeHtml(title) << "</span>\n";
 		}
 		if(show_actions) {
 			h << "    <div class=\"wf-tree-actions\">\n"
-			  << "      <button type=\"button\" class=\"wf-tree-btn\" onclick=\"TreeNavigator.expandAll('" << tree_id << "')\" title=\"Expand All Branches\">"
+			  << "      <button type=\"button\" class=\"wf-tree-btn\" data-tree-action=\"expand\" title=\"Expand All Branches\">"
 			  << VividIcon::Get("chevron-down", 12) << " Expand"
 			  << "</button>\n"
-			  << "      <button type=\"button\" class=\"wf-tree-btn\" onclick=\"TreeNavigator.collapseAll('" << tree_id << "')\" title=\"Collapse All Branches\">"
+			  << "      <button type=\"button\" class=\"wf-tree-btn\" data-tree-action=\"collapse\" title=\"Collapse All Branches\">"
 			  << VividIcon::Get("chevron-right", 12) << " Collapse"
 			  << "</button>\n"
 			  << "    </div>\n";
@@ -538,8 +645,8 @@ String TreeRenderer::Render(const TreeModel& tree, const String& tree_id,
 	if(show_filter) {
 		h << "  <div class=\"wf-tree-filter-bar\">\n"
 		  << "    <span class=\"wf-tree-filter-icon\">" << VividIcon::Get("search", 13) << "</span>\n"
-		  << "    <input type=\"text\" class=\"wf-tree-filter-input\" placeholder=\"Filter tree... (/)\" oninput=\"TreeNavigator.filter('" << tree_id << "', this.value)\">\n"
-		  << "    <button type=\"button\" class=\"wf-tree-clear-btn\" onclick=\"TreeNavigator.clearFilter('" << tree_id << "')\" title=\"Clear filter\">&times;</button>\n"
+		  << "    <input type=\"text\" class=\"wf-tree-filter-input\" placeholder=\"Filter tree... (/)\" />\n"
+		  << "    <button type=\"button\" class=\"wf-tree-clear-btn\" data-tree-action=\"clear\" title=\"Clear filter\">&times;</button>\n"
 		  << "  </div>\n";
 	}
 
@@ -626,6 +733,29 @@ String TreeRenderer::GetClientScript()
 		"        let inp = document.querySelector('.wf-tree-filter-input');\n"
 		"        if (inp) { inp.focus(); inp.select(); }\n"
 		"      }\n"
+		"    });\n"
+		"    document.addEventListener('click', function(e) {\n"
+		"      let action = e.target.closest('[data-tree-action]');\n"
+		"      let container = e.target.closest('.wf-tree-container');\n"
+		"      if (!container) return;\n"
+		"      let treeId = container.getAttribute('data-tree-id');\n"
+		"      if (action) {\n"
+		"        e.preventDefault();\n"
+		"        let name = action.getAttribute('data-tree-action');\n"
+		"        if (name === 'expand') expandAll(treeId);\n"
+		"        else if (name === 'collapse') collapseAll(treeId);\n"
+		"        else if (name === 'clear') clearFilter(treeId);\n"
+		"        return;\n"
+		"      }\n"
+		"      let chevron = e.target.closest('.wf-tree-chevron');\n"
+		"      if (chevron) { toggleNode(e, chevron.parentElement); return; }\n"
+		"      let row = e.target.closest('.wf-tree-row');\n"
+		"      if (row) rowClick(e, row);\n"
+		"    });\n"
+		"    document.addEventListener('input', function(e) {\n"
+		"      if (!e.target.matches('.wf-tree-filter-input')) return;\n"
+		"      let container = e.target.closest('.wf-tree-container');\n"
+		"      if (container) filter(container.getAttribute('data-tree-id'), e.target.value);\n"
 		"    });\n"
 		"  }\n"
 		"  function toggleNode(event, row) {\n"

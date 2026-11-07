@@ -68,7 +68,7 @@ struct PackageBuildCacheInfo : Moveable<PackageBuildCacheInfo> {
 class GitHubPlatformService {
 public:
 	static String GetDevDir();
-	static Vector<LocalRepoInfo> GetRepositories(const String& owner = "SeppoPakonen");
+	static Vector<LocalRepoInfo> GetRepositories(const String& owner = "");
 	static LocalRepoInfo GetRepo(const String& owner, const String& repo);
 	static ValueMap LoadScrapedData(const String& owner, const String& repo);
 	static String RenderRepoTabs(const String& owner, const String& repo, const String& active_tab, const LocalRepoInfo& info);
@@ -82,7 +82,7 @@ public:
 
 	// Live GitHub dynamic queries via gh CLI
 	static bool                  IsGhCliAvailable();
-	static Vector<LocalRepoInfo> GetLiveGitHubRepos(const String& owner = "SeppoPakonen");
+	static Vector<LocalRepoInfo> GetLiveGitHubRepos(const String& owner = "");
 	static Vector<ValueMap>      GetLiveIssues(const String& owner, const String& repo);
 	static ValueMap              GetLiveIssueDetail(const String& owner, const String& repo, int number);
 	static Vector<ValueMap>      GetLivePullRequests(const String& owner, const String& repo);

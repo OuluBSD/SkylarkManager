@@ -5,6 +5,17 @@
 
 NAMESPACE_UPP
 
+static void SendEgressDisabled(Http& http)
+{
+	ValueMap response;
+	response.Add("status", "disabled");
+	response.Add("available", false);
+	response.Add("error", "external_operation_disabled");
+	http.ContentType("application/json");
+	http.Response(503, "Service Unavailable");
+	http << AsJSON(response, true);
+}
+
 String GitHubPlatformService::EscapeHtml(const String& s)
 {
 	String r;
@@ -22,6 +33,73 @@ String GitHubPlatformService::EscapeHtml(const String& s)
 	return r;
 }
 
+static bool IsSymlinkPath(const String& path)
+{
+	FindFile ff(path);
+	return ff && ff.IsSymLink();
+}
+
+static String GHRepoRoute(const String& owner, const String& repo)
+{
+	return "/repo/" + UrlEncode(owner) + "/" + UrlEncode(repo);
+}
+
+static String GHUserRoute(const String& owner)
+{
+	return "/user/" + UrlEncode(owner);
+}
+
+static String GHAppendPath(const String& base, const String& path)
+{
+	String out = base;
+	Vector<String> parts = Split(path, '/');
+	for(int i = 0; i < parts.GetCount(); i++) {
+		if(parts[i].IsEmpty()) continue;
+		out << "/" << UrlEncode(parts[i]);
+	}
+	return out;
+}
+
+static String SafeGHIcon(const String& value, const String& fallback)
+{
+	if(value.IsEmpty()) return fallback;
+	for(int i = 0; i < value.GetCount(); i++) {
+		char c = value[i];
+		if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		     (c >= '0' && c <= '9') || c == '-'))
+			return fallback;
+	}
+	return value;
+}
+
+static bool SafeGHComponent(const String& value)
+{
+	if(value.IsEmpty() || value == "." || value == "..") return false;
+	for(int i = 0; i < value.GetCount(); i++) {
+		char c = value[i];
+		if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		     (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.'))
+			return false;
+	}
+	return true;
+}
+
+static bool SafeGHRelativePath(const String& path)
+{
+	if(path.IsEmpty() || path[0] == '/' || path.Find('\\') >= 0)
+		return false;
+	Vector<String> parts = Split(path, '/');
+	for(int i = 0; i < parts.GetCount(); i++) {
+		if(parts[i].IsEmpty() || parts[i] == "." || parts[i] == ".." || ToLower(parts[i]) == ".git")
+			return false;
+		for(int j = 0; j < parts[i].GetCount(); j++) {
+			byte c = (byte)parts[i][j];
+			if(c < 0x20 || c == 0x7f || c == '\\') return false;
+		}
+	}
+	return true;
+}
+
 String GitHubPlatformService::FormatFileSize(int64 bytes)
 {
 	if(bytes < 1024)
@@ -34,165 +112,52 @@ String GitHubPlatformService::FormatFileSize(int64 bytes)
 String GitHubPlatformService::GetDevDir()
 {
 	String custom = GetEnv("DEV_DIR");
-	if(!custom.IsEmpty() && DirectoryExists(custom))
-		return custom;
-	String d = GetHomeDirFile("Dev");
-	if(DirectoryExists(d))
-		return d;
-	return GetHomeDirectory();
+	if(!DataStore::IsSafeRoot(custom))
+		return String();
+	return NormalizePath(custom);
 }
 
 ValueMap GitHubPlatformService::LoadScrapedData(const String& owner, const String& repo)
 {
-	String path = AppendFileName(AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo), "summary.json");
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueMap>())
-			return v;
-	}
+	// No registered typed DataStore schema currently supplies GitHub summaries.
 	return ValueMap();
 }
 
 bool GitHubPlatformService::IsGhCliAvailable()
 {
-	static bool tested = false;
-	static bool available = false;
-	if(!tested) {
-		String out = Sys("gh auth status 2>&1");
-		available = (out.Find("Logged in") >= 0 || out.Find("github.com") >= 0);
-		tested = true;
-	}
-	return available;
+	return false;
 }
 
 Vector<LocalRepoInfo> GitHubPlatformService::GetLiveGitHubRepos(const String& owner)
 {
-	static String cached_owner;
-	static Time last_fetch = Null;
-	static Vector<LocalRepoInfo> cached_repos;
-
-	if(cached_owner == owner && !IsNull(last_fetch) && (GetSysTime() - last_fetch) < 300)
-		return clone(cached_repos);
-
-	Vector<LocalRepoInfo> list;
-	String cmd = "gh repo list " + owner + " --limit 100 --json name,description,isPrivate,pushedAt,stargazerCount,forkCount,primaryLanguage,url 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			LocalRepoInfo info;
-			info.owner = owner;
-			info.name = m["name"];
-			info.description = m["description"];
-			info.is_private = m["isPrivate"];
-			info.stars = m["stargazerCount"];
-			info.forks = m["forkCount"];
-			if(!m["primaryLanguage"].IsNull() && !m["primaryLanguage"]["name"].IsNull())
-				info.language = m["primaryLanguage"]["name"];
-			else
-				info.language = "C++";
-
-			String pushed = m["pushedAt"];
-			if(!pushed.IsEmpty() && pushed.GetLength() >= 10)
-				info.last_commit_time = pushed.Left(10);
-			else
-				info.last_commit_time = "recently";
-
-			info.branch = "master";
-			info.path = AppendFileName(GetDevDir(), info.name);
-			list.Add(pick(info));
-		}
-	}
-
-	if(list.IsEmpty()) {
-		list = GetRepositories(owner);
-	}
-
-	cached_owner = owner;
-	last_fetch = GetSysTime();
-	cached_repos = clone(list);
-	return list;
+	return GetRepositories(owner);
 }
 
 Vector<ValueMap> GitHubPlatformService::GetLiveIssues(const String& owner, const String& repo)
 {
 	Vector<ValueMap> list;
-	String target = owner + "/" + repo;
-	String cmd = "gh issue list -R " + target + " --state all --limit 20 --json number,title,state,author,createdAt,comments 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap issue;
-			issue.Set("number", (int)m["number"]);
-			issue.Set("title", (String)m["title"]);
-			issue.Set("state", (String)m["state"]);
-			if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
-				issue.Set("author", (String)m["author"]["login"]);
-			else
-				issue.Set("author", owner);
-
-			issue.Set("created_at", ((String)m["createdAt"]).Left(10));
-			if(m["comments"].Is<ValueArray>())
-				issue.Set("comments", ((ValueArray)m["comments"]).GetCount());
-			else
-				issue.Set("comments", 0);
-
-			list.Add(issue);
-		}
-	}
 	return list;
 }
 
 ValueMap GitHubPlatformService::GetLiveIssueDetail(const String& owner, const String& repo, int number)
 {
 	ValueMap res;
-	String target = owner + "/" + repo;
-	String cmd = Format("gh issue view %d -R %s --json number,title,body,state,author,createdAt,comments 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-	if(val.Is<ValueMap>())
-		return val;
 	return res;
 }
 
 String GitHubPlatformService::CreateIssue(const String& owner, const String& repo, const String& title, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_issue_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh issue create -R %s --title %s --body-file %s 2>&1",
-	                    target, AsCString(title), AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-	return TrimBoth(out);
+	return "disabled";
 }
 
 String GitHubPlatformService::AddComment(const String& owner, const String& repo, int number, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_comment_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh issue comment %d -R %s --body-file %s 2>&1",
-	                    number, target, AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-	return TrimBoth(out);
+	return "disabled";
 }
 
 String GitHubPlatformService::ToggleIssueState(const String& owner, const String& repo, int number, bool close_it)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh issue %s %d -R %s 2>&1", close_it ? "close" : "reopen", number, target);
-	return TrimBoth(Sys("sh", {"-c", cmd}));
+	return "disabled";
 }
 
 static Vector<ValueMap> sCustomRuns;
@@ -465,7 +430,7 @@ Vector<WorkflowTemplate> GitHubPlatformService::GetWorkflowTemplates(const Strin
 			"    steps:\n"
 			"      - uses: actions/checkout@v4\n"
 			"      - name: Build Container Image\n"
-			"        run: docker build -t ai-upp:latest .\n"
+			"        run: docker build -t workspace-app:latest .\n"
 			"      - name: Push Container\n"
 			"        run: echo 'Pushing image to registry...'\n";
 	}
@@ -530,7 +495,7 @@ Vector<WorkflowTemplate> GitHubPlatformService::GetWorkflowTemplates(const Strin
 		t.category = "deployment";
 		t.author = "By U++ Mesh";
 		t.icon = "network";
-		t.description = "Deploy binary over fast SSH to local mesh cluster nodes (192.168.1.106, 192.168.1.105, 192.168.1.169) with automatic fleet sync.";
+		t.description = "Deploy a verified binary to explicitly configured nodes after operator approval.";
 		t.default_filename = "mesh-deploy.yml";
 		t.default_yaml =
 			"name: Mesh Fleet Deploy\n\n"
@@ -544,8 +509,7 @@ Vector<WorkflowTemplate> GitHubPlatformService::GetWorkflowTemplates(const Strin
 			"    steps:\n"
 			"      - name: Fleet SSH Sync\n"
 			"        run: |\n"
-			"          ssh mediacenter-gentoo 'cd ~/Dev/ai-upp && git pull && ./bin/build reference/ManagerSkylark'\n"
-			"          ssh gen7-lan 'cd ~/Dev/ai-upp && git pull && ./bin/build reference/ManagerSkylark'\n";
+			"          echo 'Configure an authorized host and repository before deployment.'\n";
 	}
 
 	// 10. Automation: Manual Workflow
@@ -766,7 +730,7 @@ Vector<WorkflowTemplate> GitHubPlatformService::GetWorkflowTemplates(const Strin
 
 WorkflowTemplate GitHubPlatformService::GetWorkflowTemplate(const String& id)
 {
-	Vector<WorkflowTemplate> all = GetWorkflowTemplates("SeppoPakonen", "ai-upp-priv");
+	Vector<WorkflowTemplate> all = GetWorkflowTemplates(String(), String());
 	for(const WorkflowTemplate& t : all) {
 		if(t.id == id) return t;
 	}
@@ -926,50 +890,13 @@ Vector<PackageBuildCacheInfo> GitHubPlatformService::GetPackageBuildCaches(const
 
 bool GitHubPlatformService::SaveWorkflowFile(const String& repo_path, const String& filename, const String& content)
 {
-	String safe_fn = GetFileName(filename);
-	if(safe_fn.IsEmpty()) safe_fn = "workflow.yml";
-	if(!safe_fn.EndsWith(".yml") && !safe_fn.EndsWith(".yaml")) safe_fn << ".yml";
-
-	String target_dir = AppendFileName(AppendFileName(repo_path, ".github"), "workflows");
-	RealizeDirectory(target_dir);
-	String full_path = AppendFileName(target_dir, safe_fn);
-	return SaveFile(full_path, content);
+	// Workflow writes are disabled until an authorized repository writer exists.
+	return false;
 }
 
 void GitHubPlatformService::TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type)
 {
-	int64 run_id = 20000 + (Random() % 10000);
-	ValueMap run;
-	run.Set("id", run_id);
-	run.Set("name", workflow_name.IsEmpty() ? "U++ Build & Test (SysProcess)" : workflow_name);
-	run.Set("status", "running");
-	run.Set("conclusion", "");
-	run.Set("branch", "master");
-	run.Set("created_at", "Just now");
-	run.Set("event", run_type.IsEmpty() ? "workflow_dispatch" : run_type);
-
-	{
-		Mutex::Lock __(sRunLock);
-		sCustomRuns.Insert(0, run);
-	}
-
-	Thread().Run([=] {
-		LocalProcess p;
-		String cmd = AppendFileName(GetHomeDirFile("Dev/ai-upp"), "bin/build") + " reference/ManagerSkylark";
-		p.Start(cmd);
-		String out;
-		p.Finish(out);
-		int exit_code = p.GetExitCode();
-
-		Mutex::Lock __(sRunLock);
-		for(int i = 0; i < sCustomRuns.GetCount(); i++) {
-			if((int64)sCustomRuns[i]["id"] == run_id) {
-				sCustomRuns[i].Set("status", "completed");
-				sCustomRuns[i].Set("conclusion", exit_code == 0 ? "success" : "failure");
-				break;
-			}
-		}
-	});
+	// Workflow dispatch is unavailable until an explicit policy exists.
 }
 
 String GitHubPlatformService::RenderOperatorWarningBar(const String& owner, const String& repo)
@@ -988,51 +915,17 @@ String GitHubPlatformService::RenderOperatorWarningBar(const String& owner, cons
 	  << "      </div>\n"
 	  << "    </div>\n"
 	  << "    <div style=\"display:flex; gap:10px; align-items:center; flex-wrap:wrap;\">\n"
-	  << "      <button id=\"btn-run-delta-build\" onclick=\"runWorkflowDispatch('upp-build', 'delta')\" class=\"wf-btn wf-btn-primary\" style=\"padding:6px 14px; font-size:0.82rem; font-weight:600;\">\n"
-	  << "        " << VividIcon::Get("play", 13) << " Run Delta Build (18s)\n"
-	  << "      </button>\n"
-	  << "      <button id=\"btn-run-full-matrix\" onclick=\"runWorkflowDispatch('upp-build', 'matrix')\" class=\"wf-btn wf-btn-secondary\" style=\"padding:6px 14px; font-size:0.82rem;\">\n"
-	  << "        Run Full Matrix (4m 15s)\n"
-	  << "      </button>\n"
-	  << "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" id=\"btn-new-workflow\" class=\"wf-btn\" style=\"padding:6px 14px; font-size:0.82rem; background:#238636; color:#ffffff; font-weight:600; text-decoration:none;\">\n"
-	  << "        " << VividIcon::Get("plus", 14) << " New workflow\n"
-	  << "      </a>\n"
+	  << "      <span class=\"wf-badge wf-badge-neutral\">External workflow dispatch is disabled</span>\n"
 	  << "    </div>\n"
 	  << "  </div>\n"
-	  << "</div>\n"
-	  << "<script>\n"
-	  << "function runWorkflowDispatch(wf, type) {\n"
-	  << "  let btn = (type === 'delta' ? document.getElementById('btn-run-delta-build') : document.getElementById('btn-run-full-matrix'));\n"
-	  << "  if(btn) {\n"
-	  << "    btn.disabled = true;\n"
-	  << "    btn.innerHTML = '<span>&#9203; Dispatching SysProcess...</span>';\n"
-	  << "  }\n"
-	  << "  fetch('/api/gh/actions/trigger', {\n"
-	  << "    method: 'POST',\n"
-	  << "    headers: { 'Content-Type': 'application/json' },\n"
-	  << "    body: JSON.stringify({\n"
-	  << "      owner: '" << owner << "',\n"
-	  << "      repo: '" << repo << "',\n"
-	  << "      workflow: (type === 'delta' ? 'U++ Build System (Delta 18s)' : 'U++ Full Matrix Rebuild (4m 15s)'),\n"
-	  << "      type: 'workflow_dispatch'\n"
-	  << "    })\n"
-	  << "  })\n"
-	  << "  .then(r => r.json())\n"
-	  << "  .then(d => {\n"
-	  << "    setTimeout(() => { window.location.reload(); }, 600);\n"
-	  << "  })\n"
-	  << "  .catch(e => {\n"
-	  << "    alert('Workflow dispatch error: ' + e);\n"
-	  << "    if(btn) btn.disabled = false;\n"
-	  << "  });\n"
-	  << "}\n"
-	  << "</script>\n";
+	  << "</div>\n";
 	return h;
 }
 
 String GitHubPlatformService::RenderActionsCatalog(const String& owner, const String& repo, const String& category, const String& search_q)
 {
 	Vector<WorkflowTemplate> templates = GetWorkflowTemplates(owner, repo);
+	String repo_base = GHRepoRoute(owner, repo);
 	String cat = category;
 	if(cat.IsEmpty()) cat = "all";
 
@@ -1053,11 +946,11 @@ String GitHubPlatformService::RenderActionsCatalog(const String& owner, const St
 	  << "\n"
 	  << "  <!-- Category Nav Pills -->\n"
 	  << "  <div style=\"display:flex; gap:8px; flex-wrap:wrap; align-items:center;\">\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" class=\"wf-btn" << (cat == "all" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">All</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=continuous-integration\" class=\"wf-btn" << (cat == "continuous-integration" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Continuous integration</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=deployment\" class=\"wf-btn" << (cat == "deployment" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Deployment</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=automation\" class=\"wf-btn" << (cat == "automation" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Automation</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=pages\" class=\"wf-btn" << (cat == "pages" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Pages</a>\n"
+	  << "    <a href=\"" << repo_base << "/actions/new\" class=\"wf-btn" << (cat == "all" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">All</a>\n"
+	  << "    <a href=\"" << repo_base << "/actions/new?category=continuous-integration\" class=\"wf-btn" << (cat == "continuous-integration" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Continuous integration</a>\n"
+	  << "    <a href=\"" << repo_base << "/actions/new?category=deployment\" class=\"wf-btn" << (cat == "deployment" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Deployment</a>\n"
+	  << "    <a href=\"" << repo_base << "/actions/new?category=automation\" class=\"wf-btn" << (cat == "automation" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Automation</a>\n"
+	  << "    <a href=\"" << repo_base << "/actions/new?category=pages\" class=\"wf-btn" << (cat == "pages" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Pages</a>\n"
 	  << "  </div>\n"
 	  << "\n";
 
@@ -1078,7 +971,7 @@ String GitHubPlatformService::RenderActionsCatalog(const String& owner, const St
 			  << "          <div style=\"display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;\">\n"
 			  << "            <div style=\"display:flex; align-items:center; gap:10px;\">\n"
 			  << "              <div style=\"padding:8px; border-radius:6px; background:rgba(0,161,197,0.15); color:var(--wf-accent-focus,#00a1c5);\">\n"
-			  << "                " << VividIcon::Get(t.icon, 22) << "\n"
+			  << "                " << VividIcon::Get(SafeGHIcon(t.icon, "play"), 22) << "\n"
 			  << "              </div>\n"
 			  << "              <div>\n"
 			  << "                <div style=\"font-weight:700; font-size:1.05rem;\">" << EscapeHtml(t.title) << "</div>\n"
@@ -1090,12 +983,12 @@ String GitHubPlatformService::RenderActionsCatalog(const String& owner, const St
 			  << "          <p style=\"font-size:0.86rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:14px;\">" << EscapeHtml(t.description) << "</p>\n"
 			  << "        </div>\n"
 			  << "        <div style=\"display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));\">\n"
-			  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << t.default_filename << "</code></span>\n"
+			  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << EscapeHtml(t.default_filename) << "</code></span>\n"
 			  << "          <div style=\"display:flex; gap:8px;\">\n";
 			if(t.id == "pages-upp-tpp") {
-				h << "            <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=pages-upp-tpp&preview=1\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 10px;\">Preview Site</a>\n";
+				h << "            <a href=\"" << repo_base << "/actions/new?template=pages-upp-tpp&amp;preview=1\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 10px;\">Preview Site</a>\n";
 			}
-			h << "            <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=" << t.id << "\" class=\"wf-btn wf-btn-primary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
+			h << "            <a href=\"" << repo_base << "/actions/new?template=" << UrlEncode(t.id) << "\" class=\"wf-btn wf-btn-primary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
 			  << "          </div>\n"
 			  << "        </div>\n"
 			  << "      </div>\n";
@@ -1120,20 +1013,20 @@ String GitHubPlatformService::RenderActionsCatalog(const String& owner, const St
 		  << "          <div style=\"display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;\">\n"
 		  << "            <div style=\"display:flex; align-items:center; gap:10px;\">\n"
 		  << "              <div style=\"padding:6px; border-radius:6px; background:var(--wf-bg-alt,#1c202f); color:var(--wf-accent-focus,#00a1c5);\">\n"
-		  << "                " << VividIcon::Get(t.icon, 20) << "\n"
+	  << "                " << VividIcon::Get(SafeGHIcon(t.icon, "play"), 20) << "\n"
 		  << "              </div>\n"
 		  << "              <div>\n"
 		  << "                <div style=\"font-weight:700; font-size:0.96rem;\">" << EscapeHtml(t.title) << "</div>\n"
 		  << "                <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\">" << EscapeHtml(t.author) << "</div>\n"
 		  << "              </div>\n"
 		  << "            </div>\n"
-		  << "            <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.7rem;\">" << t.category << "</span>\n"
+	  << "            <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.7rem;\">" << EscapeHtml(t.category) << "</span>\n"
 		  << "          </div>\n"
 		  << "          <p style=\"font-size:0.84rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:12px;\">" << EscapeHtml(t.description) << "</p>\n"
 		  << "        </div>\n"
 		  << "        <div style=\"display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));\">\n"
-		  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << t.default_filename << "</code></span>\n"
-		  << "          <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=" << t.id << "\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
+	  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << EscapeHtml(t.default_filename) << "</code></span>\n"
+	  << "          <a href=\"" << repo_base << "/actions/new?template=" << UrlEncode(t.id) << "\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
 		  << "        </div>\n"
 		  << "      </div>\n";
 	}
@@ -1171,15 +1064,14 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 	  << "  <!-- Top Bar: Breadcrumb + Action Controls -->\n"
 	  << "  <div class=\"wf-card\" style=\"padding:12px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;\">\n"
 	  << "    <div style=\"display:flex; align-items:center; gap:8px; font-size:0.9rem;\">\n"
-	  << "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" style=\"color:var(--wf-accent-link,#00acd3); text-decoration:none; font-weight:600;\">Actions</a>\n"
+	  << "      <a href=\"" << GHRepoRoute(owner, repo) << "/actions/new\" style=\"color:var(--wf-accent-link,#00acd3); text-decoration:none; font-weight:600;\">Actions</a>\n"
 	  << "      <span style=\"color:var(--wf-fg-inactive,#8b919d);\">/</span>\n"
 	  << "      <span style=\"color:var(--wf-fg-inactive,#8b919d);\">.github / workflows /</span>\n"
 	  << "      <input type=\"text\" id=\"workflow-filename\" value=\"" << EscapeHtml(fn) << "\" class=\"wf-input\" style=\"padding:4px 8px; font-size:0.85rem; font-family:monospace; width:220px; background:var(--wf-bg-view,#151d2b); border:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); color:#ffffff; border-radius:4px;\">\n"
 	  << "    </div>\n"
 	  << "    <div style=\"display:flex; gap:10px; align-items:center;\">\n"
-	  << "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.82rem; padding:5px 12px;\">Cancel</a>\n"
-	  << "      <button id=\"btn-commit-workflow\" onclick=\"saveWorkflowFile()\" class=\"wf-btn\" style=\"background:#238636; color:#ffffff; font-weight:600; font-size:0.82rem; padding:6px 16px; border:none; border-radius:6px; cursor:pointer;\">"
-	  << VividIcon::Get("check", 14) << " Commit changes...</button>\n"
+	  << "      <a href=\"" << GHRepoRoute(owner, repo) << "/actions/new\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.82rem; padding:5px 12px;\">Cancel</a>\n"
+	  << "      <span class=\"wf-badge wf-badge-neutral\">External workflow writes are disabled</span>\n"
 	  << "    </div>\n"
 	  << "  </div>\n"
 	  << "\n"
@@ -1211,17 +1103,20 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 	  << "        <div style=\"font-size:0.78rem; font-weight:700; color:var(--wf-fg-inactive,#8b919d); margin-bottom:8px; text-transform:uppercase;\">Featured Actions</div>\n"
 	  << "        <div style=\"display:flex; flex-direction:column; gap:8px;\">\n";
 
+	int action_index = 0;
 	for(const MarketplaceAction& a : market_actions) {
 		h << "          <div class=\"wf-marketplace-item\" style=\"padding:10px; border-radius:6px; background:var(--wf-bg-alt,#1c202f); border:1px solid var(--wf-border-color,rgba(0,161,197,0.15));\">\n"
 		  << "            <div style=\"display:flex; justify-content:space-between; align-items:flex-start;\">\n"
 		  << "              <div>\n"
 		  << "                <div style=\"font-weight:700; font-size:0.88rem; color:#ffffff;\">" << EscapeHtml(a.name) << "</div>\n"
-		  << "                <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\">by " << EscapeHtml(a.author) << " &middot; " << a.version << " &middot; &#9733; " << a.stars << "</div>\n"
+		  << "                <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\">by " << EscapeHtml(a.author) << " &middot; " << EscapeHtml(a.version) << " &middot; &#9733; " << a.stars << "</div>\n"
 		  << "              </div>\n"
-		  << "              <button onclick=\"insertActionSnippet(" << AsCString(a.yaml_snippet) << ")\" class=\"wf-btn wf-btn-secondary\" style=\"padding:3px 8px; font-size:0.75rem;\">Insert</button>\n"
+		  << "              <button type=\"button\" data-snippet-id=\"" << action_index << "\" class=\"wf-btn wf-btn-secondary\" style=\"padding:3px 8px; font-size:0.75rem;\">Insert</button>\n"
+		  << "              <textarea id=\"action-snippet-" << action_index << "\" hidden>" << EscapeHtml(a.yaml_snippet) << "</textarea>\n"
 		  << "            </div>\n"
 		  << "            <div style=\"font-size:0.8rem; color:var(--wf-fg-normal,#d3dae3); margin-top:4px; line-height:1.3;\">" << EscapeHtml(a.description) << "</div>\n"
 		  << "          </div>\n";
+		action_index++;
 	}
 
 	h << "        </div>\n"
@@ -1285,53 +1180,17 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 	  << "    setTimeout(() => { toast.style.display = 'none'; }, 2200);\n"
 	  << "  }\n"
 	  << "}\n"
+	  << "document.addEventListener('click', function(e) {\n"
+	  << "  let btn = e.target.closest('[data-snippet-id]');\n"
+	  << "  if(!btn) return;\n"
+	  << "  let src = document.getElementById('action-snippet-' + btn.getAttribute('data-snippet-id'));\n"
+	  << "  if(src) insertActionSnippet(src.value);\n"
+	  << "});\n"
 	  << "function filterMarketplace(q) {\n"
 	  << "  q = (q || '').toLowerCase();\n"
 	  << "  document.querySelectorAll('.wf-marketplace-item').forEach(el => {\n"
 	  << "    let t = el.innerText.toLowerCase();\n"
 	  << "    el.style.display = (!q || t.includes(q)) ? 'block' : 'none';\n"
-	  << "  });\n"
-	  << "}\n"
-	  << "function saveWorkflowFile() {\n"
-	  << "  let btn = document.getElementById('btn-commit-workflow');\n"
-	  << "  let fn = document.getElementById('workflow-filename').value.trim();\n"
-	  << "  let yaml = document.getElementById('workflow-editor-yaml').value;\n"
-	  << "  if(!fn) { alert('Filename cannot be empty'); return; }\n"
-	  << "  btn.innerText = 'Committing...';\n"
-	  << "  btn.disabled = true;\n"
-	  << "  fetch('/api/gh/workflows/save', {\n"
-	  << "    method: 'POST',\n"
-	  << "    headers: { 'Content-Type': 'application/json' },\n"
-	  << "    body: JSON.stringify({\n"
-	  << "      owner: '" << owner << "',\n"
-	  << "      repo: '" << repo << "',\n"
-	  << "      filename: fn,\n"
-	  << "      content: yaml\n"
-	  << "    })\n"
-	  << "  })\n"
-	  << "  .then(r => r.json())\n"
-	  << "  .then(data => {\n"
-	  << "    if(data.status === 'ok') {\n"
-	  << "      btn.innerText = 'Committed!';\n"
-	  << "      btn.style.background = '#0969da';\n"
-	  << "      let toast = document.getElementById('workflow-toast');\n"
-	  << "      if(toast) {\n"
-	  << "        toast.style.display = 'block';\n"
-	  << "        toast.innerText = 'Workflow successfully committed to ' + data.path + '!';\n"
-	  << "      }\n"
-	  << "      setTimeout(() => {\n"
-	  << "        window.location.href = '/repo/" << owner << "/" << repo << "?tab=actions';\n"
-	  << "      }, 1200);\n"
-	  << "    } else {\n"
-	  << "      alert('Error saving workflow: ' + (data.message || 'unknown error'));\n"
-	  << "      btn.innerText = 'Commit changes...';\n"
-	  << "      btn.disabled = false;\n"
-	  << "    }\n"
-	  << "  })\n"
-	  << "  .catch(err => {\n"
-	  << "    alert('Failed to save workflow: ' + err);\n"
-	  << "    btn.innerText = 'Commit changes...';\n"
-	  << "    btn.disabled = false;\n"
 	  << "  });\n"
 	  << "}\n"
 	  << "</script>\n";
@@ -1341,12 +1200,25 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 
 String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 {
-	String full_tpp_dir = AppendFileName(GetHomeDirFile("Dev/ai-upp"), tpp_rel_dir);
+	String root = GetDevDir();
+	if(root.IsEmpty() || !SafeGHRelativePath(tpp_rel_dir))
+		return "<div class=\"wf-alert wf-alert-warning\">Documentation preview unavailable: configure DEV_DIR and a safe relative directory.</div>";
+
+	String full_tpp_dir = root;
+	Vector<String> path_parts = Split(tpp_rel_dir, '/');
+	for(const String& part : path_parts) {
+		full_tpp_dir = AppendFileName(full_tpp_dir, part);
+		if(IsSymlinkPath(full_tpp_dir))
+			return "<div class=\"wf-alert wf-alert-warning\">Documentation preview unavailable: symbolic links are not followed.</div>";
+	}
+	if(!DirectoryExists(full_tpp_dir))
+		return "<div class=\"wf-alert wf-alert-warning\">Documentation preview unavailable: configured directory was not found.</div>";
+
 	Vector<String> files;
 	Vector<String> titles;
 	FindFile ff(AppendFileName(full_tpp_dir, "*.tpp"));
 	while(ff) {
-		if(ff.IsFile()) {
+		if(ff.IsFile() && !IsSymlinkPath(ff.GetPath())) {
 			files.Add(ff.GetPath());
 			String tit;
 			ExtractTppText(ff.GetPath(), tit);
@@ -1361,10 +1233,10 @@ String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 	  << "  <div style=\"background:#003366; color:#ffffff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;\">\n"
 	  << "    <div style=\"display:flex; align-items:center; gap:12px;\">\n"
 	  << "      <span style=\"font-size:1.3rem; font-weight:800; letter-spacing:0.5px;\">Ultimate++</span>\n"
-	  << "      <span style=\"font-size:0.95rem; color:#8ab4f8;\">Documentation &middot; " << tpp_rel_dir << "</span>\n"
+	  << "      <span style=\"font-size:0.95rem; color:#8ab4f8;\">Documentation &middot; " << EscapeHtml(tpp_rel_dir) << "</span>\n"
 	  << "    </div>\n"
 	  << "    <div style=\"display:flex; gap:10px;\">\n"
-	  << "      <a href=\"/repo/SeppoPakonen/ai-upp-priv/actions/new?template=pages-upp-tpp\" class=\"wf-btn\" style=\"background:#ffffff; color:#003366; font-weight:600; padding:4px 12px; font-size:0.8rem; text-decoration:none;\">"
+	  << "      <a href=\"/repo?tab=actions\" class=\"wf-btn\" style=\"background:#ffffff; color:#003366; font-weight:600; padding:4px 12px; font-size:0.8rem; text-decoration:none;\">"
 	  << VividIcon::Get("arrow-left", 14) << " Back to Workflow Editor</a>\n"
 	  << "    </div>\n"
 	  << "  </div>\n"
@@ -1389,14 +1261,12 @@ String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 
 	for(int i = 0; i < files.GetCount(); i++) {
 		String tit = titles[i];
-		String qtf = ExtractTppText(files[i], tit);
-		String body_html = QtfToReadableHtml(qtf);
+		String source = LoadFile(files[i]);
 		h << "      <div class=\"tpp-topic-pane\" id=\"tpp-pane-" << i << "\" style=\"display:" << (i == 0 ? "block" : "none") << ";\">\n"
-		  << "        <div style=\"font-size:0.82rem; color:#57606a; margin-bottom:6px;\">" << tpp_rel_dir << " / " << GetFileName(files[i]) << "</div>\n"
+		  << "        <div style=\"font-size:0.82rem; color:#57606a; margin-bottom:6px;\">" << EscapeHtml(tpp_rel_dir) << " / " << EscapeHtml(GetFileName(files[i])) << "</div>\n"
 		  << "        <h1 style=\"font-size:1.6rem; font-weight:700; border-bottom:1px solid #d0d7de; padding-bottom:8px; margin-bottom:16px; color:#1f2328;\">" << EscapeHtml(tit) << "</h1>\n"
-		  << "        <div class=\"tpp-rendered-body\" style=\"font-size:0.95rem; color:#1f2328; line-height:1.6;\">\n"
-		  << body_html << "\n"
-		  << "        </div>\n"
+		  << "        <pre class=\"tpp-source\" style=\"font-size:0.9rem; color:#1f2328; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere;\">"
+		  << EscapeHtml(source) << "</pre>\n"
 		  << "      </div>\n";
 	}
 
@@ -1420,337 +1290,84 @@ String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 Vector<ValueMap> GitHubPlatformService::GetLiveActions(const String& owner, const String& repo)
 {
 	Vector<ValueMap> list;
-	{
-		Mutex::Lock __(sRunLock);
-		for(const ValueMap& r : sCustomRuns) {
-			list.Add(r);
-		}
-	}
-	String target = owner + "/" + repo;
-	String cmd = "gh run list -R " + target + " --limit 15 --json id,name,status,conclusion,headBranch,createdAt,event 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap run;
-			run.Set("id", (int64)m["id"]);
-			run.Set("name", (String)m["name"]);
-			run.Set("status", (String)m["status"]);
-			run.Set("conclusion", (String)m["conclusion"]);
-			run.Set("branch", (String)m["headBranch"]);
-			run.Set("created_at", ((String)m["createdAt"]).Left(10));
-			run.Set("event", (String)m["event"]);
-			list.Add(run);
-		}
-	}
 	return list;
 }
 
 Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo)
 {
 	Vector<ValueMap> list;
-	String target = owner + "/" + repo;
-	String cmd = "gh pr list -R " + target + " --state all --limit 20 --json number,title,state,author,createdAt,headRefName,baseRefName 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap pr;
-			pr.Set("number", (int)m["number"]);
-			pr.Set("title", (String)m["title"]);
-			pr.Set("state", (String)m["state"]);
-			if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
-				pr.Set("author", (String)m["author"]["login"]);
-			else
-				pr.Set("author", owner);
-
-			pr.Set("created_at", ((String)m["createdAt"]).Left(10));
-			pr.Set("head", (String)m["headRefName"]);
-			pr.Set("base", (String)m["baseRefName"]);
-			list.Add(pr);
-		}
-	}
-
-	// Check local PR store for additional or mocked PRs
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value sv = ParseJSON(LoadFile(store_path));
-		if(sv.Is<ValueArray>()) {
-			ValueArray va = sv;
-			for(int i = 0; i < va.GetCount(); i++) {
-				Value m = va[i];
-				int num = (int)m["number"];
-				bool exists = false;
-				for(int j = 0; j < list.GetCount(); j++) {
-					if((int)list[j]["number"] == num) { exists = true; break; }
-				}
-				if(!exists) {
-					ValueMap pr;
-					pr.Set("number", num);
-					pr.Set("title", (String)m["title"]);
-					pr.Set("state", (String)m["state"]);
-					Value author = m["author"];
-					pr.Set("author", author.Is<ValueMap>() && !author["login"].IsNull() ? (String)author["login"] : owner);
-					pr.Set("created_at", ((String)m["createdAt"]).Left(10));
-					pr.Set("head", (String)m["headRefName"]);
-					pr.Set("base", (String)m["baseRefName"]);
-					list.Add(pr);
-				}
-			}
-		}
-	}
-
-	// Default fallback PR #7 if list is empty
-	if(list.IsEmpty()) {
-		ValueMap pr;
-		pr.Set("number", 7);
-		pr.Set("title", "Add SourceForge template and dynamic platform switcher");
-		pr.Set("state", "OPEN");
-		pr.Set("author", "sblo");
-		pr.Set("created_at", "2026-10-30");
-		pr.Set("head", "feature/platform-parity");
-		pr.Set("base", "master");
-		list.Add(pr);
-	}
 	return list;
 }
 
 ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, const String& repo, int number)
 {
 	ValueMap res;
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr view %d -R %s --json number,title,body,state,author,createdAt,comments,reviews,headRefName,baseRefName 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-	if(val.Is<ValueMap>())
-		return val;
-
-	// Check local PR store
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value sv = ParseJSON(LoadFile(store_path));
-		if(sv.Is<ValueArray>()) {
-			ValueArray va = sv;
-			for(int i = 0; i < va.GetCount(); i++) {
-				Value m = va[i];
-				if((int)m["number"] == number)
-					return m;
-			}
-		}
-	}
-
-	// Default fallback PR #7
-	if(number == 7) {
-		res.Set("number", 7);
-		res.Set("title", "Add SourceForge template and dynamic platform switcher");
-		res.Set("body",
-			"### Pull Request Summary\n"
-			"This PR introduces the complete **SourceForge Platform Parity** tool suite:\n"
-			"- SourceForge template with dual sidebar/full layouts\n"
-			"- Real-time platform switcher cookie (`wf_platform_pref`)\n"
-			"- Wiki CMS with live markdown rendering\n"
-			"- Tickets tracker and discussion forums\n"
-			"- Autonomous SweAgent pair programming workspace\n\n"
-			"### Verification\n"
-			"- Automated Aria Marionette/WebDriver tests 1-51 passing.");
-		res.Set("state", "OPEN");
-		ValueMap author;
-		author.Set("login", "sblo");
-		res.Set("author", author);
-		res.Set("createdAt", "2026-10-30T18:00:00Z");
-		res.Set("headRefName", "feature/platform-parity");
-		res.Set("baseRefName", "master");
-
-		ValueArray comments;
-		ValueMap c1;
-		ValueMap c1_author;
-		c1_author.Set("login", "SeppoPakonen");
-		c1.Set("author", c1_author);
-		c1.Set("createdAt", "2026-10-30T19:30:00Z");
-		c1.Set("body", "Architecture and template integration looks very clean. All 51 Aria scraper tests passed cleanly.");
-		comments.Add(c1);
-		res.Set("comments", comments);
-	}
 	return res;
 }
 
 String GitHubPlatformService::GetPullRequestDiff(const String& owner, const String& repo, int number)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr diff %d -R %s 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	if(!out.IsEmpty())
-		return out;
-
-	// Fallback unified diff for PR #7
-	return
-		"diff --git a/reference/ManagerSkylark/SourceForgePlatform.cpp b/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"index 4d2206b..6b3f97e 100644\n"
-		"--- a/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"+++ b/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"@@ -1264,7 +1264,8 @@ static void RenderSourceForgeView(Http& http, const String& project, const Strin\n"
-		"+    // 13. SweAgent Pair View (native embedded, zero iframe)\n"
-		"+    WebChatView::RenderSnippet();\n"
-		"diff --git a/reference/ManagerSkylark/GitHubPlatform.cpp b/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"--- a/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"+++ b/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"@@ -853,6 +853,10 @@ static void RenderRepoView(...)\n"
-		"+    // View mode toggle: Markdown Preview vs Numbered Code\n"
-		"+    toggleFileView('preview');\n";
+	return String();
 }
 
 String GitHubPlatformService::CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_pr_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String b = base.IsEmpty() ? "master" : base;
-	String cmd = Format("gh pr create -R %s --title %s --body-file %s --head %s --base %s 2>&1",
-	                    target, AsCString(title), AsCString(tmp_file), AsCString(head), AsCString(b));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-
-	// Persist to local store so it is always immediately queryable
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	RealizePath(store_path);
-	ValueArray prs;
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) prs = v;
-	}
-	int new_num = 700 + prs.GetCount() + 1;
-	ValueMap np;
-	np.Set("number", new_num);
-	np.Set("title", title);
-	np.Set("body", body);
-	np.Set("state", "OPEN");
-	ValueMap auth; auth.Set("login", "SeppoPakonen");
-	np.Set("author", auth);
-	np.Set("createdAt", Format("%`", GetSysDate()));
-	np.Set("headRefName", head);
-	np.Set("baseRefName", b);
-	prs.Add(np);
-	SaveFile(store_path, AsJSON(prs, true));
-
-	return TrimBoth(out.IsEmpty() ? ("https://github.com/" + target + "/pull/" + AsString(new_num)) : out);
+	return "disabled";
 }
 
 String GitHubPlatformService::MergePullRequest(const String& owner, const String& repo, int number)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr merge %d -R %s --merge 2>&1", number, target);
-	String out = Sys("sh", {"-c", cmd});
-
-	// Update local store state if present
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					m.Set("state", "MERGED");
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Merged successfully" : out);
+	return "disabled";
 }
 
 String GitHubPlatformService::ClosePullRequest(const String& owner, const String& repo, int number)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr close %d -R %s 2>&1", number, target);
-	String out = Sys("sh", {"-c", cmd});
-
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					m.Set("state", "CLOSED");
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Closed successfully" : out);
+	return "disabled";
 }
 
 String GitHubPlatformService::AddPullRequestComment(const String& owner, const String& repo, int number, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_pr_comment_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh pr comment %d -R %s --body-file %s 2>&1",
-	                    number, target, AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					ValueArray comms = m["comments"];
-					ValueMap c;
-					ValueMap a; a.Set("login", "SeppoPakonen");
-					c.Set("author", a);
-					c.Set("createdAt", Format("%`", GetSysDate()));
-					c.Set("body", body);
-					comms.Add(c);
-					m.Set("comments", comms);
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Comment added" : out);
+	return "disabled";
 }
 
 Vector<LocalRepoInfo> GitHubPlatformService::GetRepositories(const String& owner)
 {
 	Vector<LocalRepoInfo> list;
 	String dev_dir = GetDevDir();
+	if(dev_dir.IsEmpty() || (!owner.IsEmpty() && !SafeGHComponent(owner))) return list;
 
 	FindFile ff(AppendFileName(dev_dir, "*"));
+	int entries = 0;
 	while(ff) {
+		if(entries++ >= DataStore::MAX_FILES)
+			break;
+		if(ff.IsSymLink()) {
+			ff.Next();
+			continue;
+		}
 		if(ff.IsFolder()) {
 			String repo_path = ff.GetPath();
+			String normalized_repo = NormalizePath(repo_path);
+			String normalized_root = NormalizePath(dev_dir);
+			if(!normalized_repo.StartsWith(normalized_root + DIR_SEP)) {
+				ff.Next();
+				continue;
+			}
 			String git_dir = AppendFileName(repo_path, ".git");
-			if(DirectoryExists(git_dir)) {
+			if(!IsSymlinkPath(git_dir) && DirectoryExists(git_dir)) {
 				LocalRepoInfo info;
 				info.name = ff.GetName();
 				info.path = repo_path;
 				info.owner = owner;
 
-				String head = LoadFile(AppendFileName(git_dir, "HEAD"));
+				String head_path = AppendFileName(git_dir, "HEAD");
+				String head;
+				if(!IsSymlinkPath(head_path) && GetFileLength(head_path) > 0 && GetFileLength(head_path) <= 4096)
+					head = LoadFile(head_path);
 				if(head.StartsWith("ref: refs/heads/"))
 					info.branch = TrimBoth(head.Mid(16));
 				else
-					info.branch = "master";
+					info.branch.Clear();
 
 				if(FileExists(AppendFileName(repo_path, info.name + ".upp")) || DirectoryExists(AppendFileName(repo_path, "uppsrc")))
 					info.language = "C++";
@@ -1764,7 +1381,7 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetRepositories(const String& owner
 					info.language = "C++";
 
 				String desc_file = AppendFileName(git_dir, "description");
-				if(FileExists(desc_file)) {
+				if(FileExists(desc_file) && !IsSymlinkPath(desc_file) && GetFileLength(desc_file) <= 4096) {
 					String d = TrimBoth(LoadFile(desc_file));
 					if(!d.StartsWith("Unnamed repository"))
 						info.description = d;
@@ -1787,78 +1404,50 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetRepositories(const String& owner
 LocalRepoInfo GitHubPlatformService::GetRepo(const String& owner, const String& repo)
 {
 	LocalRepoInfo info;
+	if(!SafeGHComponent(owner) || !SafeGHComponent(repo))
+		return info;
+	String root = GetDevDir();
+	if(root.IsEmpty()) return info;
 	info.owner = owner;
 	info.name = repo;
-	info.path = AppendFileName(GetDevDir(), repo);
-	if(!DirectoryExists(info.path) && repo == "ai-upp-priv") {
-		String alt = AppendFileName(GetDevDir(), "ai-upp");
-		if(DirectoryExists(alt))
-			info.path = alt;
-	}
-	info.branch = "master";
-
-	if(DirectoryExists(info.path)) {
-		String git_dir = AppendFileName(info.path, ".git");
-		if(DirectoryExists(git_dir)) {
-			String head = LoadFile(AppendFileName(git_dir, "HEAD"));
-			if(head.StartsWith("ref: refs/heads/"))
-				info.branch = TrimBoth(head.Mid(16));
-
-			String cmd = "git -C \"" + info.path + "\" log -1 --format=\"%h|%an|%cr|%s\" 2>/dev/null";
-			String out = Sys("sh", {"-c", cmd});
-			Vector<String> parts = Split(TrimBoth(out), '|');
-			if(parts.GetCount() >= 4) {
-				info.last_commit_hash = parts[0];
-				info.last_commit_author = parts[1];
-				info.last_commit_time = parts[2];
-				info.last_commit_msg = parts[3];
-			}
-		}
-	} else {
-		ValueMap sc = LoadScrapedData(owner, repo);
-		if(!sc.IsEmpty()) {
-			ValueMap ov = sc["overview"];
-			info.branch = ov["branch"];
-			info.description = ov["description"];
-			info.is_private = ov["is_private"];
-		}
-	}
-
+	info.path = AppendFileName(root, repo);
+	if(IsSymlinkPath(info.path)) return LocalRepoInfo();
+	if(!NormalizePath(info.path).StartsWith(NormalizePath(root) + DIR_SEP)) return LocalRepoInfo();
+	if(!DirectoryExists(info.path))
+		return LocalRepoInfo();
+	String git_dir = AppendFileName(info.path, ".git");
+	if(IsSymlinkPath(git_dir) || !DirectoryExists(git_dir))
+		return LocalRepoInfo();
+	String head_path = AppendFileName(git_dir, "HEAD");
+	String head;
+	if(!IsSymlinkPath(head_path) && GetFileLength(head_path) > 0 && GetFileLength(head_path) <= 4096)
+		head = LoadFile(head_path);
+	if(head.StartsWith("ref: refs/heads/"))
+		info.branch = TrimBoth(head.Mid(16));
 	return info;
 }
 
 Vector<String> GitHubPlatformService::GetBranches(const String& repo_path)
 {
-	Vector<String> branches;
-	if(DirectoryExists(repo_path)) {
-		String out = Sys("sh", {"-c", "git -C \"" + repo_path + "\" branch --format=\"%(refname:short)\" 2>/dev/null"});
-		Vector<String> lines = Split(TrimBoth(out), '\n');
-		for(const String& l : lines) {
-			String b = TrimBoth(l);
-			if(!b.IsEmpty())
-				branches.Add(b);
-		}
-	}
-	if(branches.IsEmpty())
-		branches.Add("master");
-	return branches;
+	(void)repo_path;
+	return Vector<String>(); // branch evidence must be imported as bounded records
 }
 
 Vector<ValueMap> GitHubPlatformService::GetTree(const String& repo_path, const String& subpath)
 {
 	Vector<ValueMap> list;
+	// Raw traversal is disabled until canonical symlink containment is available.
+	return list;
+#if 0
 	String full_dir = repo_path;
-	if(!subpath.IsEmpty())
-		full_dir = AppendFileName(repo_path, subpath);
-
+	if(!subpath.IsEmpty()) full_dir = AppendFileName(repo_path, subpath);
 	if(DirectoryExists(full_dir)) {
 		FindFile ff(AppendFileName(full_dir, "*"));
 		Vector<String> dirs, files;
 		while(ff) {
 			String n = ff.GetName();
 			if(n != ".git" && n != "_out" && n != "tmp") {
-				if(ff.IsFolder()) dirs.Add(n);
-				else files.Add(n);
+				if(ff.IsFolder()) dirs.Add(n); else files.Add(n);
 			}
 			ff.Next();
 		}
@@ -1886,49 +1475,19 @@ Vector<ValueMap> GitHubPlatformService::GetTree(const String& repo_path, const S
 			list.Add(m);
 		}
 	}
-	return list;
+#endif
 }
 
 ValueMap GitHubPlatformService::GetBlob(const String& repo_path, const String& filepath)
 {
-	ValueMap res;
-	String full = AppendFileName(repo_path, filepath);
-	if(FileExists(full)) {
-		String c = LoadFile(full);
-		int lines = 1;
-		for(int i = 0; i < c.GetLength(); i++)
-			if(c[i] == '\n') lines++;
-		res.Set("content", c);
-		res.Set("lines", lines);
-		res.Set("size", (int64)c.GetLength());
-		res.Set("size_str", FormatFileSize(c.GetLength()));
-		res.Set("name", GetFileName(filepath));
-		res.Set("path", filepath);
-	}
-	return res;
+	return ValueMap();
 }
 
 Vector<ValueMap> GitHubPlatformService::GetCommits(const String& repo_path, int limit)
 {
-	Vector<ValueMap> commits;
-	if(DirectoryExists(repo_path)) {
-		String cmd = "git -C \"" + repo_path + "\" log -n " + AsString(limit) + " --format=\"%h|%an|%ae|%cr|%s\" 2>/dev/null";
-		String out = Sys("sh", {"-c", cmd});
-		Vector<String> lines = Split(TrimBoth(out), '\n');
-		for(const String& l : lines) {
-			Vector<String> p = Split(TrimBoth(l), '|');
-			if(p.GetCount() >= 5) {
-				ValueMap m;
-				m.Set("hash", p[0]);
-				m.Set("author", p[1]);
-				m.Set("email", p[2]);
-				m.Set("time", p[3]);
-				m.Set("msg", p[4]);
-				commits.Add(m);
-			}
-		}
-	}
-	return commits;
+	(void)repo_path;
+	(void)limit;
+	return Vector<ValueMap>(); // commit evidence must be imported as bounded records
 }
 
 String GitHubPlatformService::RenderRepoHeader(const LocalRepoInfo& info)
@@ -1938,12 +1497,12 @@ String GitHubPlatformService::RenderRepoHeader(const LocalRepoInfo& info)
 	  << "  <div class=\"wf-gh-repohead-row\">\n"
 	  << "    <div class=\"wf-gh-title\">\n"
 	  << "      " << VividIcon::Get("git-repo", 20) << "\n"
-	  << "      <a href=\"/user/" << info.owner << "\">" << info.owner << "</a> / "
-	  << "      <strong><a href=\"/repo/" << info.owner << "/" << info.name << "\">" << info.name << "</a></strong>\n"
+	  << "      <a href=\"" << GHUserRoute(info.owner) << "\">" << EscapeHtml(info.owner) << "</a> / "
+	  << "      <strong><a href=\"" << GHRepoRoute(info.owner, info.name) << "\">" << EscapeHtml(info.name) << "</a></strong>\n"
 	  << "      <span class=\"wf-gh-badge\">" << (info.is_private ? "Private" : "Public") << "</span>\n"
 	  << "    </div>\n"
 	  << "    <div class=\"wf-gh-actions\">\n"
-	  << "      <a href=\"/projects/" << info.name << "/\" class=\"wf-gh-btn\" title=\"Switch to SourceForge Platform Style\" style=\"color:#ee6524; font-weight:600; text-decoration:none;\">\n"
+	  << "      <a href=\"/projects/" << UrlEncode(info.name) << "/\" class=\"wf-gh-btn\" title=\"Switch to SourceForge Platform Style\" style=\"color:#ee6524; font-weight:600; text-decoration:none;\">\n"
 	  << "        <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"currentColor\" style=\"vertical-align:-2px;\"><path d=\"M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5\"/></svg>\n"
 	  << "        <span>SourceForge View</span>\n"
 	  << "      </a>\n"
@@ -1963,7 +1522,7 @@ String GitHubPlatformService::RenderRepoHeader(const LocalRepoInfo& info)
 
 String GitHubPlatformService::RenderRepoTabs(const String& owner, const String& repo, const String& active_tab, const LocalRepoInfo& info)
 {
-	String base = "/repo/" + owner + "/" + repo;
+	String base = GHRepoRoute(owner, repo);
 	String h;
 	h << "  <nav class=\"wf-gh-nav-tabs\" aria-label=\"Repository\">\n"
 	  << "    <a href=\"" << base << "?tab=code\" class=\"wf-gh-tab" << (active_tab == "code" ? " active" : "") << "\">"
@@ -1995,202 +1554,23 @@ String GitHubPlatformService::RenderRepoTabs(const String& owner, const String& 
 
 static void RenderUserProfile(Http& http, const String& username)
 {
-	String uname = username.IsEmpty() ? "SeppoPakonen" : username;
-	Vector<LocalRepoInfo> repos = GitHubPlatformService::GetLiveGitHubRepos(uname);
-
-	String active_tab = http["tab"];
-	if(active_tab.IsEmpty()) active_tab = "overview";
-
-	String content;
-
-	// User header / profile subnav
-	String sub_nav;
-	sub_nav << "<div class=\"wf-gh-repohead\">\n"
-	        << "  <div class=\"wf-gh-main-container\" style=\"padding-bottom:0;\">\n"
-	        << "    <nav class=\"wf-gh-nav-tabs\">\n"
-	        << "      <a href=\"/repo/" << uname << "?tab=overview\" class=\"wf-gh-tab" << (active_tab == "overview" ? " active" : "") << "\">" << VividIcon::Get("book-open", 16) << " Overview</a>\n"
-	        << "      <a href=\"/repo/" << uname << "?tab=repositories\" class=\"wf-gh-tab" << (active_tab == "repositories" ? " active" : "") << "\">" << VividIcon::Get("git-repo", 16) << " Repositories <span class=\"wf-gh-counter\">" << repos.GetCount() << "</span></a>\n"
-	        << "      <a href=\"/repo/" << uname << "?tab=projects\" class=\"wf-gh-tab" << (active_tab == "projects" ? " active" : "") << "\">" << VividIcon::Get("layout-dashboard", 16) << " Projects</a>\n"
-	        << "      <a href=\"/repo/" << uname << "?tab=packages\" class=\"wf-gh-tab" << (active_tab == "packages" ? " active" : "") << "\">" << VividIcon::Get("package", 16) << " Packages</a>\n"
-	        << "      <a href=\"/repo/" << uname << "?tab=agents\" class=\"wf-gh-tab" << (active_tab == "agents" ? " active" : "") << "\" style=\"color:var(--wf-color-positive, #00aa7f);\">" << VividIcon::Get("robot", 16) << " SweAgent Workspace</a>\n"
-	        << "    </nav>\n"
-	        << "  </div>\n"
-	        << "</div>\n";
-
-	if(active_tab == "overview") {
-		content
-			<< "<div style=\"margin-bottom:1.5rem;\">\n"
-			<< "  <h3 style=\"font-size:1rem; font-weight:600; margin-bottom:12px;\">Pinned Repositories</h3>\n"
-			<< "  <div class=\"wf-grid wf-grid-2\" style=\"gap:16px;\">\n";
-
-		const char* pinned_names[] = { "ai-upp-priv", "Manager", "nes-recompiled", "AR-AirHockey", "PulseVideoGen", "Shaders" };
-		for(int i = 0; i < __countof(pinned_names); i++) {
-			LocalRepoInfo r = GitHubPlatformService::GetRepo(uname, pinned_names[i]);
-			content
-				<< "    <div class=\"wf-card\" style=\"margin-bottom:0;\">\n"
-				<< "      <div class=\"wf-card-header\">\n"
-				<< "        <a href=\"/repo/" << uname << "/" << r.name << "\" style=\"font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;\">"
-				<< VividIcon::Get("git-repo", 16) << " " << r.name << "</a>\n"
-				<< "        <span class=\"wf-gh-badge\">" << (r.is_private ? "Private" : "Public") << "</span>\n"
-				<< "      </div>\n"
-				<< "      <div class=\"wf-card-body\" style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590);\">\n"
-				<< "        <p>" << (!r.description.IsEmpty() ? r.description : "Ultimate++ Agentic repository in ~/Dev/" + r.name) << "</p>\n"
-				<< "      </div>\n"
-				<< "      <div class=\"wf-card-footer\" style=\"font-size:0.78rem;\">\n"
-				<< "        <span><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << r.language << "</span>\n"
-				<< "        <div style=\"display:flex; gap:6px;\">\n"
-				<< "          <a href=\"/repo/" << uname << "/" << r.name << "\" class=\"wf-btn wf-btn-secondary\" style=\"padding:2px 8px; font-size:0.75rem;\">GitHub</a>\n"
-				<< "          <a href=\"/projects/" << r.name << "/\" class=\"wf-btn\" style=\"padding:2px 8px; font-size:0.75rem; background:#ee6524; color:#fff; border-color:#ee6524;\">SourceForge</a>\n"
-				<< "        </div>\n"
-				<< "      </div>\n"
-				<< "    </div>\n";
-		}
-		content << "  </div>\n</div>\n";
-
-		// Contribution activity heatmap
-		content
-			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>2,842 contributions in the last year</span><span class=\"wf-badge wf-badge-emerald\">Active Daily</span></div>\n"
-			<< "  <div class=\"wf-card-body\" style=\"overflow-x:auto;\">\n"
-			<< "    <div style=\"display:grid; grid-template-columns:repeat(52, 12px); gap:3px;\">\n";
-		for(int c = 0; c < 52 * 7; c++) {
-			int intensity = (c * 17 + 3) % 5;
-			const char* col = (intensity == 0) ? "rgba(110,118,129,0.15)" :
-			                  (intensity == 1) ? "#0e4429" :
-			                  (intensity == 2) ? "#006d32" :
-			                  (intensity == 3) ? "#26a641" : "#39d353";
-			content << "<div style=\"width:12px; height:12px; border-radius:2px; background:" << col << ";\" title=\"Commit activity\"></div>";
-		}
-		content << "    </div>\n  </div>\n</div>\n";
-	}
-	else if(active_tab == "repositories") {
-		content
-			<< "<div style=\"margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center;\">\n"
-			<< "  <input type=\"search\" placeholder=\"Find a repository...\" style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.88rem;\">\n"
-			<< "  <span style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590);\">" << repos.GetCount() << " results</span>\n"
-			<< "</div>\n"
-			<< "<div class=\"wf-gh-file-box\">\n";
-		for(int i = 0; i < repos.GetCount(); i++) {
-			const LocalRepoInfo& r = repos[i];
-			content
-				<< "  <div class=\"wf-gh-file-row\" style=\"justify-content:space-between; padding:14px 16px;\">\n"
-				<< "    <div>\n"
-				<< "      <div style=\"display:flex; align-items:center; gap:8px;\">\n"
-				<< "        <a href=\"/repo/" << uname << "/" << r.name << "\" style=\"font-size:1.1rem; font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;\">" << r.name << "</a>\n"
-				<< "        <span class=\"wf-gh-badge\">" << (r.is_private ? "Private" : "Public") << "</span>\n";
-			if(r.stars > 0)
-				content << "        <span style=\"font-size:0.8rem; color:#e3b341;\">★ " << r.stars << "</span>\n";
-			if(r.forks > 0)
-				content << "        <span style=\"font-size:0.8rem; color:#8b949e;\">⑂ " << r.forks << "</span>\n";
-			content
-				<< "      </div>\n"
-				<< "      <p style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">"
-				<< (!r.description.IsEmpty() ? r.description : "~/Dev/" + r.name) << "</p>\n"
-				<< "      <div style=\"display:flex; align-items:center; gap:16px; margin-top:8px; font-size:0.78rem; color:var(--wf-fg-muted,#848d97);\">\n"
-				<< "        <span><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << r.language << "</span>\n"
-				<< "        <span>Updated: " << r.last_commit_time << "</span>\n"
-				<< "      </div>\n"
-				<< "    </div>\n"
-				<< "    <div style=\"display:flex; gap:8px; align-items:center;\">\n"
-				<< "      <a href=\"/repo/" << uname << "/" << r.name << "\" class=\"wf-btn wf-btn-secondary\" style=\"padding:4px 10px; font-size:0.8rem;\">GitHub</a>\n"
-				<< "      <a href=\"/projects/" << r.name << "/\" class=\"wf-btn\" style=\"padding:4px 10px; font-size:0.8rem; background:#ee6524; color:#ffffff; border-color:#ee6524; text-decoration:none;\">SourceForge</a>\n"
-				<< "    </div>\n"
-				<< "  </div>\n";
-		}
-		content << "</div>\n";
-	}
-	else if(active_tab == "projects") {
-		content
-			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Active GitHub Projects &amp; Kanban Boards</span><a href=\"/repo/" << uname << "/ai-upp/projects\" class=\"wf-btn wf-btn-primary\" style=\"font-size:0.75rem;\">Open ai-upp Board</a></div>\n"
-			<< "  <div class=\"wf-card-body\">\n"
-			<< "    <p style=\"color:var(--wf-fg-inactive,#7d8590); margin-bottom:1rem;\">Interactive Project Kanban workflow synchronized with local Manager project states and phases.</p>\n"
-			<< "    <div style=\"display:flex; gap:12px; flex-wrap:wrap;\">\n"
-			<< "      <div style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:1rem; flex:1; min-width:260px;\">\n"
-			<< "        <div style=\"font-weight:700; font-size:1rem; margin-bottom:6px;\"><a href=\"/repo/" << uname << "/ai-upp/projects\">ai-upp Core Delivery</a></div>\n"
-			<< "        <p style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:10px;\">Manager v2 &amp; Skylark Platform parity, Aria scraper integration.</p>\n"
-			<< "        <span class=\"badge-v2\" style=\"background:#00aa7f;\">Active Sprint</span>\n"
-			<< "      </div>\n"
-			<< "    </div>\n"
-			<< "  </div>\n"
-			<< "</div>\n";
-	}
-	else if(active_tab == "packages") {
-		content
-			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Ultimate++ Package Ecosystem</span><span class=\"wf-badge wf-badge-cyan\">uppsrc</span></div>\n"
-			<< "  <div class=\"wf-card-body\">\n"
-			<< "    <p style=\"color:var(--wf-fg-inactive,#7d8590); margin-bottom:1rem;\">Modular U++ assemblies, standard library packages, GUI controls, and network servers.</p>\n"
-			<< "    <div class=\"wf-grid wf-grid-3\">\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>Core</strong><br><small style=\"color:#8b919d;\">Foundational runtime, containers, NTL</small></div>\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>Skylark</strong><br><small style=\"color:#8b919d;\">High performance HTTP/REST server</small></div>\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>WebFramework</strong><br><small style=\"color:#8b919d;\">Multi-theme mega-menu &amp; density engine</small></div>\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>SweAgent</strong><br><small style=\"color:#8b919d;\">OpenRouter autonomous coding agent</small></div>\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>WebChat</strong><br><small style=\"color:#8b919d;\">Interactive streaming pair terminal</small></div>\n"
-			<< "      <div style=\"padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\"><strong>Aria</strong><br><small style=\"color:#8b919d;\">Autonomous browser scraping &amp; test harness</small></div>\n"
-			<< "    </div>\n"
-			<< "  </div>\n"
-			<< "</div>\n";
-	}
-	else if(active_tab == "agents") {
-		content
-			<< "<h2>SweAgent Pair Programmer Workspace</h2>\n"
-			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>SweAgent Integrated Hub</span><span class=\"wf-badge wf-badge-emerald\">Live</span></div>\n"
-			<< "  <div class=\"wf-card-body\">\n"
-			<< "    <p style=\"margin-bottom:1rem;\">Launch pair-programming agent sessions directly for any repository in <code>~/Dev/</code>.</p>\n"
-			<< "    <a href=\"/chat\" class=\"wf-btn wf-btn-primary\">Open Live WebChat</a>\n"
-			<< "  </div>\n"
-			<< "</div>\n";
-	}
-
-	// Sidebar: Profile Card
-	String sidebar;
-	sidebar
-		<< "<div class=\"wf-gh-sidebar\">\n"
-		<< "  <div style=\"display:flex; flex-direction:column; align-items:center; text-align:center;\">\n"
-		<< "    <img src=\"https://avatars.githubusercontent.com/u/9528528?v=4\" alt=\"Seppo Pakonen\" style=\"width:140px; height:140px; border-radius:50%; border:2px solid var(--wf-border-color,#30363d); margin-bottom:16px; object-fit:cover;\">\n"
-		<< "    <h2 style=\"font-size:1.3rem; margin:0;\">Seppo Pakonen</h2>\n"
-		<< "    <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.95rem;\">@" << uname << "</span>\n"
-		<< "  </div>\n"
-		<< "  <p style=\"font-size:0.9rem; line-height:1.4;\">Software Engineer &amp; AI Architect. Creator of Ultimate++, Agentic frameworks and systems.</p>\n"
-		<< "  <div style=\"display:flex; gap:12px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:14px; justify-content:center;\">\n"
-		<< "    <span>" << VividIcon::Get("users", 14) << " <strong>12</strong> followers</span>\n"
-		<< "    <span>&middot;</span>\n"
-		<< "    <span><strong>12</strong> following</span>\n"
-		<< "  </div>\n"
-		<< "  <div class=\"wf-gh-sidebar-section\">\n"
-		<< "    <span class=\"wf-gh-sidebar-title\">Details</span>\n"
-		<< "    <div>" << VividIcon::Get("map-pin", 14) << " Oulu, Finland</div>\n"
-		<< "    <div>" << VividIcon::Get("folder", 14) << " ~/Dev/ (" << repos.GetCount() << " repos)</div>\n"
-		<< "    <div>" << VividIcon::Get("git-repo", 14) << " " << repos.GetCount() << " GitHub Repos</div>\n"
-		<< "  </div>\n"
-		<< "</div>\n";
-
-	NavigationModel nav = ManagerSkylarkApp::BuildNavigation("gh_profile");
-	UserSession sess = SystemAuthService::GetCurrentSession(http);
-
-	PageBuilder pb;
-	pb.Title(uname + " (Seppo Pakonen) - GitHub Platform Parity")
-	  .Brand("GitHub", "/", "octicon-mark-github")
-	  .Navigation(nav)
-	  .NavActions(SystemAuthService::RenderUserMenu(sess))
-	  .Template("github")
-	  .Theme("github-dark")
-	  .Density(DENSITY_COMFORTABLE)
-	  .SubNav(sub_nav)
-	  .Sidebar(sidebar)
-	  .Content(content);
-	ManagerSkylarkApp::AddMarkdownSupport(pb);
-	String html = pb.Build();
-
-	http.ContentType("text/html; charset=utf-8") << html;
+	http.ContentType("text/html; charset=utf-8");
+	http.Response(503, "Service Unavailable");
+	http << "<!doctype html><html><body><p>Configured GitHub profile data is unavailable.</p></body></html>";
 }
 
 static void RenderRepoView(Http& http, const String& owner, const String& repo, const String& deep_path)
 {
+	if(!SafeGHComponent(owner) || !SafeGHComponent(repo)) {
+		http.Response(404, "Repository Not Found") << "Repository not found";
+		return;
+	}
+	if(!deep_path.IsEmpty() && !SafeGHRelativePath(deep_path)) {
+		http.Response(400, "Invalid Repository Path") << "Invalid repository path";
+		return;
+	}
 	if(http["platform"] == "sf") {
-		http.Redirect("/projects/" + repo + "/");
+		http.Redirect("/projects/" + UrlEncode(repo) + "/");
 		return;
 	}
 
@@ -2288,7 +1668,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 	// 1. Code Explorer (Tree & Blob Viewer)
 	// -----------------------------------------------------------------------
 	if(active_tab == "code") {
-		String base_url = "/repo/" + owner + "/" + repo;
+		String base_url = GHRepoRoute(owner, repo);
 		Vector<String> branches = GitHubPlatformService::GetBranches(info.path);
 
 		// Branch Switcher Bar
@@ -2297,23 +1677,23 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:12px;\">\n"
 			<< "  <div style=\"display:flex; align-items:center; gap:8px;\">\n"
 			<< "    <div class=\"wf-dropdown\" style=\"position:relative; display:inline-block;\">\n"
-			<< "      <button class=\"wf-gh-btn\" style=\"font-weight:600; font-size:0.85rem;\">" << VividIcon::Get("git-branch", 14) << " " << branch << " &#9662;</button>\n"
+			<< "      <button class=\"wf-gh-btn\" style=\"font-weight:600; font-size:0.85rem;\">" << VividIcon::Get("git-branch", 14) << " " << GitHubPlatformService::EscapeHtml(branch) << " &#9662;</button>\n"
 			<< "    </div>\n";
 
 		// Path breadcrumb
 		branch_bar << "    <nav class=\"wf-breadcrumb\" style=\"font-size:0.9rem; font-weight:600;\">\n"
-		           << "      <a href=\"" << base_url << "\">" << repo << "</a>";
+		           << "      <a href=\"" << base_url << "\">" << GitHubPlatformService::EscapeHtml(repo) << "</a>";
 		if(!file_or_folder.IsEmpty()) {
 			Vector<String> segs = Split(file_or_folder, '/');
 			String accum;
 			for(int i = 0; i < segs.GetCount(); i++) {
 				if(!accum.IsEmpty()) accum << "/";
-				accum << segs[i];
+					accum << segs[i];
 				bool is_last = (i == segs.GetCount() - 1);
 				if(is_last)
-					branch_bar << " / <span style=\"color:var(--wf-fg-normal,#e6edf3);\">" << segs[i] << "</span>";
+					branch_bar << " / <span style=\"color:var(--wf-fg-normal,#e6edf3);\">" << GitHubPlatformService::EscapeHtml(segs[i]) << "</span>";
 				else
-					branch_bar << " / <a href=\"" << base_url << "/tree/" << branch << "/" << accum << "\">" << segs[i] << "</a>";
+					branch_bar << " / <a href=\"" << GHAppendPath(base_url + "/tree", branch + "/" + accum) << "\">" << GitHubPlatformService::EscapeHtml(segs[i]) << "</a>";
 			}
 		}
 		branch_bar << "    </nav>\n"
@@ -2338,9 +1718,9 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				<< "<div class=\"wf-gh-file-box\">\n"
 				<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
 				<< "    <div style=\"font-size:0.85rem; color:var(--wf-fg-muted,#848d97);\">\n"
-				<< "      <strong>" << GetFileName(file_or_folder) << "</strong> &middot; "
+				<< "      <strong>" << GitHubPlatformService::EscapeHtml(GetFileName(file_or_folder)) << "</strong> &middot; "
 				<< "      <span>" << line_count << " lines</span> &middot; "
-				<< "      <span>" << size_str << "</span>\n"
+				<< "      <span>" << GitHubPlatformService::EscapeHtml(size_str) << "</span>\n"
 				<< "    </div>\n"
 				<< "    <div style=\"display:flex; gap:6px; align-items:center;\">\n";
 
@@ -2353,16 +1733,15 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			}
 
 			content
-				<< "      <a href=\"/raw/" << owner << "/" << repo << "/" << file_or_folder << "\" class=\"wf-gh-btn\" target=\"_blank\">Raw</a>\n"
+				<< "      <a href=\"" << GHAppendPath("/raw/" + UrlEncode(owner) + "/" + UrlEncode(repo), file_or_folder) << "\" class=\"wf-gh-btn\" target=\"_blank\">Raw</a>\n"
 				<< "      <button class=\"wf-gh-btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('wf-blob-raw-md') ? document.getElementById('wf-blob-raw-md').value : document.getElementById('wf-blob-code').innerText); alert('Copied raw contents to clipboard!');\">Copy</button>\n"
 				<< "    </div>\n"
 				<< "  </div>\n";
 
 			if(is_markdown) {
 				content
-					<< "  <div id=\"wf-blob-preview-box\" class=\"markdown-render-box\" style=\"padding:1.5rem; background:var(--wf-bg-view,#0d1117); border-radius:0 0 6px 6px;\">\n"
-					<< "    <textarea id=\"wf-blob-raw-md\" class=\"raw-markdown\" style=\"display:none;\">" << DeHtml(file_content) << "</textarea>\n"
-					<< "    <div id=\"wf-blob-preview\" class=\"markdown-body\"></div>\n"
+					<< "  <div id=\"wf-blob-preview-box\" style=\"padding:1.5rem; background:var(--wf-bg-view,#0d1117); border-radius:0 0 6px 6px;\">\n"
+					<< "    <pre id=\"wf-blob-preview\" style=\"white-space:pre-wrap;\">" << GitHubPlatformService::EscapeHtml(file_content) << "</pre>\n"
 					<< "  </div>\n";
 			}
 
@@ -2392,12 +1771,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				<< "<div class=\"wf-gh-file-box\">\n"
 				<< "  <div class=\"wf-gh-file-header\">\n"
 				<< "    <div style=\"display:flex; align-items:center; gap:10px;\">\n"
-				<< "      <span style=\"font-weight:600;\">" << (!info.last_commit_author.IsEmpty() ? info.last_commit_author : "sblo") << "</span>\n"
-				<< "      <span style=\"color:var(--wf-fg-inactive,#7d8590);\">" << (!info.last_commit_msg.IsEmpty() ? info.last_commit_msg : "Update repository files and documentation") << "</span>\n"
+				<< "      <span style=\"font-weight:600;\">" << GitHubPlatformService::EscapeHtml(!info.last_commit_author.IsEmpty() ? info.last_commit_author : "Repository contributor") << "</span>\n"
+				<< "      <span style=\"color:var(--wf-fg-inactive,#7d8590);\">" << GitHubPlatformService::EscapeHtml(!info.last_commit_msg.IsEmpty() ? info.last_commit_msg : "Repository files and documentation") << "</span>\n"
 				<< "    </div>\n"
 				<< "    <div style=\"color:var(--wf-fg-muted,#848d97); font-size:0.78rem;\">\n"
-				<< "      <code>" << (!info.last_commit_hash.IsEmpty() ? info.last_commit_hash : "master") << "</code> &middot; "
-				<< (!info.last_commit_time.IsEmpty() ? info.last_commit_time : "recent") << "\n"
+				<< "      <code>" << GitHubPlatformService::EscapeHtml(!info.last_commit_hash.IsEmpty() ? info.last_commit_hash : "master") << "</code> &middot; "
+				<< GitHubPlatformService::EscapeHtml(!info.last_commit_time.IsEmpty() ? info.last_commit_time : "recent") << "\n"
 				<< "    </div>\n"
 				<< "  </div>\n";
 
@@ -2406,10 +1785,10 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				int slash = file_or_folder.ReverseFind('/');
 				String parent_url = base_url;
 				if(slash > 0)
-					parent_url << "/tree/" << branch << "/" << file_or_folder.Left(slash);
+					parent_url = GHAppendPath(base_url + "/tree", branch + "/" + file_or_folder.Left(slash));
 				content
 					<< "  <div class=\"wf-gh-file-row\">\n"
-					<< "    <span class=\"wf-gh-file-name\">" << VividIcon::Get("corner-left-up", 16) << " <a href=\"" << parent_url << "\">..</a></span>\n"
+					<< "    <span class=\"wf-gh-file-name\">" << VividIcon::Get("corner-left-up", 16) << " <a href=\"" << GitHubPlatformService::EscapeHtml(parent_url) << "\">..</a></span>\n"
 					<< "    <span class=\"wf-gh-file-msg\"></span>\n"
 					<< "    <span class=\"wf-gh-file-age\"></span>\n"
 					<< "  </div>\n";
@@ -2422,16 +1801,16 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				String rel_path = e["path"];
 				String link_url;
 				if(type == "dir")
-					link_url = base_url + "/tree/" + branch + "/" + rel_path;
+					link_url = GHAppendPath(base_url + "/tree", branch + "/" + rel_path);
 				else
-					link_url = base_url + "/blob/" + branch + "/" + rel_path;
+					link_url = GHAppendPath(base_url + "/blob", branch + "/" + rel_path);
 
 				content
 					<< "  <div class=\"wf-gh-file-row\">\n"
 					<< "    <span class=\"wf-gh-file-name\">" << VividIcon::Get(type == "dir" ? "folder" : "file-text", 16)
-					<< " <a href=\"" << link_url << "\">" << name << "</a></span>\n"
-					<< "    <span class=\"wf-gh-file-msg\">" << (String)e["msg"] << "</span>\n"
-					<< "    <span class=\"wf-gh-file-age\">" << (String)e["age"] << "</span>\n"
+					<< " <a href=\"" << GitHubPlatformService::EscapeHtml(link_url) << "\">" << GitHubPlatformService::EscapeHtml(name) << "</a></span>\n"
+					<< "    <span class=\"wf-gh-file-msg\">" << GitHubPlatformService::EscapeHtml((String)e["msg"]) << "</span>\n"
+					<< "    <span class=\"wf-gh-file-age\">" << GitHubPlatformService::EscapeHtml((String)e["age"]) << "</span>\n"
 					<< "  </div>\n";
 			}
 			content << "</div>\n";
@@ -2444,14 +1823,13 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			else if(file_or_folder.IsEmpty() && !scraped.IsEmpty() && !((String)scraped["overview"]["readme_snippet"]).IsEmpty())
 				readme_body = scraped["overview"]["readme_snippet"];
 			else if(file_or_folder.IsEmpty())
-				readme_body = "### " + info.name + "\n\nRepository mirrored from `" + info.path + "`.\nAutonomous SweAgent and Aria automation enabled.";
+				readme_body = "### " + info.name + "\n\nLocal repository documentation is unavailable.";
 
 			if(!readme_body.IsEmpty()) {
 				content
-					<< "<div class=\"wf-gh-readme-box markdown-render-box\">\n"
+					<< "<div class=\"wf-gh-readme-box\">\n"
 					<< "  <div class=\"wf-gh-readme-header\">" << VividIcon::Get("book", 16) << " README.md</div>\n"
-					<< "  <textarea class=\"raw-markdown\" style=\"display:none;\">" << DeHtml(readme_body) << "</textarea>\n"
-					<< "  <div class=\"wf-gh-readme-body markdown-body\"></div>\n"
+					<< "  <pre class=\"wf-gh-readme-body\" style=\"white-space:pre-wrap;\">" << GitHubPlatformService::EscapeHtml(readme_body) << "</pre>\n"
 					<< "</div>\n";
 			}
 		}
@@ -2461,7 +1839,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "<div class=\"wf-gh-sidebar-section\">\n"
 			<< "  <span class=\"wf-gh-sidebar-title\">About</span>\n"
 			<< "  <p style=\"color:var(--wf-fg-inactive,#7d8590);\">"
-			<< (!info.description.IsEmpty() ? info.description : "No description provided.") << "</p>\n"
+			<< GitHubPlatformService::EscapeHtml(!info.description.IsEmpty() ? info.description : "No description provided.") << "</p>\n"
 			<< "  <div>" << VividIcon::Get("activity", 14) << " Activity: <strong>Daily</strong></div>\n"
 			<< "  <div>" << VividIcon::Get("star", 14) << " Stars: <strong>" << info.stars << "</strong></div>\n"
 			<< "  <div>" << VividIcon::Get("eye", 14) << " Watching: <strong>1</strong></div>\n"
@@ -2469,7 +1847,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "</div>\n"
 			<< "<div class=\"wf-gh-sidebar-section\">\n"
 			<< "  <span class=\"wf-gh-sidebar-title\">Languages</span>\n"
-			<< "  <div style=\"font-size:0.85rem;\"><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << info.language << " 100%</div>\n"
+			<< "  <div style=\"font-size:0.85rem;\"><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << GitHubPlatformService::EscapeHtml(info.language) << " 100%</div>\n"
 			<< "</div>\n";
 	}
 	// -----------------------------------------------------------------------
@@ -2479,20 +1857,20 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		Vector<ValueMap> commits = GitHubPlatformService::GetCommits(info.path, 30);
 		content
 			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Commit History &middot; " << branch << "</span><span class=\"wf-badge wf-badge-neutral\">" << commits.GetCount() << " commits</span></div>\n"
+			<< "  <div class=\"wf-card-header\"><span>Commit History &middot; " << GitHubPlatformService::EscapeHtml(branch) << "</span><span class=\"wf-badge wf-badge-neutral\">" << commits.GetCount() << " commits</span></div>\n"
 			<< "  <div class=\"wf-card-body\" style=\"padding:0;\">\n"
 			<< "    <div class=\"wf-gh-file-box\" style=\"border:none; margin:0;\">\n";
 		for(const ValueMap& c : commits) {
 			content
 				<< "      <div class=\"wf-gh-file-row\" style=\"justify-content:space-between; padding:12px 16px;\">\n"
 				<< "        <div>\n"
-				<< "          <div style=\"font-weight:600; color:var(--wf-fg-normal,#ffffff); font-size:0.92rem;\">" << (String)c["msg"] << "</div>\n"
+				<< "          <div style=\"font-weight:600; color:var(--wf-fg-normal,#ffffff); font-size:0.92rem;\">" << GitHubPlatformService::EscapeHtml((String)c["msg"]) << "</div>\n"
 				<< "          <div style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">"
-				<< "            <strong>" << (String)c["author"] << "</strong> committed " << (String)c["time"] << "\n"
+				<< "            <strong>" << GitHubPlatformService::EscapeHtml((String)c["author"]) << "</strong> committed " << GitHubPlatformService::EscapeHtml((String)c["time"]) << "\n"
 				<< "          </div>\n"
 				<< "        </div>\n"
 				<< "        <div>\n"
-				<< "          <code style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); padding:3px 8px; border-radius:4px;\">" << (String)c["hash"] << "</code>\n"
+				<< "          <code style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); padding:3px 8px; border-radius:4px;\">" << GitHubPlatformService::EscapeHtml((String)c["hash"]) << "</code>\n"
 				<< "        </div>\n"
 				<< "      </div>\n";
 		}
@@ -2515,15 +1893,15 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		content
 			<< "<div style=\"margin-bottom:1.5rem;\">\n"
 			<< "  <div style=\"margin-bottom:0.75rem;\">\n"
-			<< "    <a href=\"/repo/" << owner << "/" << repo << "?tab=issues\" class=\"wf-gh-btn\" style=\"font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;\">"
+			<< "    <a href=\"" << GHRepoRoute(owner, repo) << "?tab=issues\" class=\"wf-gh-btn\" style=\"font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;\">"
 			<< VividIcon::Get("chevron-left", 14) << " Back to issues</a>\n"
 			<< "  </div>\n"
 			<< "  <h1 style=\"font-size:1.75rem; font-weight:600; margin:0 0 8px 0; color:var(--wf-fg-normal,#e6edf3);\">"
-			<< DeHtml(is_title) << " <span style=\"color:var(--wf-fg-inactive,#7d8590); font-weight:400;\">#" << issue_num << "</span></h1>\n"
+			<< GitHubPlatformService::EscapeHtml(is_title) << " <span style=\"color:var(--wf-fg-inactive,#7d8590); font-weight:400;\">#" << issue_num << "</span></h1>\n"
 			<< "  <div style=\"display:flex; align-items:center; gap:10px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); flex-wrap:wrap;\">\n"
 			<< "    <span class=\"wf-badge\" style=\"background:" << (is_open ? "#238636" : "#8957e5") << "; color:#ffffff; font-weight:700; padding:4px 10px; border-radius:12px; font-size:0.82rem; display:inline-flex; align-items:center; gap:4px;\">"
 			<< VividIcon::Get(is_open ? "alert-circle" : "check", 14) << " " << (is_open ? "Open" : "Closed") << "</span>\n"
-			<< "    <span><strong>" << is_author << "</strong> opened this issue on " << is_created << "</span>\n"
+			<< "    <span><strong>" << GitHubPlatformService::EscapeHtml(is_author) << "</strong> opened this issue on " << GitHubPlatformService::EscapeHtml(is_created) << "</span>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
 
@@ -2531,12 +1909,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		content
 			<< "<div class=\"wf-gh-file-box\" style=\"margin-bottom:1.5rem;\">\n"
 			<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
-			<< "    <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << is_author << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << is_created << "</span></div>\n"
+			<< "    <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << GitHubPlatformService::EscapeHtml(is_author) << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << GitHubPlatformService::EscapeHtml(is_created) << "</span></div>\n"
 			<< "    <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.75rem;\">Owner</span>\n"
 			<< "  </div>\n"
-			<< "  <div class=\"wf-gh-file-body markdown-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6;\">\n"
-			<< (!is_body.IsEmpty() ? DeHtml(is_body) : "<em>No description provided.</em>") << "\n"
-			<< "  </div>\n"
+			<< "  <pre class=\"wf-gh-file-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6; white-space:pre-wrap;\">\n"
+			<< GitHubPlatformService::EscapeHtml(!is_body.IsEmpty() ? is_body : "No description provided.") << "\n"
+			<< "  </pre>\n"
 			<< "</div>\n";
 
 		// Comments list
@@ -2549,12 +1927,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			content
 				<< "<div class=\"wf-gh-file-box\" style=\"margin-bottom:1.5rem;\">\n"
 				<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
-				<< "    <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << c_author << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << c_time << "</span></div>\n"
+				<< "    <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << GitHubPlatformService::EscapeHtml(c_author) << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << GitHubPlatformService::EscapeHtml(c_time) << "</span></div>\n"
 				<< "    <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.75rem;\">Collaborator</span>\n"
 				<< "  </div>\n"
-				<< "  <div class=\"wf-gh-file-body markdown-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6;\">\n"
-				<< DeHtml(c_body) << "\n"
-				<< "  </div>\n"
+				<< "  <pre class=\"wf-gh-file-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6; white-space:pre-wrap;\">\n"
+				<< GitHubPlatformService::EscapeHtml(c_body) << "\n"
+				<< "  </pre>\n"
 				<< "</div>\n";
 		}
 
@@ -2565,30 +1943,10 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "  <div class=\"wf-card-body\">\n"
 			<< "    <textarea id=\"gh-comment-text\" rows=\"4\" placeholder=\"Leave a comment...\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;\"></textarea>\n"
 			<< "    <div style=\"display:flex; justify-content:flex-end; gap:8px;\">\n"
-			<< "      <button id=\"btn-toggle-issue\" onclick=\"toggleIssueState()\" class=\"wf-btn\" style=\"background:var(--wf-surface,#161b22); color:" << (is_open ? "#f85149" : "#3fb950") << "; border-color:var(--wf-border-color,#30363d); font-size:0.82rem;\">"
-			<< (is_open ? "Close issue" : "Reopen issue") << "</button>\n"
-			<< "      <button id=\"btn-submit-comment\" onclick=\"submitIssueComment()\" class=\"wf-btn wf-btn-positive\" style=\"background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;\">Comment</button>\n"
+			<< "      <span class=\"wf-badge wf-badge-neutral\">External issue changes are disabled</span>\n"
 			<< "    </div>\n"
 			<< "  </div>\n"
-			<< "</div>\n"
-			<< "<script>\n"
-			<< "function submitIssueComment() {\n"
-			<< "  let text = document.getElementById('gh-comment-text').value.trim();\n"
-			<< "  if(!text) return;\n"
-			<< "  fetch('/api/gh/issues/" << owner << "/comment', {\n"
-			<< "    method: 'POST',\n"
-			<< "    headers: {'Content-Type': 'application/json'},\n"
-			<< "    body: JSON.stringify({ repo: '" << repo << "', number: " << issue_num << ", body: text })\n"
-			<< "  }).then(r => r.json()).then(data => { window.location.reload(); });\n"
-			<< "}\n"
-			<< "function toggleIssueState() {\n"
-			<< "  fetch('/api/gh/issues/" << owner << "/toggle', {\n"
-			<< "    method: 'POST',\n"
-			<< "    headers: {'Content-Type': 'application/json'},\n"
-			<< "    body: JSON.stringify({ repo: '" << repo << "', number: " << issue_num << ", close: " << (is_open ? "true" : "false") << " })\n"
-			<< "  }).then(r => r.json()).then(data => { window.location.reload(); });\n"
-			<< "}\n"
-			<< "</script>\n";
+			<< "</div>\n";
 	}
 	else if(active_tab == "issues") {
 		Vector<ValueMap> live_issues = GitHubPlatformService::GetLiveIssues(owner, repo);
@@ -2608,31 +1966,16 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "  </div>\n"
 			<< "</div>\n"
 			<< "<div id=\"new-issue-card\" class=\"wf-card\" style=\"display:none; margin-bottom:1.5rem; border:1px solid var(--wf-accent-focus,#58a6ff);\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Create New Issue in " << owner << "/" << repo << "</span></div>\n"
+			<< "  <div class=\"wf-card-header\"><span>Create New Issue in " << GitHubPlatformService::EscapeHtml(owner) << "/" << GitHubPlatformService::EscapeHtml(repo) << "</span></div>\n"
 			<< "  <div class=\"wf-card-body\">\n"
 			<< "    <input type=\"text\" id=\"new-issue-title\" placeholder=\"Title\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.95rem; font-weight:600; margin-bottom:12px;\">\n"
 			<< "    <textarea id=\"new-issue-body\" rows=\"5\" placeholder=\"Leave a comment / issue description...\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;\"></textarea>\n"
 			<< "    <div style=\"display:flex; justify-content:flex-end; gap:8px;\">\n"
 			<< "      <button onclick=\"document.getElementById('new-issue-card').style.display='none';\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.82rem;\">Cancel</button>\n"
-			<< "      <button id=\"btn-submit-new-issue\" onclick=\"submitNewIssue()\" class=\"wf-btn wf-btn-positive\" style=\"background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;\">Submit new issue</button>\n"
+			<< "      <span class=\"wf-badge wf-badge-neutral\">External issue creation is disabled</span>\n"
 			<< "    </div>\n"
 			<< "  </div>\n"
 			<< "</div>\n"
-			<< "<script>\n"
-			<< "function submitNewIssue() {\n"
-			<< "  let title = document.getElementById('new-issue-title').value.trim();\n"
-			<< "  let body = document.getElementById('new-issue-body').value.trim();\n"
-			<< "  if(!title) { alert('Please enter an issue title'); return; }\n"
-			<< "  fetch('/api/gh/issues/" << owner << "/create', {\n"
-			<< "    method: 'POST',\n"
-			<< "    headers: {'Content-Type': 'application/json'},\n"
-			<< "    body: JSON.stringify({ repo: '" << repo << "', title: title, body: body })\n"
-			<< "  }).then(r => r.json()).then(data => {\n"
-			<< "    if(data.status === 'ok') window.location.reload();\n"
-			<< "    else alert('Error creating issue: ' + (data.error || 'unknown error'));\n"
-			<< "  });\n"
-			<< "}\n"
-			<< "</script>\n"
 			<< "<div class=\"wf-gh-file-box\">\n"
 			<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
 			<< "    <div style=\"display:flex; gap:16px; font-size:0.88rem;\">\n"
@@ -2653,10 +1996,10 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 					<< "    <div>\n"
 					<< "      <div style=\"display:flex; align-items:center; gap:8px;\">\n"
 					<< "        <span style=\"color:" << (is_open ? "#238636" : "#8957e5") << ";\">" << VividIcon::Get(is_open ? "alert-circle" : "check", 16) << "</span>\n"
-					<< "        <a href=\"/repo/" << owner << "/" << repo << "/issues/" << num << "\" style=\"font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;\">" << (String)is["title"] << "</a>\n"
+					<< "        <a href=\"" << GHRepoRoute(owner, repo) << "/issues/" << num << "\" style=\"font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;\">" << GitHubPlatformService::EscapeHtml((String)is["title"]) << "</a>\n"
 					<< "      </div>\n"
 					<< "      <div style=\"font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px; margin-left:24px;\">\n"
-					<< "        #" << num << " opened on " << (String)is["created_at"] << " by <strong>" << (String)is["author"] << "</strong>\n"
+					<< "        #" << num << " opened on " << GitHubPlatformService::EscapeHtml((String)is["created_at"]) << " by <strong>" << GitHubPlatformService::EscapeHtml((String)is["author"]) << "</strong>\n"
 					<< "      </div>\n"
 					<< "    </div>\n"
 					<< "    <div style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.8rem;\">" << VividIcon::Get("message-square", 14) << " " << (int)is["comments"] << "</div>\n"
@@ -2687,15 +2030,15 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		content
 			<< "<div style=\"margin-bottom:1.5rem;\">\n"
 			<< "  <div style=\"margin-bottom:0.75rem;\">\n"
-			<< "    <a href=\"/repo/" << owner << "/" << repo << "/pulls\" class=\"wf-gh-btn\" style=\"font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;\">"
+			<< "    <a href=\"" << GHRepoRoute(owner, repo) << "/pulls\" class=\"wf-gh-btn\" style=\"font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;\">"
 			<< VividIcon::Get("chevron-left", 14) << " Back to pull requests</a>\n"
 			<< "  </div>\n"
 			<< "  <h1 style=\"font-size:1.75rem; font-weight:600; margin:0 0 8px 0; color:var(--wf-fg-normal,#e6edf3);\">"
-			<< DeHtml(pr_title) << " <span style=\"color:var(--wf-fg-inactive,#7d8590); font-weight:400;\">#" << pr_num << "</span></h1>\n"
+			<< GitHubPlatformService::EscapeHtml(pr_title) << " <span style=\"color:var(--wf-fg-inactive,#7d8590); font-weight:400;\">#" << pr_num << "</span></h1>\n"
 			<< "  <div style=\"display:flex; align-items:center; gap:10px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); flex-wrap:wrap;\">\n"
 			<< "    <span class=\"wf-badge\" style=\"background:" << (is_open ? "#238636" : (is_merged ? "#8957e5" : "#f85149")) << "; color:#ffffff; font-weight:700; padding:4px 10px; border-radius:12px; font-size:0.82rem; display:inline-flex; align-items:center; gap:4px;\">"
 			<< VividIcon::Get(is_open ? "git-pull-request" : (is_merged ? "check" : "x"), 14) << " " << (is_open ? "Open" : (is_merged ? "Merged" : "Closed")) << "</span>\n"
-			<< "    <span><strong>" << pr_author << "</strong> wants to merge into <code>" << pr_base << "</code> from <code>" << pr_head << "</code> &middot; opened on " << pr_created << "</span>\n"
+			<< "    <span><strong>" << GitHubPlatformService::EscapeHtml(pr_author) << "</strong> wants to merge into <code>" << GitHubPlatformService::EscapeHtml(pr_base) << "</code> from <code>" << GitHubPlatformService::EscapeHtml(pr_head) << "</code> &middot; opened on " << GitHubPlatformService::EscapeHtml(pr_created) << "</span>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
 
@@ -2709,13 +2052,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		// Conversation Section
 		content
 			<< "<div id=\"pr-convo-section\">\n"
-			<< "  <div class=\"wf-gh-file-box markdown-render-box\" style=\"margin-bottom:1.5rem;\">\n"
+			<< "  <div class=\"wf-gh-file-box\" style=\"margin-bottom:1.5rem;\">\n"
 			<< "    <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
-			<< "      <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << pr_author << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << pr_created << "</span></div>\n"
+			<< "      <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << GitHubPlatformService::EscapeHtml(pr_author) << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << GitHubPlatformService::EscapeHtml(pr_created) << "</span></div>\n"
 			<< "      <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.75rem;\">Author</span>\n"
 			<< "    </div>\n"
-			<< "    <textarea class=\"raw-markdown\" style=\"display:none;\">" << (!pr_body.IsEmpty() ? DeHtml(pr_body) : "No description provided.") << "</textarea>\n"
-			<< "    <div class=\"wf-gh-file-body markdown-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6;\">" << (!pr_body.IsEmpty() ? DeHtml(pr_body) : "<em>No description provided.</em>") << "</div>\n"
+			<< "    <pre class=\"wf-gh-file-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6; white-space:pre-wrap;\">" << GitHubPlatformService::EscapeHtml(!pr_body.IsEmpty() ? pr_body : "No description provided.") << "</pre>\n"
 			<< "  </div>\n";
 
 		// Comments thread
@@ -2726,13 +2068,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			String c_body = c["body"];
 			String c_time = ((String)c["createdAt"]).Left(10);
 			content
-				<< "  <div class=\"wf-gh-file-box markdown-render-box\" style=\"margin-bottom:1.5rem;\">\n"
+				<< "  <div class=\"wf-gh-file-box\" style=\"margin-bottom:1.5rem;\">\n"
 				<< "    <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
-				<< "      <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << c_author << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << c_time << "</span></div>\n"
+				<< "      <div style=\"display:flex; align-items:center; gap:8px;\"><strong>" << GitHubPlatformService::EscapeHtml(c_author) << "</strong> <span style=\"color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;\">commented on " << GitHubPlatformService::EscapeHtml(c_time) << "</span></div>\n"
 				<< "      <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.75rem;\">Reviewer</span>\n"
 				<< "    </div>\n"
-				<< "    <textarea class=\"raw-markdown\" style=\"display:none;\">" << DeHtml(c_body) << "</textarea>\n"
-				<< "    <div class=\"wf-gh-file-body markdown-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6;\">" << DeHtml(c_body) << "</div>\n"
+				<< "    <pre class=\"wf-gh-file-body\" style=\"padding:16px; font-size:0.92rem; line-height:1.6; white-space:pre-wrap;\">" << GitHubPlatformService::EscapeHtml(c_body) << "</pre>\n"
 				<< "  </div>\n";
 		}
 
@@ -2763,11 +2104,9 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				<< "      <span class=\"wf-badge wf-badge-emerald\">Clean branch</span>\n"
 				<< "    </div>\n"
 				<< "    <div class=\"wf-card-body\">\n"
-				<< "      <p style=\"margin-bottom:12px; font-size:0.88rem;\">This branch has no conflicts with the base branch (<code>" << pr_base << "</code>). Merging can be performed automatically.</p>\n"
+				<< "      <p style=\"margin-bottom:12px; font-size:0.88rem;\">This branch has no conflicts with the base branch (<code>" << GitHubPlatformService::EscapeHtml(pr_base) << "</code>). Merging can be performed automatically.</p>\n"
 				<< "      <div style=\"display:flex; gap:10px; align-items:center;\">\n"
-				<< "        <button id=\"btn-merge-pr\" onclick=\"GitHubPlatformUI.mergePR('" << owner << "', '" << repo << "', " << pr_num << ")\" class=\"wf-btn wf-btn-positive\" style=\"background:#238636; border-color:#2ea043; color:#fff; font-weight:600; padding:7px 16px;\">"
-				<< VividIcon::Get("git-pull-request", 15) << " Merge pull request</button>\n"
-				<< "        <button id=\"btn-close-pr\" onclick=\"GitHubPlatformUI.closePR('" << owner << "', '" << repo << "', " << pr_num << ")\" class=\"wf-btn\" style=\"background:var(--wf-surface,#161b22); color:#f85149; border-color:var(--wf-border-color,#30363d); font-size:0.82rem;\">Close pull request</button>\n"
+				<< "        <span class=\"wf-badge wf-badge-neutral\">External merge and close operations are disabled</span>\n"
 				<< "      </div>\n"
 				<< "    </div>\n"
 				<< "  </div>\n";
@@ -2787,7 +2126,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "    <div class=\"wf-card-body\">\n"
 			<< "      <textarea id=\"pr-comment-text\" rows=\"4\" placeholder=\"Leave a review comment on this pull request...\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;\"></textarea>\n"
 			<< "      <div style=\"display:flex; justify-content:flex-end;\">\n"
-			<< "        <button id=\"btn-submit-pr-comment\" onclick=\"GitHubPlatformUI.commentPR('" << owner << "', '" << repo << "', " << pr_num << ")\" class=\"wf-btn wf-btn-positive\" style=\"background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;\">Comment</button>\n"
+			<< "        <span class=\"wf-badge wf-badge-neutral\">External comments are disabled</span>\n"
 			<< "      </div>\n"
 			<< "    </div>\n"
 			<< "  </div>\n"
@@ -2800,7 +2139,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "  <div class=\"wf-card\" style=\"margin-bottom:1.5rem;\">\n"
 			<< "    <div class=\"wf-card-header\" style=\"justify-content:space-between;\">\n"
 			<< "      <span>Showing unified diff for pull request #" << pr_num << "</span>\n"
-			<< "      <span class=\"wf-badge wf-badge-neutral\">git diff " << pr_base << "..." << pr_head << "</span>\n"
+			<< "      <span class=\"wf-badge wf-badge-neutral\">git diff " << GitHubPlatformService::EscapeHtml(pr_base) << "..." << GitHubPlatformService::EscapeHtml(pr_head) << "</span>\n"
 			<< "    </div>\n"
 			<< "    <div class=\"wf-card-body\" style=\"padding:0;\">\n";
 
@@ -2824,7 +2163,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				line_bg = "rgba(56,139,253,0.15)";
 				line_fg = "#79c0ff";
 			}
-			content << "        <div style=\"padding:2px 12px; background:" << line_bg << "; color:" << line_fg << "; white-space:pre;\">" << DeHtml(line) << "</div>\n";
+			content << "        <div style=\"padding:2px 12px; background:" << line_bg << "; color:" << line_fg << "; white-space:pre;\">" << GitHubPlatformService::EscapeHtml(line) << "</div>\n";
 		}
 		content
 			<< "      </div>\n"
@@ -2904,7 +2243,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			<< "    </div>\n"
 			<< "    <div style=\"display:flex; justify-content:flex-end; gap:8px;\">\n"
 			<< "      <button type=\"button\" onclick=\"GitHubPlatformUI.toggleNewPRCard()\" class=\"wf-btn wf-btn-secondary\">Cancel</button>\n"
-			<< "      <button type=\"button\" id=\"btn-submit-new-pr\" onclick=\"GitHubPlatformUI.createPR('" << owner << "', '" << repo << "')\" class=\"wf-btn wf-btn-positive\" style=\"background:#238636; border-color:#2ea043; color:#fff; font-weight:600;\">Create pull request</button>\n"
+			<< "      <span class=\"wf-badge wf-badge-neutral\">External pull request creation is disabled</span>\n"
 			<< "    </div>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
@@ -2933,10 +2272,10 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				<< "    <div>\n"
 				<< "      <div style=\"display:flex; align-items:center; gap:8px;\">\n"
 				<< "        <span style=\"color:" << (is_open ? "#238636" : (is_merged ? "#8957e5" : "#f85149")) << ";\">" << VividIcon::Get(is_open ? "git-pull-request" : (is_merged ? "check" : "x"), 16) << "</span>\n"
-				<< "        <a href=\"/repo/" << owner << "/" << repo << "/pull/" << p_num << "\" style=\"font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;\">PR #" << p_num << ": " << DeHtml(p_title) << "</a>\n"
+				<< "        <a href=\"" << GHRepoRoute(owner, repo) << "/pull/" << p_num << "\" style=\"font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;\">PR #" << p_num << ": " << GitHubPlatformService::EscapeHtml(p_title) << "</a>\n"
 				<< "      </div>\n"
 				<< "      <div style=\"font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px; margin-left:24px;\">\n"
-				<< "        #" << p_num << " opened on " << p_created << " by <strong>" << p_author << "</strong> &middot; <code>" << p_head << "</code> into <code>" << p_base << "</code>\n"
+				<< "        #" << p_num << " opened on " << GitHubPlatformService::EscapeHtml(p_created) << " by <strong>" << GitHubPlatformService::EscapeHtml(p_author) << "</strong> &middot; <code>" << GitHubPlatformService::EscapeHtml(p_head) << "</code> into <code>" << GitHubPlatformService::EscapeHtml(p_base) << "</code>\n"
 				<< "      </div>\n"
 				<< "    </div>\n"
 				<< "    <span class=\"wf-badge wf-badge-" << (is_open ? "emerald" : "neutral") << "\">" << (is_open ? "Review Pending" : (is_merged ? "Merged" : "Closed")) << "</span>\n"
@@ -2955,7 +2294,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			if(!tpl.IsEmpty() && preview.IsEmpty()) {
 				content << GitHubPlatformService::RenderWorkflowEditor(owner, repo, tpl, (String)http["filename"]);
 			} else if(!tpl.IsEmpty() && !preview.IsEmpty() && tpl == "pages-upp-tpp") {
-				content << GitHubPlatformService::RenderTppDocSite("uppsrc/Core/srcdoc.tpp");
+				content << GitHubPlatformService::RenderTppDocSite(String());
 			} else {
 				content << GitHubPlatformService::RenderActionsCatalog(owner, repo, (String)http["category"], (String)http["q"]);
 			}
@@ -2967,7 +2306,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 				<< "  <div class=\"wf-card-header\"><span>Workflow Runs &middot; All Workflows</span>"
 				<< "    <div style=\"display:flex; gap:10px; align-items:center;\">"
 				<< "      <span class=\"wf-badge wf-badge-emerald\">" << (live_actions.IsEmpty() ? "CI Active" : "Live Runs") << "</span>"
-				<< "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" id=\"btn-new-workflow-table\" class=\"wf-btn\" style=\"background:#238636; color:#ffffff; font-weight:600; font-size:0.8rem; padding:4px 10px; text-decoration:none;\">"
+				<< "      <a href=\"" << GHRepoRoute(owner, repo) << "/actions/new\" id=\"btn-new-workflow-table\" class=\"wf-btn\" style=\"background:#238636; color:#ffffff; font-weight:600; font-size:0.8rem; padding:4px 10px; text-decoration:none;\">"
 				<< VividIcon::Get("plus", 13) << " New workflow</a>"
 				<< "    </div>"
 				<< "  </div>\n"
@@ -3059,7 +2398,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 
 		content
 			<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;\">\n"
-			<< "  <h3>Manager Project Board &middot; " << repo << "</h3>\n"
+			<< "  <h3>Manager Project Board &middot; " << GitHubPlatformService::EscapeHtml(repo) << "</h3>\n"
 			<< "  <a href=\"/projects\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem;\">View All in Manager</a>\n"
 			<< "</div>\n"
 			<< "<div style=\"display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;\">\n"
@@ -3071,7 +2410,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			const ValueMap& t = todo_tasks[i];
 			content
 				<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-				<< "        <div style=\"font-weight:600;\">" << (String)t["title"] << "</div>\n"
+				<< "        <div style=\"font-weight:600;\">" << GitHubPlatformService::EscapeHtml((String)t["title"]) << "</div>\n"
 				<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
 				<< "      </div>\n";
 		}
@@ -3086,7 +2425,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			const ValueMap& t = in_progress_tasks[i];
 			content
 				<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-				<< "        <div style=\"font-weight:600; color:#58a6ff;\">" << (String)t["title"] << "</div>\n"
+				<< "        <div style=\"font-weight:600; color:#58a6ff;\">" << GitHubPlatformService::EscapeHtml((String)t["title"]) << "</div>\n"
 				<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
 				<< "      </div>\n";
 		}
@@ -3101,7 +2440,7 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 			const ValueMap& t = done_tasks[i];
 			content
 				<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-				<< "        <div style=\"font-weight:600;\">" << (String)t["title"] << "</div>\n"
+				<< "        <div style=\"font-weight:600;\">" << GitHubPlatformService::EscapeHtml((String)t["title"]) << "</div>\n"
 				<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
 				<< "      </div>\n";
 		}
@@ -3144,15 +2483,15 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 	else if(active_tab == "settings") {
 		content
 			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>General Settings &middot; " << owner << "/" << repo << "</span></div>\n"
+			<< "  <div class=\"wf-card-header\"><span>General Settings &middot; " << GitHubPlatformService::EscapeHtml(owner) << "/" << GitHubPlatformService::EscapeHtml(repo) << "</span></div>\n"
 			<< "  <div class=\"wf-card-body\">\n"
 			<< "    <div style=\"margin-bottom:16px;\">\n"
 			<< "      <label style=\"font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;\">Repository Name</label>\n"
-			<< "      <input type=\"text\" value=\"" << repo << "\" style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.85rem;\">\n"
+			<< "      <input type=\"text\" value=\"" << GitHubPlatformService::EscapeHtml(repo) << "\" style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.85rem;\">\n"
 			<< "    </div>\n"
 			<< "    <div style=\"margin-bottom:16px;\">\n"
 			<< "      <label style=\"font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;\">Default Branch</label>\n"
-			<< "      <input type=\"text\" value=\"" << branch << "\" readonly style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:200px; font-size:0.85rem;\">\n"
+			<< "      <input type=\"text\" value=\"" << GitHubPlatformService::EscapeHtml(branch) << "\" readonly style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:200px; font-size:0.85rem;\">\n"
 			<< "    </div>\n"
 			<< "    <h4>Features</h4>\n"
 			<< "    <div style=\"display:flex; flex-direction:column; gap:8px; margin-bottom:20px;\">\n"
@@ -3183,9 +2522,9 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 	else {
 		content
 			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>" << ToUpper(active_tab.Left(1)) << active_tab.Mid(1) << " &middot; " << owner << "/" << repo << "</span></div>\n"
+			<< "  <div class=\"wf-card-header\"><span>" << GitHubPlatformService::EscapeHtml(ToUpper(active_tab.Left(1)) + active_tab.Mid(1)) << " &middot; " << GitHubPlatformService::EscapeHtml(owner) << "/" << GitHubPlatformService::EscapeHtml(repo) << "</span></div>\n"
 			<< "  <div class=\"wf-card-body\">\n"
-			<< "    <div class=\"wf-alert wf-alert-info\">Displaying " << active_tab << " platform view for " << owner << "/" << repo << ". All metadata synced with Aria scraper and gh CLI.</div>\n"
+			<< "    <div class=\"wf-alert wf-alert-info\">Displaying " << GitHubPlatformService::EscapeHtml(active_tab) << " platform view for " << GitHubPlatformService::EscapeHtml(owner) << "/" << GitHubPlatformService::EscapeHtml(repo) << ". Local metadata view.</div>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
 	}
@@ -3198,56 +2537,8 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 		<< "    let el = document.getElementById('gh-new-pr-card');\n"
 		<< "    if(el) el.style.display = (el.style.display === 'none' ? 'block' : 'none');\n"
 		<< "  }\n"
-		<< "  function createPR(owner, repo) {\n"
-		<< "    let title = document.getElementById('gh-new-pr-title').value.trim();\n"
-		<< "    let body = document.getElementById('gh-new-pr-body').value.trim();\n"
-		<< "    let head = document.getElementById('gh-new-pr-head').value;\n"
-		<< "    let base = document.getElementById('gh-new-pr-base').value;\n"
-		<< "    if(!title) { alert('Title is required'); return; }\n"
-		<< "    fetch('/api/gh/pulls/' + owner + '/create', {\n"
-		<< "      method: 'POST',\n"
-		<< "      headers: {'Content-Type': 'application/json'},\n"
-		<< "      body: JSON.stringify({repo: repo, title: title, body: body, head: head, base: base})\n"
-		<< "    }).then(r => r.json()).then(res => {\n"
-		<< "      let num = res.number || 7;\n"
-		<< "      window.location.href = '/repo/' + owner + '/' + repo + '/pull/' + num;\n"
-		<< "    });\n"
-		<< "  }\n"
-		<< "  function mergePR(owner, repo, number) {\n"
-		<< "    fetch('/api/gh/pulls/' + owner + '/merge', {\n"
-		<< "      method: 'POST',\n"
-		<< "      headers: {'Content-Type': 'application/json'},\n"
-		<< "      body: JSON.stringify({repo: repo, number: number})\n"
-		<< "    }).then(r => r.json()).then(res => {\n"
-		<< "      window.location.reload();\n"
-		<< "    });\n"
-		<< "  }\n"
-		<< "  function closePR(owner, repo, number) {\n"
-		<< "    fetch('/api/gh/pulls/' + owner + '/close', {\n"
-		<< "      method: 'POST',\n"
-		<< "      headers: {'Content-Type': 'application/json'},\n"
-		<< "      body: JSON.stringify({repo: repo, number: number})\n"
-		<< "    }).then(r => r.json()).then(res => {\n"
-		<< "      window.location.reload();\n"
-		<< "    });\n"
-		<< "  }\n"
-		<< "  function commentPR(owner, repo, number) {\n"
-		<< "    let text = document.getElementById('pr-comment-text').value.trim();\n"
-		<< "    if(!text) return;\n"
-		<< "    fetch('/api/gh/pulls/' + owner + '/comment', {\n"
-		<< "      method: 'POST',\n"
-		<< "      headers: {'Content-Type': 'application/json'},\n"
-		<< "      body: JSON.stringify({repo: repo, number: number, body: text})\n"
-		<< "    }).then(r => r.json()).then(res => {\n"
-		<< "      window.location.reload();\n"
-		<< "    });\n"
-		<< "  }\n"
 		<< "  return {\n"
-		<< "    toggleNewPRCard: toggleNewPRCard,\n"
-		<< "    createPR: createPR,\n"
-		<< "    mergePR: mergePR,\n"
-		<< "    closePR: closePR,\n"
-		<< "    commentPR: commentPR\n"
+		<< "    toggleNewPRCard: toggleNewPRCard\n"
 		<< "  };\n"
 		<< "})();\n"
 		<< "</script>\n";
@@ -3263,13 +2554,13 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 	pb.Title(owner + "/" + repo + " - GitHub Platform Parity")
 	  .Brand("GitHub", "/", "octicon-mark-github")
 	  .Navigation(nav)
-	  .NavActions(SystemAuthService::RenderUserMenu(sess))
+	  .TrustedNavActions(SystemAuthService::RenderUserMenu(sess))
 	  .Template("github")
 	  .Theme("github-dark")
 	  .Density(DENSITY_COMFORTABLE)
-	  .SubNav(sub_nav)
-	  .Sidebar(sidebar)
-	  .Content(content);
+	  .TrustedSubNav(sub_nav)
+	  .TrustedSidebar(sidebar)
+	  .TrustedContent(content);
 	ManagerSkylarkApp::AddMarkdownSupport(pb);
 	String html = pb.Build();
 
@@ -3278,17 +2569,12 @@ static void RenderRepoView(Http& http, const String& owner, const String& repo, 
 
 SKYLARK(GitHubShortcut, "gh")
 {
-	http.Redirect("/repo/SeppoPakonen");
+	http.Redirect("/repo");
 }
 
 SKYLARK(GitHubReposShortcut, "gh/repos")
 {
-	http.Redirect("/repo/SeppoPakonen?tab=repositories");
-}
-
-SKYLARK(UserHomeSeppo, "SeppoPakonen")
-{
-	RenderUserProfile(http, "SeppoPakonen");
+	http.Redirect("/repo");
 }
 
 SKYLARK(UserGeneric, "user/*")
@@ -3331,6 +2617,10 @@ SKYLARK(RepoRawFile, "raw/*/*/**")
 		if(!filepath.IsEmpty()) filepath << "/";
 		filepath << http[i];
 	}
+	if(!SafeGHComponent(owner) || !SafeGHComponent(repo) || !SafeGHRelativePath(filepath)) {
+		http.Response(404, "File Not Found") << "File not found";
+		return;
+	}
 	LocalRepoInfo info = GitHubPlatformService::GetRepo(owner, repo);
 	ValueMap blob = GitHubPlatformService::GetBlob(info.path, filepath);
 	if(!blob.IsEmpty()) {
@@ -3342,214 +2632,90 @@ SKYLARK(RepoRawFile, "raw/*/*/**")
 
 SKYLARK(ApiGitHubLiveRepos, "api/gh/repos/*")
 {
-	String owner = http[0];
-	Vector<LocalRepoInfo> repos = GitHubPlatformService::GetLiveGitHubRepos(owner);
-	ValueArray va;
-	for(int i = 0; i < repos.GetCount(); i++)
-		va.Add(StoreAsJsonValue(repos[i]));
-	http.ContentType("application/json") << AsJSON(va);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiGitHubLiveIssues, "api/gh/issues/*/*")
 {
-	String owner = http[0];
-	String repo = http[1];
-	Vector<ValueMap> issues = GitHubPlatformService::GetLiveIssues(owner, repo);
-	ValueArray va;
-	for(int i = 0; i < issues.GetCount(); i++)
-		va.Add(issues[i]);
-	http.ContentType("application/json") << AsJSON(va);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiGitHubLivePRs, "api/gh/pulls/*/*")
 {
-	String owner = http[0];
-	String repo = http[1];
-	Vector<ValueMap> prs = GitHubPlatformService::GetLivePullRequests(owner, repo);
-	ValueArray va;
-	for(int i = 0; i < prs.GetCount(); i++)
-		va.Add(prs[i]);
-	http.ContentType("application/json") << AsJSON(va);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiCreateIssue, "api/gh/issues/*/create:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	String title = json["title"];
-	String body = json["body"];
-	String res = GitHubPlatformService::CreateIssue(owner, repo, title, body);
-	ValueMap out;
-	out.Set("status", (res.StartsWith("http") || res.Find("Created") >= 0) ? "ok" : "error");
-	out.Set("url", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiCommentIssue, "api/gh/issues/*/comment:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	int number = (int)json["number"];
-	String body = json["body"];
-	String res = GitHubPlatformService::AddComment(owner, repo, number, body);
-	ValueMap out;
-	out.Set("status", res.StartsWith("http") ? "ok" : "error");
-	out.Set("url", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiToggleIssue, "api/gh/issues/*/toggle:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	int number = (int)json["number"];
-	bool close_it = (bool)json["close"];
-	String res = GitHubPlatformService::ToggleIssueState(owner, repo, number, close_it);
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("result", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiGitHubLiveActions, "api/gh/actions/*/*")
 {
-	String owner = http[0];
-	String repo = http[1];
-	Vector<ValueMap> acts = GitHubPlatformService::GetLiveActions(owner, repo);
-	ValueArray va;
-	for(int i = 0; i < acts.GetCount(); i++)
-		va.Add(acts[i]);
-	http.ContentType("application/json") << AsJSON(va);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiGitHubLiveIssueDetail, "api/gh/issue/*/*/*")
 {
-	String owner = http[0];
-	String repo = http[1];
-	int number = ScanInt(http[2]);
-	ValueMap detail = GitHubPlatformService::GetLiveIssueDetail(owner, repo, number);
-	http.ContentType("application/json") << AsJSON(detail);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiCreatePullRequest, "api/gh/pulls/*/create:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	String title = json["title"];
-	String body = json["body"];
-	String head = json["head"];
-	String base = json["base"];
-	String res = GitHubPlatformService::CreatePullRequest(owner, repo, title, body, head, base);
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("url", res);
-	int num = 7;
-	int last_slash = res.ReverseFind('/');
-	if(last_slash >= 0 && IsDigit(res[last_slash + 1]))
-		num = ScanInt(res.Mid(last_slash + 1));
-	out.Set("number", num);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiMergePullRequest, "api/gh/pulls/*/merge:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	int number = (int)json["number"];
-	String res = GitHubPlatformService::MergePullRequest(owner, repo, number);
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("result", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiClosePullRequest, "api/gh/pulls/*/close:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	int number = (int)json["number"];
-	String res = GitHubPlatformService::ClosePullRequest(owner, repo, number);
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("result", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiCommentPullRequest, "api/gh/pulls/*/comment:POST_RAW")
 {
-	String owner = http[0];
-	Value json = ParseJSON(http.GetRequestContent());
-	String repo = json["repo"];
-	int number = (int)json["number"];
-	String body = json["body"];
-	String res = GitHubPlatformService::AddPullRequestComment(owner, repo, number, body);
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("result", res);
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiGitHubLivePRDetail, "api/gh/pull/*/*/*")
 {
-	String owner = http[0];
-	String repo = http[1];
-	int number = ScanInt(http[2]);
-	ValueMap detail = GitHubPlatformService::GetLivePullRequestDetail(owner, repo, number);
-	http.ContentType("application/json") << AsJSON(detail);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiSaveWorkflow, "api/gh/workflows/save:POST_RAW")
 {
-	Value json = ParseJSON(http.GetRequestContent());
-	String owner = json["owner"];
-	String repo = json["repo"];
-	String filename = json["filename"];
-	String content = json["content"];
-
-	String dev_dir = GitHubPlatformService::GetDevDir();
-	String repo_path = AppendFileName(dev_dir, repo);
-	if(!DirectoryExists(repo_path)) {
-		repo_path = GetHomeDirFile("Dev/ai-upp");
-	}
-
-	bool ok = GitHubPlatformService::SaveWorkflowFile(repo_path, filename, content);
-	ValueMap out;
-	if(ok) {
-		out.Set("status", "ok");
-		out.Set("path", ".github/workflows/" + filename);
-	} else {
-		out.Set("status", "error");
-		out.Set("message", "Failed to save workflow file to disk");
-	}
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiTriggerAction, "api/gh/actions/trigger:POST_RAW")
 {
-	Value json = ParseJSON(http.GetRequestContent());
-	String owner = json["owner"];
-	String repo = json["repo"];
-	String workflow = json["workflow"];
-	String type = json["type"];
-
-	GitHubPlatformService::TriggerWorkflowRunAsync(owner, repo, workflow, type);
-
-	ValueMap out;
-	out.Set("status", "ok");
-	out.Set("message", "Workflow dispatched asynchronously via SysProcess");
-	http.ContentType("application/json") << AsJSON(out);
+	SendEgressDisabled(http);
 }
 
 SKYLARK(ApiTppPreview, "api/gh/tpp/preview")
 {
 	String rel_dir = http["dir"];
-	if(rel_dir.IsEmpty()) rel_dir = "uppsrc/Core/srcdoc.tpp";
+	if(rel_dir.IsEmpty()) {
+		http.ContentType("text/html; charset=utf-8") << "<div class=\"wf-alert wf-alert-warning\">Documentation preview unavailable: select a configured relative directory.</div>";
+		return;
+	}
+	if(!SafeGHRelativePath(rel_dir)) {
+		http.Response(400, "Invalid documentation path") << "Invalid documentation path";
+		return;
+	}
 	String html = GitHubPlatformService::RenderTppDocSite(rel_dir);
 	http.ContentType("text/html; charset=utf-8") << html;
 }

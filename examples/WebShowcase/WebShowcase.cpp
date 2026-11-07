@@ -246,8 +246,8 @@ SKYLARK(ShowcaseHome, "")
 		.Density(DENSITY_COMFORTABLE)
 		.LeftTree(nav_tree, "Navigation Tree", "wf-nav-tree")
 		.AutoOutline(true)
-		.Content(content)
-		.Footer("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
+		.TrustedContent(content)
+		.TrustedFooter("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
 		.Build();
 
 	http.ContentType("text/html; charset=utf-8") << html;
@@ -478,8 +478,8 @@ SKYLARK(ShowcaseTabs, "showcase")
 		.Density(DENSITY_COMFORTABLE)
 		.LeftTree(nav_tree, "Navigation Tree", "wf-nav-tree")
 		.AutoOutline(true)
-		.Content(content)
-		.Footer("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
+		.TrustedContent(content)
+		.TrustedFooter("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
 		.Build();
 
 	http.ContentType("text/html; charset=utf-8") << html;
@@ -515,8 +515,8 @@ SKYLARK(ShowcaseDashboard, "dashboard")
 		.Template("dashboard")
 		.Theme("vivid-dark")
 		.Density(DENSITY_COMPACT)
-		.Sidebar(sidebar)
-		.Content(content)
+		.TrustedSidebar(sidebar)
+		.TrustedContent(content)
 		.Build();
 
 	http.ContentType("text/html; charset=utf-8") << html;
@@ -564,12 +564,19 @@ SKYLARK(ShowcaseWorkspace, "workspace")
 
 		// Dynamic file loader script
 		<< "<script>\n"
+		<< "function showWorkspaceFileMessage(viewer, text, isError) {\n"
+		<< "  let message = document.createElement('div');\n"
+		<< "  message.style.padding = '1.5rem';\n"
+		<< "  message.style.color = isError ? 'var(--wf-color-negative,#c83771)' : 'var(--wf-fg-inactive,#8b919d)';\n"
+		<< "  message.textContent = text;\n"
+		<< "  viewer.replaceChildren(message);\n"
+		<< "}\n"
 		<< "function loadWorkspaceFile(relPath) {\n"
 		<< "  let viewer = document.getElementById('workspace-file-content');\n"
 		<< "  let titleEl = document.getElementById('workspace-file-title');\n"
 		<< "  let statsEl = document.getElementById('workspace-file-stats');\n"
 		<< "  if(!viewer) return;\n"
-		<< "  viewer.innerHTML = '<div style=\"padding:1.5rem; text-align:center; color:var(--wf-fg-inactive);\">Loading ' + relPath + '...</div>';\n"
+		<< "  showWorkspaceFileMessage(viewer, 'Loading ' + relPath + '...', false);\n"
 		<< "  fetch('/api/workspace/file?path=' + encodeURIComponent(relPath))\n"
 		<< "    .then(r => r.json())\n"
 		<< "    .then(data => {\n"
@@ -577,27 +584,34 @@ SKYLARK(ShowcaseWorkspace, "workspace")
 		<< "        if(titleEl) titleEl.innerText = data.path;\n"
 		<< "        if(statsEl) statsEl.innerText = data.lines + ' lines';\n"
 		<< "        let lines = data.content.split('\\n');\n"
-		<< "        let html = '';\n"
+		<< "        let fragment = document.createDocumentFragment();\n"
 		<< "        for(let i = 0; i < lines.length; i++) {\n"
-		<< "          let num = i + 1;\n"
-		<< "          let esc = lines[i].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n"
-		<< "          html += '<div class=\"wf-code-row\"><span class=\"wf-code-num\">' + num + '</span><span class=\"wf-code-text\">' + (esc || '&nbsp;') + '</span></div>';\n"
+		<< "          let row = document.createElement('div');\n"
+		<< "          row.className = 'wf-code-row';\n"
+		<< "          let number = document.createElement('span');\n"
+		<< "          number.className = 'wf-code-num';\n"
+		<< "          number.textContent = String(i + 1);\n"
+		<< "          let text = document.createElement('span');\n"
+		<< "          text.className = 'wf-code-text';\n"
+		<< "          text.textContent = lines[i] || ' ';\n"
+		<< "          row.append(number, text);\n"
+		<< "          fragment.appendChild(row);\n"
 		<< "        }\n"
-		<< "        viewer.innerHTML = html;\n"
+		<< "        viewer.replaceChildren(fragment);\n"
 		<< "        if(window.WebAudio) WebAudio.play('click');\n"
 		<< "      } else {\n"
-		<< "        viewer.innerHTML = '<div style=\"padding:1.5rem; color:var(--wf-color-negative,#c83771);\">' + data.message + '</div>';\n"
+		<< "        showWorkspaceFileMessage(viewer, String(data.message || 'File could not be loaded.'), true);\n"
 		<< "      }\n"
 		<< "    })\n"
 		<< "    .catch(err => {\n"
-		<< "      viewer.innerHTML = '<div style=\"padding:1.5rem; color:var(--wf-color-negative,#c83771);\">Error loading file: ' + err + '</div>';\n"
+		<< "      showWorkspaceFileMessage(viewer, 'Error loading file: ' + String(err), true);\n"
 		<< "    });\n"
 		<< "}\n"
 		<< "function checkHash() {\n"
 		<< "  let h = window.location.hash;\n"
 		<< "  if(h.startsWith('#file/')) {\n"
-		<< "    let p = decodeURIComponent(h.substring(6));\n"
-		<< "    loadWorkspaceFile(p);\n"
+		<< "    try { loadWorkspaceFile(decodeURIComponent(h.substring(6))); }\n"
+		<< "    catch(error) { loadWorkspaceFile(''); }\n"
 		<< "  } else {\n"
 		<< "    loadWorkspaceFile('Icons.cpp');\n"
 		<< "  }\n"
@@ -627,8 +641,8 @@ SKYLARK(ShowcaseWorkspace, "workspace")
 		.Density(DENSITY_NONE)
 		.LeftTree(file_tree, "Workspace Files", "wf-workspace-tree")
 		.AutoOutline(true)
-		.ExtraHead(extra_css)
-		.Content(content)
+		.TrustedExtraHead(extra_css)
+		.TrustedContent(content)
 		.Build();
 
 	http.ContentType("text/html; charset=utf-8") << html;
@@ -738,8 +752,8 @@ SKYLARK(ShowcaseTelemetry, "telemetry")
 		.Density(DENSITY_COMFORTABLE)
 		.LeftTree(nav_tree, "Navigation Tree", "wf-nav-tree")
 		.AutoOutline(true)
-		.Content(content)
-		.Footer("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
+		.TrustedContent(content)
+		.TrustedFooter("&copy; 2026 Ultimate++ Agentic Web Framework. Powered by Skylark &amp; Vivid Plasma Design.")
 		.Build();
 
 	http.ContentType("text/html; charset=utf-8") << html;

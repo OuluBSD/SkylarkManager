@@ -89,15 +89,18 @@ void ChatStreamDispatcher::StreamToSocket(TcpSocket* sock,
 		sock->PutAll("HTTP/1.1 200 OK\r\n"
 		             "Content-Type: text/event-stream; charset=utf-8\r\n"
 		             "Cache-Control: no-cache\r\n"
-		             "Connection: keep-alive\r\n"
-		             "Access-Control-Allow-Origin: *\r\n\r\n");
+		             "Connection: keep-alive\r\n\r\n");
 	}
 
 	ChatMessage& msg = ChatSessionManager::Get().StartAssistantMessage(session_id, role);
 
 	if(sock) {
-		sock->PutAll(Format("data: {\"type\":\"start\",\"id\":\"%s\",\"role\":\"assistant\",\"sender\":\"%s\"}\n\n",
-		                    msg.id, role));
+		ValueMap start;
+		start.Add("type", "start");
+		start.Add("id", msg.id);
+		start.Add("role", "assistant");
+		start.Add("sender", msg.sender);
+		sock->PutAll("data: " + AsJSON(start, true) + "\n\n");
 	}
 
 	String full_response = GeneratePairProgrammingReply(*s, user_prompt);

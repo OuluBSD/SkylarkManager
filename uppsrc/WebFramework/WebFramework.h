@@ -12,6 +12,7 @@ NAMESPACE_UPP
 #include "Tree.h"
 #include "Theme.h"
 #include "Template.h"
+#include "Diagram.h"
 #include "PageBuilder.h"
 
 END_UPP_NAMESPACE

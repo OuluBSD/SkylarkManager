@@ -1,15 +1,54 @@
-#include "ChatRoutes.h"
+#include "WebChat.h"
 
 NAMESPACE_UPP
 
+namespace {
+WebChatAuthorizationCallback& AuthorizationCallback()
+{
+	static WebChatAuthorizationCallback callback = NULL;
+	return callback;
+}
+
+bool AuthorizeWebChat(Http& http, bool unsafe_method)
+{
+	WebChatAuthorizationCallback callback = AuthorizationCallback();
+	if(!callback) {
+		http.ContentType("text/plain; charset=utf-8");
+		http.Response(503, "Service Unavailable");
+		http << "WebChat host authorization is not configured.";
+		return false;
+	}
+	if(unsafe_method) {
+		String host = http.GetHeader("host");
+		String source = http.GetHeader("origin");
+		if(source.IsEmpty()) source = http.GetHeader("referer");
+		String fetch_site = ToLower(http.GetHeader("sec-fetch-site"));
+		bool same_host = source.StartsWith("http://" + host + "/") || source == "http://" + host ||
+		                 source.StartsWith("https://" + host + "/") || source == "https://" + host;
+		if(host.IsEmpty() || source.IsEmpty() || !same_host || fetch_site == "cross-site") {
+			http.Response(403, "Forbidden");
+			return false;
+		}
+	}
+	return callback(http);
+}
+}
+
+void SetWebChatAuthorizationCallback(WebChatAuthorizationCallback callback)
+{
+	AuthorizationCallback() = callback;
+}
+
 SKYLARK(WebChatPage, "webchat")
 {
+	if(!AuthorizeWebChat(http, false)) return;
 	String session_id = http["session"];
 	http.ContentType("text/html; charset=utf-8") << WebChatView::RenderPage(session_id);
 }
 
 SKYLARK(ApiChatSessions, "api/chat/sessions")
 {
+	if(!AuthorizeWebChat(http, false)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 
 	ValueArray arr;
@@ -24,6 +63,7 @@ SKYLARK(ApiChatSessions, "api/chat/sessions")
 
 SKYLARK(ApiChatCreateSession, "api/chat/sessions/create:POST_RAW")
 {
+	if(!AuthorizeWebChat(http, true)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 
 	String req = http.GetRequestContent();
@@ -43,6 +83,7 @@ SKYLARK(ApiChatCreateSession, "api/chat/sessions/create:POST_RAW")
 
 SKYLARK(ApiChatMessage, "api/chat/message:POST_RAW")
 {
+	if(!AuthorizeWebChat(http, true)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 	String req = http.GetRequestContent();
 	Value v = ParseJSON(req);
@@ -66,12 +107,13 @@ SKYLARK(ApiChatMessage, "api/chat/message:POST_RAW")
 
 SKYLARK(ApiChatStream, "api/chat/stream/*")
 {
+	if(!AuthorizeWebChat(http, false)) return;
 	String session_id = http[0];
 	String prompt = http["prompt"];
 	String model = http["model"];
 	String role = http["role"];
-
-	if(role.IsEmpty()) role = "Pair Programmer";
+	if(role != "pair-programmer" && role != "code-reviewer" && role != "architect" && role != "debugger")
+		role = "pair-programmer";
 
 	TcpSocket* sock = http.DetachSocket();
 	if(sock) {
@@ -81,6 +123,7 @@ SKYLARK(ApiChatStream, "api/chat/stream/*")
 
 SKYLARK(ApiChatFork, "api/chat/fork:POST_RAW")
 {
+	if(!AuthorizeWebChat(http, true)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 	String req = http.GetRequestContent();
 	Value v = ParseJSON(req);
@@ -96,6 +139,7 @@ SKYLARK(ApiChatFork, "api/chat/fork:POST_RAW")
 
 SKYLARK(ApiChatRevert, "api/chat/revert:POST_RAW")
 {
+	if(!AuthorizeWebChat(http, true)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 	String req = http.GetRequestContent();
 	Value v = ParseJSON(req);
@@ -110,6 +154,7 @@ SKYLARK(ApiChatRevert, "api/chat/revert:POST_RAW")
 
 SKYLARK(ApiChatDeleteMessage, "api/chat/message/delete:POST_RAW")
 {
+	if(!AuthorizeWebChat(http, true)) return;
 	ChatSessionManager& mgr = ChatSessionManager::Get();
 	String req = http.GetRequestContent();
 	Value v = ParseJSON(req);

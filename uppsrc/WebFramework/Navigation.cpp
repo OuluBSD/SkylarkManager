@@ -2,6 +2,107 @@
 
 NAMESPACE_UPP
 
+static String EscapeNavHtml(const String& text)
+{
+	String out;
+	for(int i = 0; i < text.GetCount(); i++) {
+		byte c = (byte)text[i];
+		if(c < 0x20 || c == 0x7f) {
+			out << "&#xfffd;";
+			continue;
+		}
+		switch(text[i]) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(text[i]); break;
+		}
+	}
+	return out;
+}
+
+static String SafeNavIcon(const String& icon, const String& fallback)
+{
+	if(icon.IsEmpty())
+		return fallback;
+	for(int i = 0; i < icon.GetCount(); i++) {
+		char c = icon[i];
+		if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		     (c >= '0' && c <= '9') || c == '-'))
+			return fallback;
+	}
+	return icon;
+}
+
+static String EncodeNavParts(const String& value, char separator)
+{
+	String out;
+	Vector<String> parts = Split(value, separator);
+	for(int i = 0; i < parts.GetCount(); i++) {
+		if(i) out.Cat(separator);
+		out << UrlEncode(parts[i]);
+	}
+	return out;
+}
+
+static bool SafeNavUrlChars(const String& url)
+{
+	for(int i = 0; i < url.GetCount(); i++) {
+		byte c = (byte)url[i];
+		if(c <= 0x20 || c == 0x7f || c == '\\' || c == '"' || c == '\'' || c == '<' || c == '>')
+			return false;
+	}
+	return true;
+}
+
+static String SafeNavUrl(const String& url)
+{
+	if(!SafeNavUrlChars(url))
+		return String();
+	if(url == "#")
+		return url;
+	if(url.StartsWith("https://")) {
+		String authority = url.Mid(8);
+		int end = authority.GetCount();
+		for(int i = 0; i < authority.GetCount(); i++)
+			if(authority[i] == '/' || authority[i] == '?' || authority[i] == '#') {
+				end = i;
+				break;
+			}
+		String host = authority.Left(end);
+		return host.IsEmpty() || host.Find('@') >= 0 ? String() : url;
+	}
+	if(url.StartsWith("//"))
+		return String();
+	if(url.StartsWith("#"))
+		return "#" + EncodeNavParts(url.Mid(1), '/');
+	if(!url.StartsWith("/"))
+		return String();
+
+	int frag_pos = url.Find('#');
+	String fragment = frag_pos >= 0 ? url.Mid(frag_pos + 1) : String();
+	String before_fragment = frag_pos >= 0 ? url.Left(frag_pos) : url;
+	int query_pos = before_fragment.Find('?');
+	String path = query_pos >= 0 ? before_fragment.Left(query_pos) : before_fragment;
+	String query = query_pos >= 0 ? before_fragment.Mid(query_pos + 1) : String();
+	String out = "/" + EncodeNavParts(path.Mid(1), '/');
+	if(query_pos >= 0) {
+		out << "?";
+		Vector<String> args = Split(query, '&');
+		for(int i = 0; i < args.GetCount(); i++) {
+			if(i) out << "&";
+			int eq = args[i].Find('=');
+			out << UrlEncode(eq >= 0 ? args[i].Left(eq) : args[i]);
+			if(eq >= 0) out << "=" << UrlEncode(args[i].Mid(eq + 1));
+		}
+	}
+	if(frag_pos >= 0)
+		out << "#" << EncodeNavParts(fragment, '/');
+	return out;
+}
+
 NavItem::NavItem()
 	: is_active(false)
 {
@@ -246,6 +347,15 @@ String MegaMenuRenderer::GetClientScript()
 		"        openCategory(catId);\n"
 		"      });\n"
 		"    });\n"
+		"    let sidebar = document.querySelector('.wf-mega-sidebar');\n"
+		"    if (sidebar) sidebar.addEventListener('mouseover', function(e) {\n"
+		"      let pill = e.target.closest('.wf-mega-cat-pill');\n"
+		"      if (pill && !pill.contains(e.relatedTarget)) openCategory(pill.getAttribute('data-cat-id'));\n"
+		"    });\n"
+		"    document.addEventListener('click', function(e) {\n"
+		"      let mobile = e.target.closest('.wf-mobile-toggle');\n"
+		"      if (mobile) { e.preventDefault(); openCategory(mobile.getAttribute('data-cat-id')); }\n"
+		"    });\n"
 		"    let navBar = document.querySelector('.wf-nav-bar');\n"
 		"    if (navBar) {\n"
 		"      navBar.addEventListener('mouseleave', scheduleClose);\n"
@@ -291,10 +401,13 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	String h;
 
 	// Nav bar header
+	String safe_brand_url = SafeNavUrl(brand_url);
+	if(safe_brand_url.IsEmpty()) safe_brand_url = "/";
+	String safe_brand_icon = SafeNavIcon(brand_icon, "vivid");
 	h << "<header class=\"wf-nav-bar\" role=\"navigation\">\n"
-	  << "  <a href=\"" << brand_url << "\" class=\"wf-brand\">\n"
-	  << "    <span class=\"wf-brand-icon\">" << VividIcon::Get(brand_icon, 22) << "</span>\n"
-	  << "    <span>" << brand_title << "</span>\n"
+	  << "  <a href=\"" << EscapeNavHtml(safe_brand_url) << "\" class=\"wf-brand\">\n"
+	  << "    <span class=\"wf-brand-icon\">" << VividIcon::Get(safe_brand_icon, 22) << "</span>\n"
+	  << "    <span>" << EscapeNavHtml(brand_title) << "</span>\n"
 	  << "  </a>\n";
 
 	// Center category tabs
@@ -302,8 +415,8 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	for(int i = 0; i < nav.GetCount(); i++) {
 		const NavCategory& cat = nav[i];
 		bool is_act = (cat.id == nav.GetActiveCategoryId());
-		h << "    <a class=\"wf-cat-tab " << (is_act ? "active" : "") << "\" data-cat-id=\"" << cat.id << "\" href=\"#\">\n"
-		  << "      <span>" << cat.title << "</span>\n"
+		h << "    <a class=\"wf-cat-tab " << (is_act ? "active" : "") << "\" data-cat-id=\"" << EscapeNavHtml(cat.id) << "\" href=\"#\">\n"
+		  << "      <span>" << EscapeNavHtml(cat.title) << "</span>\n"
 		  << "      <span class=\"wf-cat-arrow\">" << VividIcon::Get("chevron-down", 12) << "</span>\n"
 		  << "    </a>\n";
 	}
@@ -321,9 +434,10 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	  << "      " << VividIcon::Get("volume", 16) << "\n"
 	  << "    </button>\n";
 	if(!extra_actions.IsEmpty()) {
+		// Explicit trusted-HTML extension slot; callers must not pass user content.
 		h << "    " << extra_actions << "\n";
 	}
-	h << "    <button class=\"wf-mobile-toggle wf-btn-icon\" aria-label=\"Menu\" onclick=\"MegaMenu.openCategory('" << (nav.GetCount() > 0 ? nav[0].id : "") << "')\">\n"
+	h << "    <button class=\"wf-mobile-toggle wf-btn-icon\" aria-label=\"Menu\" data-cat-id=\"" << EscapeNavHtml(nav.GetCount() > 0 ? nav[0].id : String()) << "\">\n"
 	  << "      " << VividIcon::Get("menu", 18) << "\n"
 	  << "    </button>\n"
 	  << "  </div>\n";
@@ -338,9 +452,9 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	for(int i = 0; i < nav.GetCount(); i++) {
 		const NavCategory& cat = nav[i];
 		bool is_act = (cat.id == nav.GetActiveCategoryId());
-		h << "        <div class=\"wf-mega-cat-pill " << (is_act ? "active" : "") << "\" data-cat-id=\"" << cat.id << "\" onmouseenter=\"MegaMenu.openCategory('" << cat.id << "')\">\n"
-		  << "          " << VividIcon::Get(cat.icon.IsEmpty() ? "folder" : cat.icon, 16) << "\n"
-		  << "          <span>" << cat.title << "</span>\n"
+		h << "        <div class=\"wf-mega-cat-pill " << (is_act ? "active" : "") << "\" data-cat-id=\"" << EscapeNavHtml(cat.id) << "\">\n"
+		  << "          " << VividIcon::Get(SafeNavIcon(cat.icon, "folder"), 16) << "\n"
+		  << "          <span>" << EscapeNavHtml(cat.title) << "</span>\n"
 		  << "        </div>\n";
 	}
 	h << "      </div>\n";
@@ -350,7 +464,7 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	for(int i = 0; i < nav.GetCount(); i++) {
 		const NavCategory& cat = nav[i];
 		bool is_act = (i == 0); // show first by default
-		h << "        <div class=\"wf-mega-cat-content\" data-cat-id=\"" << cat.id << "\" style=\"display:" << (is_act ? "grid" : "none") << ";\">\n";
+		h << "        <div class=\"wf-mega-cat-content\" data-cat-id=\"" << EscapeNavHtml(cat.id) << "\" style=\"display:" << (is_act ? "grid" : "none") << ";\">\n";
 
 		// Direct items if any
 		if(!cat.direct_items.IsEmpty()) {
@@ -359,18 +473,26 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 			  << "            <div class=\"wf-mega-item-list\">\n";
 			for(int it = 0; it < cat.direct_items.GetCount(); it++) {
 				const NavItem& item = cat.direct_items[it];
-				h << "              <a href=\"" << item.url << "\" class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n"
-				  << "                <div class=\"wf-mega-item-icon\">" << VividIcon::Get(item.icon.IsEmpty() ? "file" : item.icon, 16) << "</div>\n"
+				String safe_url = SafeNavUrl(item.url);
+				String tag = safe_url.IsEmpty() ? "div" : "a";
+				if(tag == "a")
+					h << "              <a href=\"" << EscapeNavHtml(safe_url) << "\" class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n";
+				else
+					h << "              <div class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n";
+				h << "                <div class=\"wf-mega-item-icon\">" << VividIcon::Get(SafeNavIcon(item.icon, "file"), 16) << "</div>\n"
 				  << "                <div class=\"wf-mega-item-body\">\n"
-				  << "                  <div class=\"wf-mega-item-title\">" << item.title;
+				  << "                  <div class=\"wf-mega-item-title\">" << EscapeNavHtml(item.title);
 				if(!item.badge.text.IsEmpty()) {
-					h << " <span class=\"wf-badge wf-badge-" << item.badge.style << "\">" << item.badge.text << "</span>";
+					String badge_style = item.badge.style;
+					if(badge_style != "cyan" && badge_style != "emerald" && badge_style != "crimson" && badge_style != "purple" && badge_style != "neutral")
+						badge_style = "neutral";
+					h << " <span class=\"wf-badge wf-badge-" << badge_style << "\">" << EscapeNavHtml(item.badge.text) << "</span>";
 				}
 				h << "                  </div>\n";
 				if(!item.description.IsEmpty())
-					h << "                  <div class=\"wf-mega-item-desc\">" << item.description << "</div>\n";
+					h << "                  <div class=\"wf-mega-item-desc\">" << EscapeNavHtml(item.description) << "</div>\n";
 				h << "                </div>\n"
-				  << "              </a>\n";
+				  << "              </" << tag << ">\n";
 			}
 			h << "            </div>\n"
 			  << "          </div>\n";
@@ -380,22 +502,30 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 		for(int s = 0; s < cat.sections.GetCount(); s++) {
 			const NavSection& sec = cat.sections[s];
 			h << "          <div>\n"
-			  << "            <div class=\"wf-mega-section-title\">" << sec.title << "</div>\n"
+			  << "            <div class=\"wf-mega-section-title\">" << EscapeNavHtml(sec.title) << "</div>\n"
 			  << "            <div class=\"wf-mega-item-list\">\n";
 			for(int it = 0; it < sec.items.GetCount(); it++) {
 				const NavItem& item = sec.items[it];
-				h << "              <a href=\"" << item.url << "\" class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n"
-				  << "                <div class=\"wf-mega-item-icon\">" << VividIcon::Get(item.icon.IsEmpty() ? "file" : item.icon, 16) << "</div>\n"
+				String safe_url = SafeNavUrl(item.url);
+				String tag = safe_url.IsEmpty() ? "div" : "a";
+				if(tag == "a")
+					h << "              <a href=\"" << EscapeNavHtml(safe_url) << "\" class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n";
+				else
+					h << "              <div class=\"wf-mega-item " << (item.is_active ? "active" : "") << "\">\n";
+				h << "                <div class=\"wf-mega-item-icon\">" << VividIcon::Get(SafeNavIcon(item.icon, "file"), 16) << "</div>\n"
 				  << "                <div class=\"wf-mega-item-body\">\n"
-				  << "                  <div class=\"wf-mega-item-title\">" << item.title;
+				  << "                  <div class=\"wf-mega-item-title\">" << EscapeNavHtml(item.title);
 				if(!item.badge.text.IsEmpty()) {
-					h << " <span class=\"wf-badge wf-badge-" << item.badge.style << "\">" << item.badge.text << "</span>";
+					String badge_style = item.badge.style;
+					if(badge_style != "cyan" && badge_style != "emerald" && badge_style != "crimson" && badge_style != "purple" && badge_style != "neutral")
+						badge_style = "neutral";
+					h << " <span class=\"wf-badge wf-badge-" << badge_style << "\">" << EscapeNavHtml(item.badge.text) << "</span>";
 				}
 				h << "                  </div>\n";
 				if(!item.description.IsEmpty())
-					h << "                  <div class=\"wf-mega-item-desc\">" << item.description << "</div>\n";
+					h << "                  <div class=\"wf-mega-item-desc\">" << EscapeNavHtml(item.description) << "</div>\n";
 				h << "                </div>\n"
-				  << "              </a>\n";
+				  << "              </" << tag << ">\n";
 			}
 			h << "            </div>\n"
 			  << "          </div>\n";

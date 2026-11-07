@@ -5,6 +5,8 @@
 
 NAMESPACE_UPP
 
+class ManagerSkylarkApp;
+
 struct V2GoalNode : Moveable<V2GoalNode> {
 	String                    kind; // "phase" or "task"
 	String                    id;
@@ -15,6 +17,7 @@ struct V2GoalNode : Moveable<V2GoalNode> {
 	VectorMap<String, String> sets;
 	Vector<String>            children;
 	String                    notes;
+	ValueMap                  source_data;
 
 	V2GoalNode();
 	V2GoalNode(const V2GoalNode& o);
@@ -33,6 +36,9 @@ struct V2Goal : Moveable<V2Goal> {
 	Vector<String>            tags;
 	VectorMap<String, String> state;
 	Vector<V2GoalNode>        tasks;
+	String                    qualified_id;
+	String                    source_revision;
+	ValueMap                  source_data;
 
 	V2Goal();
 	V2Goal(const V2Goal& o);
@@ -54,6 +60,9 @@ struct V2Issue : Moveable<V2Issue> {
 	String title;
 	String status; // "proposed", "verified", "accepted", "resolved", "closed"
 	String notes;
+	String qualified_id;
+	String source_revision;
+	ValueMap source_data;
 
 	V2Issue();
 	V2Issue(const V2Issue& o);
@@ -71,6 +80,9 @@ struct V2Release : Moveable<V2Release> {
 	String         status; // "proposed", "planned", "active", "released", "retired"
 	Vector<String> goals;
 	Vector<String> issues;
+	String qualified_id;
+	String source_revision;
+	ValueMap source_data;
 
 	V2Release();
 	V2Release(const V2Release& o);
@@ -84,8 +96,9 @@ struct V2Release : Moveable<V2Release> {
 class V2Store {
 public:
 	V2Store();
+	V2Store(const V2Store& o);
+	V2Store& operator=(const V2Store& o);
 
-	bool Load(const String& root_dir = "");
 	void Clear();
 
 	const Vector<V2Goal>&    GetGoals() const    { return goals; }
@@ -101,12 +114,29 @@ public:
 	Vector<const V2Issue*> GetIssuesForRepo(const String& repo) const;
 
 	String GetRootDir() const { return base_dir; }
+	const Vector<String>& GetSourceDiagnostics() const { return source_diagnostics; }
+	int GetSourceErrorCount() const { return source_errors; }
+	bool IsLoadIncomplete() const { return source_incomplete; }
+	String GetLoadStatus() const { return source_incomplete ? "load_incomplete" : source_errors ? "loaded_with_errors" : "loaded"; }
+	String GetSourceId() const { return source_id; }
+	const V2Goal* FindGoalExact(const String& id) const;
+	const V2Issue* FindIssueExact(const String& id) const;
+	const V2Release* FindReleaseExact(const String& id) const;
 
 private:
+	friend class ManagerSkylarkApp;
+	bool LoadFixtureForTests(const String& fixture_root);
+	bool LoadRoot(const String& root_dir, const String& source_id);
 	String            base_dir;
 	Vector<V2Goal>    goals;
 	Vector<V2Issue>   issues;
 	Vector<V2Release> releases;
+	int               entries_scanned;
+	int64             source_bytes_scanned;
+	String            source_id;
+	int               source_errors;
+	bool              source_incomplete = false;
+	Vector<String>    source_diagnostics;
 
 	void LoadGoals(const String& dir);
 	void LoadIssues(const String& dir);

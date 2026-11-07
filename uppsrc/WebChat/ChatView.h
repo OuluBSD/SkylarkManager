@@ -14,13 +14,13 @@ public:
 	// Returns HTML/CSS/JS snippet for embedding into existing Skylark views
 	static String RenderSnippet(const String& current_session_id = "");
 
-	// Returns client-side JavaScript for markdown rendering & SSE streaming
+	// Returns client-side JavaScript for plain-text messages and SSE streaming
 	static String GetClientScript();
 
 	// Returns modern CSS stylesheet for chat
 	static String GetStyles();
 
-	// Returns core client-side JavaScript for Markdown parsing & custom viewers
+	// Returns the safe plain-text message DOM helper
 	static String GetMarkdownScript();
 
 	// Returns modern CSS stylesheet for Markdown body & custom viewers

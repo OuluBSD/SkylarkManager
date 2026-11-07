@@ -1,360 +1,630 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+#include <Core/SSL/SSL.h>
 
 #ifdef PLATFORM_POSIX
+#include <errno.h>
+#include <poll.h>
+#include <pwd.h>
+#include <signal.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #endif
 
+#ifdef PLATFORM_WIN32
+#include <windows.h>
+#ifdef COMPILER_MSC
+#pragma comment(lib, "Advapi32.lib")
+#endif
+#endif
+
 NAMESPACE_UPP
 
-VectorMap<String, UserSession>& SystemAuthService::Sessions()
+namespace {
+
+VectorMap<String, UserSession>& SessionMap()
 {
-	static VectorMap<String, UserSession> s;
-	static bool loaded = false;
-	if(!loaded) {
-		loaded = true;
-		LoadSessions();
-	}
-	return s;
+	static VectorMap<String, UserSession> sessions;
+	return sessions;
 }
 
-String SystemAuthService::ExtractCookie(const Http& http, const char* name)
+StaticMutex& SessionMutex()
 {
-	String cookie_hdr = http.GetHeader("cookie");
-	Vector<String> parts = Split(cookie_hdr, ';');
-	for(int i = 0; i < parts.GetCount(); i++) {
-		String p = TrimBoth(parts[i]);
-		if(p.StartsWith(String(name) + "="))
-			return TrimBoth(p.Mid((int)strlen(name) + 1));
-	}
-	return String();
+	static StaticMutex mutex;
+	return mutex;
 }
 
-void SystemAuthService::SaveSessions()
+bool SameOrigin(const Http& http)
 {
-	String dir = GetHomeDirFile(".config/managerskylark");
-	RealizeDirectory(dir);
-	String path = AppendFileName(dir, "sessions.json");
-	ValueMap m;
-	VectorMap<String, UserSession>& s = Sessions();
-	for(int i = 0; i < s.GetCount(); i++) {
-		m.Add(s.GetKey(i), StoreAsJsonValue(s[i]));
-	}
-	SaveFile(path, AsJSON(m, true));
+	String host = http.GetHeader("host");
+	String source = http.GetHeader("origin");
+	if(source.IsEmpty()) source = http.GetHeader("referer");
+	String fetch_site = ToLower(http.GetHeader("sec-fetch-site"));
+	bool same_host = source == "http://" + host || source.StartsWith("http://" + host + "/") ||
+	                 source == "https://" + host || source.StartsWith("https://" + host + "/");
+	return !host.IsEmpty() && !source.IsEmpty() && same_host &&
+	       (fetch_site.IsEmpty() || fetch_site == "same-origin");
 }
 
-void SystemAuthService::LoadSessions()
+struct LoginThrottleState {
+	int failures = 0;
+	Time window_start = Null;
+	Time blocked_until = Null;
+};
+
+LoginThrottleState& LoginThrottle()
 {
-	String path = AppendFileName(GetHomeDirFile(".config/managerskylark"), "sessions.json");
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueMap>()) {
-			ValueMap m = v;
-			VectorMap<String, UserSession>& s = Sessions();
-			for(int i = 0; i < m.GetCount(); i++) {
-				UserSession sess;
-				LoadFromJsonValue(sess, m.GetValue(i));
-				if(sess.expires_at > GetSysTime())
-					s.Add(m.GetKey(i), sess);
-			}
+	static LoginThrottleState state;
+	return state;
+}
+
+StaticMutex& LoginThrottleMutex()
+{
+	static StaticMutex mutex;
+	return mutex;
+}
+
+bool LoginIsThrottled()
+{
+	Mutex::Lock lock(LoginThrottleMutex());
+	Time now = GetSysTime();
+	LoginThrottleState& state = LoginThrottle();
+	if(state.blocked_until.IsValid() && state.blocked_until > now)
+		return true;
+	if(!state.window_start.IsValid() || now > state.window_start + 60) {
+		state.failures = 0;
+		state.window_start = now;
+		state.blocked_until = Null;
+	}
+	return false;
+}
+
+void RecordLoginFailure()
+{
+	Mutex::Lock lock(LoginThrottleMutex());
+	Time now = GetSysTime();
+	LoginThrottleState& state = LoginThrottle();
+	if(!state.window_start.IsValid() || now > state.window_start + 60) {
+		state.failures = 0;
+		state.window_start = now;
+	}
+	if(++state.failures >= 5) {
+		state.blocked_until = now + 30;
+		state.failures = 0;
+		state.window_start = state.blocked_until;
+	}
+}
+
+void ClearLoginFailures()
+{
+	Mutex::Lock lock(LoginThrottleMutex());
+	LoginThrottle() = LoginThrottleState();
+}
+
+String RandomToken()
+{
+	try {
+		SecureBuffer<byte> random = SecureRandom(32);
+		if(random.IsEmpty()) return String();
+		static const char hex[] = "0123456789abcdef";
+		String token;
+		token.Reserve(64);
+		for(int i = 0; i < 32; i++) {
+			token.Cat(hex[random[i] >> 4]);
+			token.Cat(hex[random[i] & 15]);
+		}
+		return token;
+	}
+	catch(...) { return String(); }
+}
+
+String EscapeAuthHtml(const String& text)
+{
+	String out;
+	for(int i = 0; i < text.GetCount(); i++) {
+		switch(text[i]) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(text[i]); break;
 		}
 	}
+	return out;
+}
+
+} // namespace
+
+void RegisterManagerSkylarkHandler(void (*handler)(Http&), const char *id, const char *path,
+                                   int (*progress)(int, Http&, int))
+{
+	RegisterHandler(handler, id, path, progress);
+}
+
+void RegisterManagerSkylarkProgressHandler(void (*handler)(Http&), const char *id, const char *path,
+                                            int (*progress)(int, Http&, int))
+{
+	RegisterHandler(handler, id, path, progress);
+}
+
+String SystemAuthService::CurrentOsUsername()
+{
+#ifdef PLATFORM_POSIX
+	struct passwd *pw = getpwuid(getuid());
+	return pw ? String(pw->pw_name) : String();
+#elif defined(PLATFORM_WIN32)
+	char username[512];
+	DWORD size = (DWORD)sizeof(username);
+	if(!GetUserNameA(username, &size))
+		return String();
+	return String(username);
+#else
+	return String();
+#endif
 }
 
 bool SystemAuthService::VerifySystemPassword(const String& username, const String& password)
 {
-	if(username.IsEmpty() || password.IsEmpty())
+	if(username.IsEmpty() || password.IsEmpty() || username != CurrentOsUsername())
 		return false;
-
-	String curr_user = GetEnv("USER");
-	if(curr_user.IsEmpty()) curr_user = "sblo";
-
-#ifdef PLATFORM_POSIX
-	// 1. Try unix_chkpwd helper for local system user
-	if(FileExists("/usr/bin/unix_chkpwd") && (username == curr_user || username == "sblo")) {
-		int stdin_pipe[2];
-		int stdout_pipe[2];
-		if(pipe(stdin_pipe) == 0 && pipe(stdout_pipe) == 0) {
-			pid_t pid = fork();
-			if(pid == 0) {
-				close(stdin_pipe[1]);
-				close(stdout_pipe[0]);
-				dup2(stdin_pipe[0], STDIN_FILENO);
-				dup2(stdout_pipe[1], STDOUT_FILENO);
-				dup2(stdout_pipe[1], STDERR_FILENO);
-				close(stdin_pipe[0]);
-				close(stdout_pipe[1]);
-				execl("/usr/bin/unix_chkpwd", "unix_chkpwd", ~username, "nullok", (char*)NULL);
-				_exit(127);
-			}
-			close(stdin_pipe[0]);
-			close(stdout_pipe[1]);
-			write(stdin_pipe[1], ~password, password.GetLength() + 1);
-			close(stdin_pipe[1]);
-			close(stdout_pipe[0]);
-
-			int status = 0;
-			waitpid(pid, &status, 0);
-			if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
-				return true;
+#if defined(PLATFORM_LINUX)
+	const char *helper = FileExists("/usr/sbin/unix_chkpwd") ? "/usr/sbin/unix_chkpwd" :
+	                     FileExists("/usr/bin/unix_chkpwd") ? "/usr/bin/unix_chkpwd" : NULL;
+	if(!helper) {
+		RLOG("Authentication unavailable: unix_chkpwd is not installed; login fails closed.");
+		return false;
+	}
+	int input_pipe[2];
+	int output_pipe[2];
+	if(pipe(input_pipe) != 0) {
+		RLOG("Authentication unavailable: cannot create unix_chkpwd pipes.");
+		return false;
+	}
+	if(pipe(output_pipe) != 0) {
+		close(input_pipe[0]);
+		close(input_pipe[1]);
+		RLOG("Authentication unavailable: cannot create unix_chkpwd pipes.");
+		return false;
+	}
+	pid_t pid = fork();
+	if(pid == 0) {
+		close(input_pipe[1]);
+		close(output_pipe[0]);
+		dup2(input_pipe[0], STDIN_FILENO);
+		dup2(output_pipe[1], STDOUT_FILENO);
+		dup2(output_pipe[1], STDERR_FILENO);
+		close(input_pipe[0]);
+		close(output_pipe[1]);
+		execl(helper, "unix_chkpwd", ~username, "nullok", (char *)NULL);
+		_exit(127);
+	}
+	close(input_pipe[0]);
+	close(output_pipe[1]);
+	if(pid < 0) {
+		close(input_pipe[1]);
+		close(output_pipe[0]);
+		RLOG("Authentication unavailable: could not start unix_chkpwd.");
+		return false;
+	}
+	String input = password + "\n";
+	int written = 0;
+	while(written < input.GetCount()) {
+		int n = (int)write(input_pipe[1], input.Begin() + written, input.GetCount() - written);
+		if(n <= 0) break;
+		written += n;
+	}
+	close(input_pipe[1]);
+	char response[128];
+	bool timed_out = false;
+	bool pipe_failed = false;
+	for(;;) {
+		struct pollfd pfd;
+		pfd.fd = output_pipe[0];
+		pfd.events = POLLIN | POLLHUP;
+		pfd.revents = 0;
+		int ready = poll(&pfd, 1, 5000);
+		if(ready < 0 && errno == EINTR)
+			continue;
+		if(ready <= 0) {
+			timed_out = true;
+			break;
+		}
+		int n = (int)read(output_pipe[0], response, sizeof(response));
+		if(n == 0)
+			break;
+		if(n < 0 && errno == EINTR)
+			continue;
+		if(n < 0) {
+			pipe_failed = true;
+			break;
 		}
 	}
-#endif
-
-	// 2. Check config password file ~/.config/managerskylark/auth.json
-	String conf_file = AppendFileName(GetHomeDirFile(".config/managerskylark"), "auth.json");
-	if(FileExists(conf_file)) {
-		Value v = ParseJSON(LoadFile(conf_file));
-		if(v.Is<ValueMap>()) {
-			ValueMap m = v;
-			if(m.Find(username) >= 0 && (String)m[username] == password)
-				return true;
-		}
+	close(output_pipe[0]);
+	if(timed_out || pipe_failed)
+		kill(pid, SIGKILL);
+	int status = 0;
+	pid_t waited;
+	do {
+		waited = waitpid(pid, &status, 0);
+	} while(waited < 0 && errno == EINTR);
+	return !timed_out && !pipe_failed && waited == pid && written == input.GetCount() && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#elif defined(PLATFORM_WIN32)
+	{
+		HANDLE token = NULL;
+		BOOL verified = LogonUserA(~username, ".", ~password, LOGON32_LOGON_INTERACTIVE,
+		                           LOGON32_PROVIDER_DEFAULT, &token);
+		if(token)
+			CloseHandle(token);
+		return verified != 0;
 	}
-
-	// 3. Fallback dev password / env check
-	String env_pwd = GetEnv("MANAGER_AUTH_PASSWORD");
-	if(!env_pwd.IsEmpty() && password == env_pwd)
-		return true;
-
-	// 4. Default developer convenience for user sblo
-	if((username == "sblo" || username == curr_user) && (password == "sblo" || password == "admin" || password == "password"))
-		return true;
-
+#else
+	RLOG("Authentication unavailable: OS password verification is unsupported on this platform.");
 	return false;
+#endif
 }
 
 UserSession SystemAuthService::CreateSession(const String& username)
 {
-	UserSession s;
-	s.username = username;
-	s.github_username = "SeppoPakonen";
-	s.sf_username = "sppp";
-	s.display_name = (username == "sblo") ? "Seppo Pakonen" : ToUpper(username.Left(1)) + username.Mid(1);
-	s.home_dir = GetHomeDirectory();
-	s.created_at = GetSysTime();
-	s.expires_at = GetSysTime() + 30 * 24 * 3600;
-	s.is_authenticated = true;
-	s.is_admin = true;
+	if(username.IsEmpty() || username != CurrentOsUsername()) return UserSession();
+	UserSession session;
+	session.username = username;
+	session.display_name = username;
+	session.home_dir = GetHomeDirectory();
+	session.created_at = GetSysTime();
+	session.expires_at = session.created_at + 8 * 3600;
+	session.is_authenticated = true;
+	// The only accepted identity is the current OS account: this initial
+	// deployment mode represents one local operator, not arbitrary admins.
+	session.is_admin = true;
+	session.token = RandomToken();
+	if(session.token.IsEmpty()) return UserSession();
+	Mutex::Lock lock(SessionMutex());
+	for(int i = SessionMap().GetCount() - 1; i >= 0; i--)
+		if(SessionMap()[i].expires_at <= session.created_at) SessionMap().Remove(i);
+	while(SessionMap().GetCount() >= 32) {
+		int oldest = 0;
+		for(int i = 1; i < SessionMap().GetCount(); i++)
+			if(SessionMap()[i].created_at < SessionMap()[oldest].created_at)
+				oldest = i;
+		SessionMap().Remove(oldest);
+	}
+	SessionMap().GetAdd(session.token) = session;
+	return session;
+}
 
-	// Token generator
-	s.token = "auth-" + username + "-" + AsString((int64)Random(1000000000)) + AsString((int64)Random(1000000000));
-	Sessions().GetAdd(s.token) = s;
-	SaveSessions();
-	return s;
+UserSession SystemAuthService::CreateTestSessionForTests()
+{
+	if(!ManagerSkylarkApp::IsolatedTestModeActive()) return UserSession();
+	UserSession session;
+	session.username = "synthetic-test-operator";
+	session.display_name = "Synthetic Test Operator";
+	session.created_at = GetSysTime();
+	session.expires_at = session.created_at + 3600;
+	session.is_authenticated = true;
+	session.is_admin = true;
+	session.token = RandomToken();
+	if(session.token.IsEmpty()) return UserSession();
+	Mutex::Lock lock(SessionMutex());
+	SessionMap().GetAdd(session.token) = session;
+	return session;
+}
+
+ManagerSkylarkApp::BatchFinalizationResult SystemAuthService::FinalizeBatchForSession(
+	ManagerSkylarkApp& app, const UserSession& session, const String& source_id,
+	const String& workspace_id, const String& operation_id,
+	const Vector<DataBatchChange>& changes)
+{
+	ManagerSkylarkApp::BatchFinalizationResult denied;
+	denied.operation_id = operation_id;
+	denied.status = "authorization_denied";
+	if(session.token.IsEmpty() || source_id.IsEmpty() || workspace_id.IsEmpty()) return denied;
+
+	UserSession live;
+	{
+		Mutex::Lock lock(SessionMutex());
+		int q = SessionMap().Find(session.token);
+		if(q < 0) return denied;
+		if(SessionMap()[q].expires_at <= GetSysTime()) {
+			SessionMap().Remove(q);
+			return denied;
+		}
+		live = SessionMap()[q];
+	}
+	if(!live.is_authenticated || !live.is_admin || live.username.IsEmpty() ||
+	   session.username != live.username ||
+	   session.is_authenticated != live.is_authenticated || session.is_admin != live.is_admin ||
+	   session.created_at != live.created_at || session.expires_at != live.expires_at) return denied;
+
+	DataSourceRegistration registration;
+	if(!app.ReadCurrentCatalogRegistration(registration) || !registration.enabled ||
+	   registration.id != source_id || registration.read_only || !registration.write_enabled)
+		return denied;
+
+	CatalogReadHandle catalog = app.PinLatestCatalog();
+	if(!catalog || catalog->status != "loaded" || catalog->data.GetSourceId() != source_id)
+		return denied;
+	bool workspace_found = false;
+	for(const DataDocument& document : catalog->data.GetDocuments()) {
+		if(document.workspace_id != workspace_id || document.source_id != source_id) continue;
+		workspace_found = true;
+		if(!document.valid || !document.validated) return denied;
+	}
+	if(!workspace_found) return denied;
+
+	DataWriteAuthorization authorization;
+	authorization.authenticated = true;
+	authorization.action_scope = "record:write";
+	authorization.principal = live.username;
+	authorization.source_id = registration.id;
+	authorization.workspace_id = workspace_id;
+	return app.FinalizeBatch(authorization, operation_id, changes);
+}
+
+bool SystemAuthService::AuthorizeWriteForSession(ManagerSkylarkApp& app, const UserSession& session,
+                                                  const String& source_id, const String& workspace_id)
+{
+	if(session.token.IsEmpty() || source_id.IsEmpty() || workspace_id.IsEmpty()) return false;
+	UserSession live;
+	{
+		Mutex::Lock lock(SessionMutex());
+		int q = SessionMap().Find(session.token);
+		if(q < 0) return false;
+		if(SessionMap()[q].expires_at <= GetSysTime()) { SessionMap().Remove(q); return false; }
+		live = SessionMap()[q];
+	}
+	if(!live.is_authenticated || !live.is_admin || live.username.IsEmpty() ||
+	   session.username != live.username || session.is_authenticated != live.is_authenticated ||
+	   session.is_admin != live.is_admin || session.created_at != live.created_at ||
+	   session.expires_at != live.expires_at) return false;
+	DataSourceRegistration registration;
+	if(!app.ReadCurrentCatalogRegistration(registration) || !registration.enabled ||
+	   registration.id != source_id || registration.read_only || !registration.write_enabled) return false;
+	CatalogReadHandle catalog = app.PinLatestCatalog();
+	if(!catalog || catalog->status != "loaded" || catalog->data.GetSourceId() != source_id) return false;
+	bool found = false;
+	for(const DataDocument& document : catalog->data.GetDocuments()) {
+		if(document.workspace_id != workspace_id || document.source_id != source_id) continue;
+		found = true;
+		if(!document.valid || !document.validated) return false;
+	}
+	return found;
+}
+
+bool SystemAuthService::AuthorizeWriteForSession(ManagerSkylarkApp& app, const UserSession& session,
+	                                              const String& workspace_id)
+{
+	if(session.token.IsEmpty() || workspace_id.IsEmpty()) return false;
+	UserSession live;
+	{
+		Mutex::Lock lock(SessionMutex());
+		int q = SessionMap().Find(session.token);
+		if(q < 0) return false;
+		if(SessionMap()[q].expires_at <= GetSysTime()) { SessionMap().Remove(q); return false; }
+		live = SessionMap()[q];
+	}
+	if(!live.is_authenticated || !live.is_admin || live.username.IsEmpty() ||
+	   session.username != live.username || session.is_authenticated != live.is_authenticated ||
+	   session.is_admin != live.is_admin || session.created_at != live.created_at ||
+	   session.expires_at != live.expires_at) return false;
+	DataSourceRegistration registration;
+	if(!app.ReadCurrentCatalogRegistration(registration) || !registration.enabled ||
+	   registration.id.IsEmpty() || registration.read_only || !registration.write_enabled) return false;
+	CatalogReadHandle catalog = app.PinLatestCatalog();
+	if(!catalog || catalog->status != "loaded" || catalog->data.GetSourceId() != registration.id) return false;
+	bool found = false;
+	for(const DataDocument& document : catalog->data.GetDocuments()) {
+		if(document.workspace_id != workspace_id || document.source_id != registration.id) continue;
+		found = true;
+		if(!document.valid || !document.validated) return false;
+	}
+	return found;
+}
+
+void SystemAuthService::ExpireSessionForTest(const String& token)
+{
+	if(!ManagerSkylarkApp::IsolatedTestModeActive()) return;
+	Mutex::Lock lock(SessionMutex());
+	int q = SessionMap().Find(token);
+	if(q >= 0) SessionMap()[q].expires_at = GetSysTime() - 1;
 }
 
 UserSession SystemAuthService::GetCurrentSession(const Http& http)
 {
+	if(ManagerSkylarkApp::IsolatedTestModeActive()) {
+		String test_token = ExtractCookie(http, "wf_auth_session");
+		if(test_token.IsEmpty()) {
+			String auth = http.GetHeader("authorization");
+			if(auth.StartsWith("Bearer ")) test_token = TrimBoth(auth.Mid(7));
+		}
+		if(!test_token.IsEmpty()) {
+			Mutex::Lock lock(SessionMutex());
+			int q = SessionMap().Find(test_token);
+			if(q >= 0 && SessionMap()[q].expires_at > GetSysTime()) return SessionMap()[q];
+		}
+		UserSession test;
+		test.username = "test-operator";
+		test.display_name = "Isolated Test Operator";
+		test.is_authenticated = true;
+		test.is_admin = true;
+		return test;
+	}
 	String token = ExtractCookie(http, "wf_auth_session");
 	if(token.IsEmpty()) {
-		String auth_hdr = http.GetHeader("authorization");
-		if(auth_hdr.StartsWith("Bearer "))
-			token = TrimBoth(auth_hdr.Mid(7));
+		String auth = http.GetHeader("authorization");
+		if(auth.StartsWith("Bearer ")) token = TrimBoth(auth.Mid(7));
 	}
-
-	if(!token.IsEmpty()) {
-		VectorMap<String, UserSession>& map = Sessions();
-		int q = map.Find(token);
-		if(q >= 0) {
-			UserSession& s = map[q];
-			if(s.expires_at > GetSysTime())
-				return s;
-			map.Remove(q);
-			SaveSessions();
-		}
-	}
-
-	// Default unauthenticated guest
 	UserSession guest;
 	guest.username = "guest";
-	guest.display_name = "Guest Visitor";
-	guest.is_authenticated = false;
-	guest.is_admin = false;
-	return guest;
+	guest.display_name = "Guest";
+	Mutex::Lock lock(SessionMutex());
+	int q = SessionMap().Find(token);
+	if(q < 0) return guest;
+	if(SessionMap()[q].expires_at <= GetSysTime()) {
+		SessionMap().Remove(q);
+		return guest;
+	}
+	return SessionMap()[q];
 }
 
 bool SystemAuthService::Login(Http& http, const String& username, const String& password)
 {
-	UserSession sess = LoginSession(http, username, password);
-	return sess.is_authenticated;
+	return LoginSession(http, username, password).is_authenticated;
 }
 
 UserSession SystemAuthService::LoginSession(Http& http, const String& username, const String& password)
 {
-	if(VerifySystemPassword(username, password)) {
-		UserSession sess = CreateSession(username);
-		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/");
-		return sess;
+	if(!SameOrigin(http) || LoginIsThrottled())
+		return UserSession();
+	if(!VerifySystemPassword(username, password)) {
+		RecordLoginFailure();
+		return UserSession();
 	}
-	UserSession failed;
-	failed.username = username;
-	failed.is_authenticated = false;
-	return failed;
+	ClearLoginFailures();
+	UserSession session = CreateSession(username);
+	if(!session.is_authenticated) return session;
+	// Emit the application-owned cookie on a normal response so that SameSite
+	// survives Skylark's redirect serializer, which only emits its cookie jar.
+	http.SetHeader("Set-Cookie", "wf_auth_session=" + UrlEncode(session.token) +
+	              "; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
+	return session;
 }
 
 void SystemAuthService::Logout(Http& http)
 {
 	String token = ExtractCookie(http, "wf_auth_session");
-	if(!token.IsEmpty()) {
-		Sessions().RemoveKey(token);
-		SaveSessions();
+	if(token.IsEmpty()) {
+		String auth = http.GetHeader("authorization");
+		if(auth.StartsWith("Bearer ")) token = TrimBoth(auth.Mid(7));
 	}
-	http.SetCookie("wf_auth_session", "", GetSysTime() - 3600, "/");
+	{
+		Mutex::Lock lock(SessionMutex());
+		SessionMap().RemoveKey(token);
+	}
+	http.SetHeader("Set-Cookie", "wf_auth_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
 }
 
 bool SystemAuthService::RequireAuth(Http& http)
 {
-	UserSession s = GetCurrentSession(http);
-	if(!s.is_authenticated) {
-		String uri = http.GetRequestContent();
-		http.Redirect("/login");
+	return AuthorizeRequest(http);
+}
+
+bool SystemAuthService::AuthorizeRequest(Http& http, const char *route_path)
+{
+	String id = http.GetHandlerId();
+	bool is_public = (id == "LoginPage" && route_path && String(route_path) == "login") ||
+	                 (id == "LoginPost" && route_path && String(route_path) == "login/submit:POST_RAW") ||
+	                 (id == "ApiAuthStatus" && route_path && String(route_path) == "api/auth/status") ||
+	                 (id == "ApiAuthLogin" && route_path && String(route_path) == "api/auth/login:POST_RAW") ||
+	                 (id == "ApiHealth" && route_path && String(route_path) == "api/health");
+	if(is_public) {
+		if(id != "ApiHealth")
+			http.SetHeader("Cache-Control", "no-store");
+		return true;
+	}
+	if(route_path && String(route_path).Find(":POST") >= 0 && !SameOrigin(http)) {
+		http.Response(403, "Forbidden");
+		http.ContentType("application/json");
+		http.SetHeader("Cache-Control", "no-store");
 		return false;
 	}
-	return true;
+	if(GetCurrentSession(http).is_authenticated) {
+		http.SetHeader("Cache-Control", "no-store");
+		return true;
+	}
+	http.SetHeader("Cache-Control", "no-store");
+	if(id.StartsWith("Api") || (route_path && String(route_path).StartsWith("api/"))) {
+		http.Response(401, "Unauthorized");
+		http.ContentType("application/json");
+		http << "{\"error\":\"authentication_required\"}";
+	}
+	else
+		http.Redirect("/login");
+	return false;
+}
+
+String SystemAuthService::ExtractCookie(const Http& http, const char *name)
+{
+	Vector<String> cookies = Split(http.GetHeader("cookie"), ';');
+	String prefix = String(name) + "=";
+	for(const String& cookie : cookies) {
+		String value = TrimBoth(cookie);
+		if(value.StartsWith(prefix)) return value.Mid(prefix.GetCount());
+	}
+	return String();
 }
 
 String SystemAuthService::RenderUserMenu(const UserSession& session)
 {
-	String h;
-	if(session.is_authenticated) {
-		h << "<div style=\"display:flex; align-items:center; gap:10px;\">\n"
-		  << "  <a href=\"/host/overview\" style=\"display:flex; align-items:center; gap:6px; color:var(--wf-fg-normal,#ffffff); font-size:0.85rem; text-decoration:none;\">\n"
-		  << "    <span style=\"width:24px; height:24px; border-radius:50%; background:linear-gradient(135deg,#00a1c5,#6d55aa); display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; color:#fff;\">" << ToUpper(session.username.Left(1)) << "</span>\n"
-		  << "    <span><strong>" << session.username << "</strong></span>\n"
-		  << "  </a>\n"
-		  << "  <a href=\"/logout\" class=\"wf-btn wf-btn-secondary\" style=\"padding:2px 8px; font-size:0.75rem;\">Log Out</a>\n"
-		  << "</div>\n";
-	} else {
-		h << "<div style=\"display:flex; align-items:center; gap:8px;\">\n"
-		  << "  <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.75rem;\">Guest</span>\n"
-		  << "  <a href=\"/login\" class=\"wf-btn wf-btn-primary\" style=\"padding:3px 10px; font-size:0.78rem;\">Log In</a>\n"
-		  << "</div>\n";
-	}
-	return h;
+	if(!session.is_authenticated)
+		return "<a href=\"/login\" class=\"wf-btn wf-btn-primary\">Log In</a>";
+	return "<span>" + EscapeAuthHtml(session.username) + "</span> <form method=\"POST\" action=\"/logout\" style=\"display:inline\"><button type=\"submit\" class=\"wf-btn\">Log out</button></form>";
 }
 
-String SystemAuthService::RenderLoginForm(const String& redirect_url, const String& error_msg)
+String SystemAuthService::RenderLoginForm(const String&, const String& error_msg)
 {
-	String h;
-	h << "<div style=\"max-width:420px; margin:4rem auto; padding:0 1rem;\">\n"
-	  << "  <div class=\"wf-card\">\n"
-	  << "    <div class=\"wf-card-header\">\n"
-	  << "      <span>Linux System Authentication</span>\n"
-	  << "      <span class=\"wf-badge wf-badge-emerald\">PAM Protected</span>\n"
-	  << "    </div>\n"
-	  << "    <div class=\"wf-card-body\">\n"
-	  << "      <div style=\"text-align:center; margin-bottom:1.5rem;\">\n"
-	  << "        <div style=\"width:54px; height:54px; border-radius:50%; background:var(--wf-accent-focus,#00a1c5); display:inline-flex; align-items:center; justify-content:center; color:#fff; font-size:1.6rem; margin-bottom:10px;\">\n"
-	  << "          " << VividIcon::Get("shield", 28) << "\n"
-	  << "        </div>\n"
-	  << "        <h3 style=\"margin:0;\">Sign in to ManagerSkylark</h3>\n"
-	  << "        <p style=\"font-size:0.82rem; color:var(--wf-fg-inactive,#8c929a); margin-top:4px;\">Log in with your Linux machine account (e.g. <code>sblo</code>)</p>\n"
-	  << "      </div>\n";
-
-	if(!error_msg.IsEmpty()) {
-		h << "      <div class=\"wf-alert wf-alert-danger\" style=\"margin-bottom:1rem;\">" << error_msg << "</div>\n";
-	}
-
-	h << "      <form method=\"POST\" action=\"/login/submit\">\n"
-	  << "        <input type=\"hidden\" name=\"redirect\" value=\"" << redirect_url << "\">\n"
-	  << "        <div style=\"margin-bottom:1rem;\">\n"
-	  << "          <label style=\"display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;\">Linux Username</label>\n"
-	  << "          <input type=\"text\" name=\"username\" value=\"sblo\" required autofocus style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.9rem;\">\n"
-	  << "        </div>\n"
-	  << "        <div style=\"margin-bottom:1.5rem;\">\n"
-	  << "          <label style=\"display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;\">System Password</label>\n"
-	  << "          <input type=\"password\" name=\"password\" required placeholder=\"••••••••\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.9rem;\">\n"
-	  << "        </div>\n"
-	  << "        <button type=\"submit\" class=\"wf-btn wf-btn-primary\" style=\"width:100%; padding:9px;\">Sign In to Machine</button>\n"
-	  << "      </form>\n"
-	  << "    </div>\n"
-	  << "    <div class=\"wf-card-footer\" style=\"font-size:0.78rem; justify-content:center;\">\n"
-	  << "      <span>Host: <code>" << GetComputerName() << "</code> &middot; Authenticated against Linux shadow</span>\n"
-	  << "    </div>\n"
-	  << "  </div>\n"
-	  << "</div>\n";
-	return h;
+	String user = CurrentOsUsername();
+	String html;
+	html << "<main><h1>Sign in to ManagerSkylark</h1>"
+	     << "<p>Authenticate as the operating-system account <strong>" << EscapeAuthHtml(user) << "</strong>.</p>";
+	if(!error_msg.IsEmpty()) html << "<p role=\"alert\">" << EscapeAuthHtml(error_msg) << "</p>";
+	html << "<form method=\"POST\" action=\"/login/submit\"><input type=\"hidden\" name=\"username\" value=\""
+	     << EscapeAuthHtml(user) << "\"><label>Password <input type=\"password\" name=\"password\" required></label>"
+	     << "<button type=\"submit\">Sign in</button></form></main>";
+	return html;
 }
-
-// ---------------------------------------------------------------------------
-// SKYLARK Auth Handlers
-// ---------------------------------------------------------------------------
 
 SKYLARK(LoginPage, "login")
 {
-	String err = http["err"];
-	String form = SystemAuthService::RenderLoginForm(http["redirect"], err);
-
-	NavigationModel nav = ManagerSkylarkApp::BuildNavigation("login");
-	String html = PageBuilder()
-		.Title("Sign In - ManagerSkylark System Auth")
-		.Brand("ManagerSkylark", "/", "shield")
-		.Navigation(nav)
-		.Content(form)
-		.Build();
-
+	String html = PageBuilder().Title("Sign In - ManagerSkylark").Brand("ManagerSkylark", "/", "shield")
+		.TrustedContent(SystemAuthService::RenderLoginForm("", http["err"])).Build();
 	http.ContentType("text/html; charset=utf-8") << html;
 }
 
 SKYLARK(LoginPost, "login/submit:POST_RAW")
 {
-	String body = http.GetRequestContent();
 	VectorMap<String, String> form;
-	Vector<String> pairs = Split(body, '&');
-	for(const String& p : pairs) {
-		int eq = p.Find('=');
-		if(eq >= 0)
-			form.Add(UrlDecode(p.Left(eq)), UrlDecode(p.Mid(eq + 1)));
+	for(const String& pair : Split(http.GetRequestContent(), '&')) {
+		int eq = pair.Find('=');
+		if(eq >= 0) form.Add(UrlDecode(pair.Left(eq)), UrlDecode(pair.Mid(eq + 1)));
 	}
-
-	String user = form.Get("username", "");
-	String pass = form.Get("password", "");
-	String redir = form.Get("redirect", "/");
-	if(redir.IsEmpty() || redir.StartsWith("/login")) redir = "/";
-
-	if(SystemAuthService::Login(http, user, pass)) {
-		http.Redirect(redir);
-	} else {
-		http.Redirect("/login?err=" + UrlEncode("Authentication failed. Invalid system username or password."));
+	if(SystemAuthService::Login(http, form.Get("username", ""), form.Get("password", ""))) {
+		http.ContentType("text/html; charset=utf-8");
+		http << "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signed in</title></head>"
+		        "<body><p>Sign-in succeeded. <a href=\"/\">Continue to the workspace</a>.</p></body></html>";
 	}
+	else
+		http.Redirect("/login?err=" + UrlEncode("Authentication failed or system password verification is unavailable."));
 }
 
-SKYLARK(LogoutHandler, "logout")
+SKYLARK(LogoutHandler, "logout:POST_RAW")
 {
 	SystemAuthService::Logout(http);
-	http.Redirect("/");
+	http.ContentType("text/html; charset=utf-8");
+	http << "<!doctype html><html><head><meta charset=\"utf-8\"><title>Signed out</title></head>"
+	        "<body><p>Signed out. <a href=\"/login\">Sign in</a>.</p></body></html>";
 }
 
 SKYLARK(ApiAuthStatus, "api/auth/status")
 {
-	UserSession s = SystemAuthService::GetCurrentSession(http);
-	ValueMap m;
-	m.Set("authenticated", s.is_authenticated);
-	m.Set("username", s.username);
-	m.Set("display_name", s.display_name);
-	m.Set("github_user", s.github_username);
-	m.Set("sf_user", s.sf_username);
-	m.Set("is_admin", s.is_admin);
-	http.ContentType("application/json") << AsJSON(m);
+	UserSession session = SystemAuthService::GetCurrentSession(http);
+	ValueMap response;
+	response.Set("authenticated", session.is_authenticated);
+	if(session.is_authenticated) response.Set("username", session.username);
+	http.ContentType("application/json") << AsJSON(response);
 }
 
 SKYLARK(ApiAuthLogin, "api/auth/login:POST_RAW")
 {
-	Value v = ParseJSON(http.GetRequestContent());
-	if(v.Is<ValueMap>()) {
-		String u = v["username"];
-		String p = v["password"];
-		UserSession s = SystemAuthService::LoginSession(http, u, p);
-		if(s.is_authenticated) {
-			ValueMap res;
-			res.Set("status", "ok");
-			res.Set("token", s.token);
-			res.Set("username", s.username);
-			res.Set("display_name", s.display_name);
-			http.ContentType("application/json") << AsJSON(res);
+	Value value = ParseJSON(http.GetRequestContent());
+	if(value.Is<ValueMap>()) {
+		UserSession session = SystemAuthService::LoginSession(http, value["username"], value["password"]);
+		if(session.is_authenticated) {
+			ValueMap response;
+			response.Set("status", "ok");
+			response.Set("username", session.username);
+			http.ContentType("application/json") << AsJSON(response);
 			return;
 		}
 	}

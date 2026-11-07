@@ -33,17 +33,17 @@ struct AgentStep : Moveable<AgentStep> {
 };
 
 struct AgentRun : Moveable<AgentRun> {
-	String id;               // e.g. "run-101"
-	String repo;             // e.g. "ai-upp-priv"
-	String owner;            // e.g. "SeppoPakonen"
-	String author;           // e.g. "SeppoPakonen"
-	String model;            // e.g. "nvidia/nemotron-3.5-super-vl"
+	String id;
+	String repo;
+	String owner;
+	String author;
+	String model;
 	String task_prompt;      // task description
 	int    linked_issue = 0; // issue #
-	String branch;           // target branch, e.g. "master"
+	String branch;           // target branch
 	String status;           // "running", "completed", "failed", "waiting_review"
 	String created_at;       // ISO date
-	String duration;         // e.g. "48s"
+	String duration;
 	int    max_steps = 10;
 	Vector<AgentStep> steps;
 	String patch_diff;       // unified diff

@@ -2,6 +2,22 @@
 
 NAMESPACE_UPP
 
+static String EscapePageText(const String& s)
+{
+	String out;
+	for(int i = 0; i < s.GetCount(); i++) {
+		switch(s[i]) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(s[i]); break;
+		}
+	}
+	return out;
+}
+
 PageBuilder::PageBuilder()
 	: title("Web Application")
 	, brand_title("WebFramework")
@@ -125,11 +141,11 @@ String PageBuilder::Build() const
 
 	String html;
 	html << "<!DOCTYPE html>\n"
-	     << "<html lang=\"en\" data-theme=\"" << theme_id << "\" data-density=\"" << density_str << "\">\n"
+	     << "<html lang=\"en\" data-theme=\"" << EscapePageText(theme_id) << "\" data-density=\"" << density_str << "\">\n"
 	     << "<head>\n"
 	     << "  <meta charset=\"UTF-8\">\n"
 	     << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-	     << "  <title>" << title << "</title>\n"
+	     << "  <title>" << EscapePageText(title) << "</title>\n"
 	     << "  <style>\n"
 	     << ThemeRegistry::GetGlobalStyles() << "\n"
 	     << DensityConfig::GetAllDensityStyles() << "\n"

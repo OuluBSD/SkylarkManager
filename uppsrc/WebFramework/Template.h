@@ -28,7 +28,25 @@ struct DensityConfig : Moveable<DensityConfig> {
 	static String GetClientScript();
 };
 
-struct TemplateSlots : Moveable<TemplateSlots> {
+class TemplateSlots : Moveable<TemplateSlots> {
+public:
+	const String& GetHeader() const { return header; }
+	const String& GetSubNav() const { return sub_nav; }
+	const String& GetSidebar() const { return sidebar; }
+	const String& GetLeftSidebar() const { return left_sidebar; }
+	const String& GetRightSidebar() const { return right_sidebar; }
+	const String& GetBreadcrumb() const { return breadcrumb; }
+	const String& GetContent() const { return content; }
+	const String& GetFooter() const { return footer; }
+	const String& GetModals() const { return modals; }
+
+private:
+	friend class PageBuilder;
+	friend class MegaMenuTemplate;
+	friend class DashboardTemplate;
+	friend class AppWorkspaceTemplate;
+	friend class GitHubTemplate;
+	friend class SourceForgeTemplate;
 	String header;
 	String sub_nav;
 	String sidebar;
