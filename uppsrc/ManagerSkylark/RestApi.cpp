@@ -1,6 +1,118 @@
 #include "ManagerSkylark.h"
+#include "CandidateWorkflow.h"
+#include "ReviewPackage.h"
 
 NAMESPACE_UPP
+
+namespace {
+
+struct SelfTestSiteRoot {
+	String path;
+	SelfTestSiteRoot()
+	{
+		path = GetTempFileName("ManagerSkylarkSelfTest");
+		if(FileExists(path)) FileDelete(path);
+		RealizeDirectory(path);
+	}
+	~SelfTestSiteRoot()
+	{
+		if(DirectoryExists(path)) DeleteFolderDeep(path);
+	}
+};
+
+static ValueMap TestPolicyIdentity(const String& workspace, const String& object)
+{
+	ValueMap identity;
+	identity.Add("workspace_id", workspace);
+	identity.Add("object_id", object);
+	return identity;
+}
+
+static ValueMap TestDataEnvelope(const String& kind, const String& workspace, const String& id,
+	                            const String& visibility, const String& provenance)
+{
+	ValueMap envelope;
+	envelope.Add("schema_id", "skylark/" + kind);
+	envelope.Add("schema_version", "1");
+	envelope.Add("workspace_id", workspace);
+	envelope.Add("stable_id", id);
+	envelope.Add("record_kind", kind);
+	envelope.Add("revision", "1");
+	envelope.Add("visibility", visibility);
+	envelope.Add("provenance_ref", provenance);
+	return envelope;
+}
+
+static ValueMap TestCandidateRecord(const String& id, const String& source_identity = String())
+{
+	ValueMap record;
+	record.Add("id", id);
+	record.Add("kind", "local-candidate");
+	record.Add("workspace_id", "synthetic-workspace");
+	record.Add("schema_id", "skylark/local-candidate");
+	record.Add("schema_version", "1");
+	record.Add("origin_kind", "locally-authored");
+	record.Add("owner_kind", "local-author");
+	record.Add("provenance", "synthetic-test");
+	record.Add("uncertainty", "synthetic test candidate");
+	record.Add("candidate_kind", "candidate");
+	if(!source_identity.IsEmpty()) record.Add("source_identity", source_identity);
+	record.Add("relationships", ValueArray());
+	ValueMap envelope;
+	envelope.Add("schema_id", "skylark/local-candidate");
+	envelope.Add("schema_version", "1");
+	envelope.Add("workspace_id", "synthetic-workspace");
+	envelope.Add("stable_id", id);
+	envelope.Add("record_kind", "local-candidate");
+	envelope.Add("revision", "1");
+	envelope.Add("visibility", "private");
+	envelope.Add("provenance_ref", "synthetic-test");
+	record.Add("envelope", envelope);
+	return record;
+}
+
+static ValueMap TestPolicyConfiguration()
+{
+	ValueMap instance;
+	instance.Add("configured", true);
+	instance.Add("remote_enabled", false);
+	instance.Add("export_enabled", false);
+	instance.Add("review_granularity", "record");
+	instance.Add("secret_reference", "");
+	ValueArray workspaces, sources, providers, ancestry, protected_ancestry;
+	workspaces.Add(TestPolicyIdentity("synthetic-workspace", "synthetic-workspace"));
+	auto add_source = [&](const String& id, const String& classification, bool visible) {
+		ValueMap source;
+		source.Add("workspace", TestPolicyIdentity("synthetic-workspace", "synthetic-workspace"));
+		source.Add("identity", TestPolicyIdentity("synthetic-workspace", id));
+		source.Add("classification", classification);
+		source.Add("visible", visible);
+		sources.Add(source);
+	};
+	add_source("public-source", "public", true);
+	add_source("private-source", "private", false);
+	ValueMap provider;
+	provider.Add("workspace", TestPolicyIdentity("synthetic-workspace", "synthetic-workspace"));
+	provider.Add("identity", TestPolicyIdentity("synthetic-workspace", "offline-provider"));
+	provider.Add("training_policy", "ineligible");
+	provider.Add("enabled", false);
+	provider.Add("config_revision", "");
+	provider.Add("secret_reference", "");
+	providers.Add(provider);
+	ValueMap registry;
+	registry.Add("version", "trusted-policy-v2");
+	registry.Add("workspaces", workspaces);
+	registry.Add("sources", sources);
+	registry.Add("ancestry", ancestry);
+	registry.Add("providers", providers);
+	registry.Add("protected_ancestry", protected_ancestry);
+	ValueMap config;
+	config.Add("instance", instance);
+	config.Add("registry", registry);
+	return config;
+}
+
+}
 
 SKYLARK(ApiHealth, "api/health")
 {
@@ -383,10 +495,136 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 {
 	Cout() << "=== Running ManagerSkylark Automated Verification ===\n";
 
+	SelfTestSiteRoot fixture;
+	if(fixture.path.IsEmpty() || !DirectoryExists(fixture.path)) {
+		Cerr() << "FAILED: cannot create isolated self-test site root\n";
+		return false;
+	}
+	if(!SystemAuthService::SetSitePassword(fixture.path, "synthetic-user", "synthetic-password")) {
+		Cerr() << "FAILED: cannot write hashed synthetic site-auth fixture\n";
+		return false;
+	}
+	String data_root = AppendFileName(fixture.path, "data-source");
+	RealizeDirectory(data_root);
+	ValueMap sample_paper;
+	sample_paper.Add("id", "demo-paper");
+	sample_paper.Add("kind", "paper");
+	sample_paper.Add("title", "Synthetic Paper");
+	sample_paper.Add("source", "test-fixture");
+	sample_paper.Add("status", "draft");
+	sample_paper.Add("envelope", TestDataEnvelope("paper", "synthetic-workspace", "demo-paper", "public", "synthetic-test"));
+	if(!SaveFile(AppendFileName(data_root, "paper.json"), AsJSON(sample_paper, true))) {
+		Cerr() << "FAILED: cannot write synthetic data fixture\n";
+		return false;
+	}
+	ValueMap hidden_paper;
+	hidden_paper.Add("id", "private-paper");
+	hidden_paper.Add("kind", "paper");
+	hidden_paper.Add("title", "Synthetic Hidden Paper");
+	hidden_paper.Add("source", "test-fixture");
+	hidden_paper.Add("status", "draft");
+	hidden_paper.Add("envelope", TestDataEnvelope("paper", "synthetic-workspace", "private-paper", "private", "synthetic-test"));
+	if(!SaveFile(AppendFileName(data_root, "private-paper.json"), AsJSON(hidden_paper, true))) {
+		Cerr() << "FAILED: cannot write synthetic hidden-data fixture\n";
+		return false;
+	}
+	ValueMap hidden_run;
+	hidden_run.Add("id", "private-run");
+	hidden_run.Add("kind", "paper-research-run");
+	hidden_run.Add("title", "Synthetic Hidden Run");
+	hidden_run.Add("status", "done");
+	hidden_run.Add("envelope", TestDataEnvelope("paper-research-run", "synthetic-workspace", "private-run", "private", "synthetic-test"));
+	if(!SaveFile(AppendFileName(data_root, "private-run.json"), AsJSON(hidden_run, true))) {
+		Cerr() << "FAILED: cannot write synthetic hidden-envelope fixture\n";
+		return false;
+	}
+	if(!SaveFile(AppendFileName(data_root, "candidate-public.json"), AsJSON(TestCandidateRecord("synthetic-candidate"), true)) ||
+	   !SaveFile(AppendFileName(data_root, "candidate-hidden.json"), AsJSON(TestCandidateRecord("hidden-candidate", "private-source"), true)) ||
+	   !SaveFile(AppendFileName(fixture.path, "policy.json"), AsJSON(TestPolicyConfiguration(), true)) ||
+	   !ManagerSkylarkApp::SeedSyntheticCandidateWorkflow(data_root, "synthetic-workspace", "synthetic-candidate", "public-source") ||
+	   !ManagerSkylarkApp::SeedSyntheticReviewData(data_root, "synthetic-workspace", "public-source")) {
+		Cerr() << "FAILED: cannot write synthetic candidate and policy fixtures\n";
+		return false;
+	}
+	ValueMap registration;
+	registration.Add("root", data_root);
+	if(!SaveFile(AppendFileName(fixture.path, "data-root.json"), AsJSON(registration, true))) {
+		Cerr() << "FAILED: cannot write synthetic data-root registration\n";
+		return false;
+	}
+	DataStore::SetRootRegistrationPath(AppendFileName(fixture.path, "data-root.json"));
+	if(!ScopedPolicyService::RunSyntheticTests()) {
+		Cerr() << "FAILED: scoped-policy synthetic tests\n";
+		return false;
+	}
+	if(!CandidateWorkflow::RunSyntheticTests()) {
+		Cerr() << "FAILED: candidate-workflow synthetic validation tests\n";
+		return false;
+	}
+	if(!ReviewPackage::RunSyntheticTests()) {
+		Cerr() << "FAILED: immutable review-package synthetic tests\n";
+		return false;
+	}
+	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));
+	if(!auth_config.Is<ValueMap>()) {
+		Cerr() << "FAILED: site credential file was not a JSON object\n";
+		return false;
+	}
+	ValueMap test_credentials = auth_config;
+	test_credentials.Add("legacy-user", "legacy-password");
+	if(!SaveFile(AppendFileName(fixture.path, "auth.json"), AsJSON(test_credentials, true))) {
+		Cerr() << "FAILED: cannot write legacy synthetic site-auth fixture\n";
+		return false;
+	}
+	SystemAuthService::ConfigureSite(fixture.path, false);
+	bool hashed_ok = SystemAuthService::VerifySystemPassword("synthetic-user", "synthetic-password");
+	bool hashed_bad = SystemAuthService::VerifySystemPassword("synthetic-user", "wrong-password");
+	bool legacy_ok = SystemAuthService::VerifySystemPassword("legacy-user", "legacy-password");
+	bool dummy_ok = SystemAuthService::VerifySystemPassword("sblo", "password");
+	if(!hashed_ok || hashed_bad || !legacy_ok || dummy_ok) {
+		Cerr() << "FAILED: site auth configuration contract\n";
+		return false;
+	}
+	SystemAuthService::ConfigureSite(fixture.path, true);
+	if(!SystemAuthService::VerifySystemPassword("demo", "demo") ||
+	   SystemAuthService::VerifySystemPassword("sblo", "password") ||
+	   SystemAuthService::VerifySystemPassword("demo", "wrong-password")) {
+		Cerr() << "FAILED: explicit synthetic demo auth contract\n";
+		return false;
+	}
+	SystemAuthService::ConfigureSite(fixture.path, false);
+
 	ManagerSkylarkApp app;
 	app.port = port;
 	app.threads = 1;
+	app.ip = "127.0.0.1";
+	app.test_mode = true;
+	app.custom_site_dir = true;
+	app.site_dir = fixture.path;
+	app.demo_site = false;
+	SystemAuthService::ConfigureSite(fixture.path, false);
+	DataStore::SetRootRegistrationPath(AppendFileName(fixture.path, "data-root.json"));
 	app.InitApp();
+	if(app.GetDataStore().GetDocuments().GetCount() != 20 ||
+	   !app.IsAssessmentSourceVisible("synthetic-workspace", "public-source") ||
+	   app.IsAssessmentSourceVisible("synthetic-workspace", "private-source")) {
+		Cerr() << "FAILED: explicitly registered synthetic data root\n";
+		return false;
+	}
+	ValueMap initial_workflow = CandidateWorkflow::Project(app.GetDataStore(), app, "synthetic-workspace", "synthetic-candidate");
+	if(MapGetString(initial_workflow, "status") != "visible" || MapGetString(initial_workflow, "stage") != "draft") {
+		Cerr() << "FAILED: synthetic candidate workflow projection\n";
+		return false;
+	}
+	int before_denied_mutations = app.GetDataStore().GetDocuments().GetCount();
+	ValueMap disabled_create = CandidateWorkflow::CreateProposal(app.GetDataStore(), app, ValueMap(), "synthetic-workspace", "synthetic-source", "synthetic-op", UserSession());
+	ValueMap disabled_revise = CandidateWorkflow::ReviseProposal(app.GetDataStore(), app, "synthetic-workspace", "synthetic-candidate", "synthetic-proposal", "1", "r1", ValueMap(), "synthetic-source", "synthetic-revise", UserSession());
+	ValueMap disabled_advance = CandidateWorkflow::AdvanceStage(app.GetDataStore(), app, "synthetic-workspace", "synthetic-candidate", "r1", "1", "1", "event", "source-inspected", "synthetic", ValueArray(), "synthetic-source", "synthetic-advance", UserSession());
+	if(MapGetString(disabled_create, "status") != "denied" || MapGetString(disabled_revise, "status") != "denied" ||
+	   MapGetString(disabled_advance, "status") != "denied" || app.GetDataStore().GetDocuments().GetCount() != before_denied_mutations) {
+		Cerr() << "FAILED: candidate workflow mutations must remain disabled\n";
+		return false;
+	}
 
 	// 1. Model & Store Tests
 	V2Store& v2 = app.GetV2Store();
@@ -468,6 +706,18 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 			return false;
 		}
 		Cout() << "ok    /api/projects (200 OK)\n";
+	}
+	{
+		HttpRequest req(base_url + "/api/data/docs?kind=paper");
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Paper") < 0 || res.Find("Synthetic Hidden Paper") >= 0 || res.Find("Synthetic Hidden Run") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: synthetic read-only catalog API or source-path redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		Cout() << "ok    /api/data/docs (synthetic read-only catalog)\n";
 	}
 
 	// Test GET /api/tasks/next/manager-skylark
@@ -598,8 +848,335 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cout() << "ok    GET /api/chat/stream (200 OK SSE streaming)\n";
 	}
 
-	// Clean shutdown
-	server_thread.Detach();
+	app.test_mode = false;
+	app.demo_site = false;
+	SystemAuthService::ConfigureSite(fixture.path, false);
+	{
+		HttpRequest req(base_url + "/api/projects");
+		req.Timeout(3000);
+		req.Execute();
+		if(req.GetStatusCode() != 401) {
+			Cerr() << "FAILED: unauthenticated site API was not denied\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/data/docs");
+		req.Timeout(3000);
+		req.Execute();
+		if(req.GetStatusCode() != 401) {
+			Cerr() << "FAILED: unauthenticated data catalog request was not denied\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	ValueMap site_login;
+	site_login.Add("username", "synthetic-user");
+	site_login.Add("password", "synthetic-password");
+	HttpRequest site_login_req(base_url + "/api/auth/login");
+	site_login_req.POST().ContentType("application/json").PostData(AsJSON(site_login));
+	site_login_req.Timeout(3000);
+	String site_login_body = site_login_req.Execute();
+	Value site_login_result = ParseJSON(site_login_body);
+	String site_token = site_login_result["token"];
+	if(site_login_req.GetStatusCode() != 200 || site_token.IsEmpty()) {
+		Cerr() << "FAILED: site-configured login\n";
+		app.Quit();
+		server_thread.Wait();
+		return false;
+	}
+	{
+		HttpRequest req(base_url + "/api/projects");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("manager-skylark") < 0) {
+			Cerr() << "FAILED: authenticated site request\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/reviews/packages");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		String synthetic_patch = "diff --git a/src/synthetic.cpp b/src/synthetic.cpp\nindex 1111111..2222222 100644\n--- a/src/synthetic.cpp\n+++ b/src/synthetic.cpp\n@@ -1 +1 @@\n-old\n+new\n";
+		String patch_hash = DataStore::ContentDigest(synthetic_patch);
+		if(req.GetStatusCode() != 200 || res.Find("demo-package") < 0 || res.Find("diff --git") >= 0 ||
+		   res.Find("src/synthetic.cpp") >= 0 || res.Find(patch_hash) >= 0 || res.Find("patch_sha256") >= 0 ||
+		   res.Find("patch_bytes") >= 0 || res.Find("Synthetic Reviewer") >= 0) {
+			Cerr() << "FAILED: read-only review package index redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/reviews/package?workspace=synthetic-workspace&package=demo-package&revision=demo-review-revision");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		String synthetic_patch = "diff --git a/src/synthetic.cpp b/src/synthetic.cpp\nindex 1111111..2222222 100644\n--- a/src/synthetic.cpp\n+++ b/src/synthetic.cpp\n@@ -1 +1 @@\n-old\n+new\n";
+		String patch_hash = DataStore::ContentDigest(synthetic_patch);
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Goal") < 0 || res.Find("Synthetic Topology") < 0 ||
+		   res.Find("Related record unavailable") < 0 || res.Find("private-check") >= 0 || res.Find("missing-check") >= 0 ||
+		   res.Find("SYNTHETIC HUMAN COMMENT BODY") >= 0 || res.Find("Private Synthetic Reviewer") >= 0 ||
+		   res.Find("diff --git") >= 0 || res.Find("src/synthetic.cpp") >= 0 || res.Find(patch_hash) >= 0 || res.Find("patch_bytes") >= 0) {
+			Cerr() << "FAILED: review package API metadata and discussion redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/reviews/related?workspace=synthetic-workspace&kind=goal&ref=demo-goal");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Goal") < 0) {
+			Cerr() << "FAILED: visible related-record link resolver\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/reviews/related?workspace=synthetic-workspace&kind=paper&ref=private-check");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 404 || res.Find("private-check") >= 0) {
+			Cerr() << "FAILED: hidden related-record redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/review-package?workspace=synthetic-workspace&package=demo-package&revision=demo-review-revision");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("diff --git") < 0 || res.Find("SYNTHETIC HUMAN COMMENT BODY") >= 0 ||
+		   res.Find("Private Synthetic Reviewer") >= 0 || res.Find("private-check") >= 0 || res.Find("missing-check") >= 0) {
+			Cerr() << "FAILED: authenticated review detail rendering\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/candidates/lineage?workspace=synthetic-workspace");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("synthetic-candidate") < 0 ||
+		   res.Find("hidden-candidate") >= 0 || res.Find("private-source") >= 0) {
+			Cerr() << "FAILED: policy-scoped candidate lineage projection\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/candidates/workflow?workspace=synthetic-workspace&candidate=synthetic-candidate");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("workflow_state") < 0 || res.Find("visible") < 0 ||
+		   res.Find("draft") < 0 || res.Find("private-source") >= 0 || res.Find("demo-evidence-item") >= 0 ||
+		   res.Find("quality_contract") >= 0) {
+			Cerr() << "FAILED: read-only candidate workflow projection\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/data/docs?kind=paper");
+		req.Header("Authorization", "Bearer " + site_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Paper") < 0) {
+			Cerr() << "FAILED: authenticated site data catalog\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+
+	app.demo_site = true;
+	SystemAuthService::ConfigureSite(fixture.path, true);
+	ValueMap demo_login;
+	demo_login.Add("username", "demo");
+	demo_login.Add("password", "demo");
+	HttpRequest demo_login_req(base_url + "/api/auth/login");
+	demo_login_req.POST().ContentType("application/json").PostData(AsJSON(demo_login));
+	demo_login_req.Timeout(3000);
+	String demo_login_body = demo_login_req.Execute();
+	Value demo_login_result = ParseJSON(demo_login_body);
+	String demo_token = demo_login_result["token"];
+	if(demo_login_req.GetStatusCode() != 200 || demo_token.IsEmpty()) {
+		Cerr() << "FAILED: explicit demo login\n";
+		app.Quit();
+		server_thread.Wait();
+		return false;
+	}
+	{
+		HttpRequest req(base_url + "/api/reviews/packages");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("demo-package") < 0 || res.Find("diff --git") >= 0 || res.Find("src/synthetic.cpp") >= 0) {
+			Cerr() << "FAILED: synthetic review package index\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/reviews");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("demo-package") < 0) {
+			Cerr() << "FAILED: synthetic review package page\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/review-package?workspace=synthetic-workspace&package=demo-package&revision=demo-review-revision");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("diff --git") < 0 || res.Find("SYNTHETIC HUMAN COMMENT BODY") >= 0 ||
+		   res.Find("Private Synthetic Reviewer") >= 0 || res.Find("private-check") >= 0) {
+			Cerr() << "FAILED: synthetic review detail privacy\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic ManagerSkylark Demo") < 0 || res.Find("/home/") >= 0) {
+			Cerr() << "FAILED: isolated synthetic demo homepage\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/data/docs?kind=paper");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Paper") < 0 || res.Find("Synthetic Hidden Paper") >= 0 || res.Find("Synthetic Hidden Run") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: demo read-only data catalog\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/research/papers");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Synthetic Paper") < 0 ||
+		   res.Find("Synthetic Hidden Paper") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: read-only synthetic research listing\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/candidates/lineage?workspace=synthetic-workspace");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("synthetic-candidate") < 0 ||
+		   res.Find("hidden-candidate") >= 0 || res.Find("private-source") >= 0) {
+			Cerr() << "FAILED: read-only synthetic candidate lineage\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/candidates/workflow?workspace=synthetic-workspace&candidate=synthetic-candidate");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("workflow_state") < 0 || res.Find("visible") < 0 ||
+		   res.Find("draft") < 0 || res.Find("private-source") >= 0 || res.Find("demo-evidence-item") >= 0 ||
+		   res.Find("quality_contract") >= 0) {
+			Cerr() << "FAILED: synthetic read-only candidate workflow\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/candidate-workflow?workspace=synthetic-workspace&candidate=synthetic-candidate");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Candidate synthetic-candidate is at stage draft") < 0 ||
+		   res.Find("/api/candidates/proposal") >= 0 || res.Find("/api/candidates/stage") >= 0) {
+			Cerr() << "FAILED: read-only candidate workflow page\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/data");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Data Catalog") < 0 || res.Find("Synthetic Hidden Paper") >= 0 || res.Find("Synthetic Hidden Run") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: isolated data catalog page\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
+		ValueMap claim;
+		claim.Add("project", "manager-skylark");
+		claim.Add("seq", 1);
+		HttpRequest req(base_url + "/api/tasks/claim");
+		req.Header("Authorization", "Bearer " + demo_token);
+		req.POST().ContentType("application/json").PostData(AsJSON(claim));
+		req.Timeout(3000);
+		req.Execute();
+		const Task *task = app.GetLocalStore().FindTask("manager-skylark", 1);
+		if(req.GetStatusCode() != 403 || !task || task->status != "open") {
+			Cerr() << "FAILED: demo write isolation\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	app.test_mode = true;
+	app.demo_site = false;
+	SystemAuthService::ConfigureSite(fixture.path, false);
+
+	// Clean shutdown before the isolated fixture root is removed.
+	app.Quit();
+	server_thread.Wait();
 
 	Cout() << "ManagerSkylark verification PASSED\n";
 	return true;

@@ -8,15 +8,309 @@ ManagerSkylarkApp* ManagerSkylarkApp::s_instance = NULL;
 
 ManagerSkylarkApp::ManagerSkylarkApp()
 	: test_mode(false)
-	, custom_port(8080)
+	, demo_site(false)
+	, custom_site_dir(false)
+	, custom_port(8081)
 {
 	s_instance = this;
 	root = "";
-	port = 8080;
+	port = 8081;
 	ip = "0.0.0.0";
 	threads = 2;
 	prefork = 0;
 	use_caching = false;
+	site_dir = GetHomeDirFile(".config/managerskylark");
+	instance_policy = ScopedPolicyService::Defaults();
+}
+
+ManagerSkylarkApp::~ManagerSkylarkApp()
+{
+	if(demo_site && custom_site_dir && DirectoryExists(site_dir))
+		DeleteFolderDeep(site_dir);
+}
+
+static bool ReadPolicySettings(const Value& value, PolicySettings& settings)
+{
+	if(!value.Is<ValueMap>()) return false;
+	ValueMap map = value;
+	if(map.GetCount() != 5 || map.Find("configured") < 0 || map.Find("remote_enabled") < 0 ||
+	   map.Find("export_enabled") < 0 || map.Find("review_granularity") < 0 || map.Find("secret_reference") < 0)
+		return false;
+	Value configured = map["configured"], remote = map["remote_enabled"], export_enabled = map["export_enabled"];
+	Value review = map["review_granularity"], secret = map["secret_reference"];
+	if(!configured.Is<bool>() || !remote.Is<bool>() || !export_enabled.Is<bool>() ||
+	   !IsString(review) || !IsString(secret))
+		return false;
+	settings.configured = configured;
+	settings.remote_enabled = remote;
+	settings.export_enabled = export_enabled;
+	settings.review_granularity = review;
+	settings.secret_reference = secret;
+	String error;
+	return ScopedPolicyService::Validate(settings, error);
+}
+
+static ValueMap MakeDemoCandidate(const String& id, const String& source_identity = String())
+{
+	ValueMap candidate;
+	candidate.Add("id", id);
+	candidate.Add("kind", "local-candidate");
+	candidate.Add("workspace_id", "demo-workspace");
+	candidate.Add("schema_id", "skylark/local-candidate");
+	candidate.Add("schema_version", "1");
+	candidate.Add("origin_kind", "locally-authored");
+	candidate.Add("owner_kind", "local-author");
+	candidate.Add("provenance", "synthetic-demo");
+	candidate.Add("uncertainty", "synthetic example only");
+	candidate.Add("candidate_kind", "candidate");
+	if(!source_identity.IsEmpty()) candidate.Add("source_identity", source_identity);
+	candidate.Add("relationships", ValueArray());
+	ValueMap envelope;
+	envelope.Add("schema_id", "skylark/local-candidate");
+	envelope.Add("schema_version", "1");
+	envelope.Add("workspace_id", "demo-workspace");
+	envelope.Add("stable_id", id);
+	envelope.Add("record_kind", "local-candidate");
+	envelope.Add("revision", "1");
+	envelope.Add("visibility", "private");
+	envelope.Add("provenance_ref", "synthetic-demo");
+	candidate.Add("envelope", envelope);
+	return candidate;
+}
+
+static ValueMap MakeDemoEnvelope(const String& kind, const String& workspace, const String& id,
+	                              const String& visibility, const String& provenance, const String& version = "1")
+{
+	ValueMap envelope;
+	envelope.Add("schema_id", "skylark/" + kind);
+	envelope.Add("schema_version", version);
+	envelope.Add("workspace_id", workspace);
+	envelope.Add("stable_id", id);
+	envelope.Add("record_kind", kind);
+	envelope.Add("revision", "1");
+	envelope.Add("visibility", visibility);
+	envelope.Add("provenance_ref", provenance);
+	return envelope;
+}
+
+static ValueMap MakeDemoPolicyIdentity(const String& workspace, const String& object)
+{
+	ValueMap identity;
+	identity.Add("workspace_id", workspace);
+	identity.Add("object_id", object);
+	return identity;
+}
+
+static ValueMap MakeDemoPolicyConfig()
+{
+	ValueMap instance;
+	instance.Add("configured", true);
+	instance.Add("remote_enabled", false);
+	instance.Add("export_enabled", false);
+	instance.Add("review_granularity", "record");
+	instance.Add("secret_reference", "");
+	ValueArray workspaces, sources, providers, ancestry, protected_ancestry;
+	workspaces.Add(MakeDemoPolicyIdentity("demo-workspace", "demo-workspace"));
+	ValueMap source;
+	source.Add("workspace", MakeDemoPolicyIdentity("demo-workspace", "demo-workspace"));
+	source.Add("identity", MakeDemoPolicyIdentity("demo-workspace", "demo-source"));
+	source.Add("classification", "public"); source.Add("visible", true); sources.Add(source);
+	ValueMap provider;
+	provider.Add("workspace", MakeDemoPolicyIdentity("demo-workspace", "demo-workspace"));
+	provider.Add("identity", MakeDemoPolicyIdentity("demo-workspace", "offline-demo"));
+	provider.Add("training_policy", "ineligible"); provider.Add("enabled", false);
+	provider.Add("config_revision", ""); provider.Add("secret_reference", ""); providers.Add(provider);
+	ValueMap registry;
+	registry.Add("version", "trusted-policy-v2"); registry.Add("workspaces", workspaces); registry.Add("sources", sources);
+	registry.Add("ancestry", ancestry); registry.Add("providers", providers); registry.Add("protected_ancestry", protected_ancestry);
+	ValueMap config; config.Add("instance", instance); config.Add("registry", registry);
+	return config;
+}
+
+bool ManagerSkylarkApp::SeedSyntheticCandidateWorkflow(const String& data_root, const String& workspace_id,
+	const String& candidate_id, const String& source_identity)
+{
+	if(data_root.IsEmpty() || workspace_id.IsEmpty() || candidate_id.IsEmpty() || source_identity.IsEmpty()) return false;
+	String provenance = "synthetic-demo";
+	String snapshot_id = "demo-evidence-snapshot";
+	String evidence_id = "demo-evidence-item";
+	String proposal_id = "demo-proposal";
+	String revision_id = "demo-proposal-revision";
+	String operation_id = "demo-initial-stage";
+	String stage_event_id = "candidate-stage-event-" + DataStore::ContentDigest(operation_id + "\n" + candidate_id + "\n" + revision_id + "\ndraft").Left(32);
+	String proposal_head_id = "candidate-proposal-head-" + DataStore::ContentDigest(workspace_id + "\n" + proposal_id).Left(32);
+	String stage_head_id = "candidate-stage-head-" + DataStore::ContentDigest(workspace_id + "\n" + candidate_id + "\n" + revision_id).Left(32);
+	String digest('a', 64);
+	ValueMap locator;
+	locator.Add("type", "paper-section");
+	locator.Add("id", "section-1");
+	locator.Add("section", "1");
+
+	ValueMap snapshot;
+	snapshot.Add("id", snapshot_id); snapshot.Add("kind", "evidence-snapshot"); snapshot.Add("workspace_id", workspace_id);
+	snapshot.Add("source_kind", "paper"); snapshot.Add("source_identity", source_identity); snapshot.Add("upstream_revision", "demo-upstream-1");
+	snapshot.Add("content_sha256", digest); snapshot.Add("captured_at", "01/01/2024 00:00:00"); snapshot.Add("source_at", "01/01/2024 00:00:00");
+	snapshot.Add("collector", "synthetic-demo"); snapshot.Add("locator", locator); snapshot.Add("resolution", "resolved");
+	snapshot.Add("content", "Synthetic evidence content for a local demo workflow."); snapshot.Add("classification", "public");
+	snapshot.Add("visibility", "visible"); snapshot.Add("retracted", false); snapshot.Add("predecessor", "none");
+	ValueArray contributors; contributors.Add("synthetic-demo"); snapshot.Add("contributors", contributors);
+	snapshot.Add("envelope", MakeDemoEnvelope("evidence-snapshot", workspace_id, snapshot_id, "private", provenance, "2"));
+	if(!SaveFile(AppendFileName(data_root, "demo-evidence-snapshot.json"), AsJSON(snapshot, true))) return false;
+
+	ValueMap evidence;
+	evidence.Add("id", evidence_id); evidence.Add("kind", "evidence-item"); evidence.Add("workspace_id", workspace_id); evidence.Add("snapshot", snapshot_id);
+	evidence.Add("source_identity", source_identity); evidence.Add("upstream_revision", "demo-upstream-1"); evidence.Add("content_sha256", digest);
+	evidence.Add("locator", locator); evidence.Add("resolution", "resolved"); evidence.Add("excerpt", "Synthetic evidence excerpt.");
+	evidence.Add("contributors", contributors); ValueArray source_lines; source_lines.Add(1); evidence.Add("source_lines", source_lines);
+	evidence.Add("classification", "public"); evidence.Add("visibility", "visible");
+	evidence.Add("envelope", MakeDemoEnvelope("evidence-item", workspace_id, evidence_id, "private", provenance, "2"));
+	if(!SaveFile(AppendFileName(data_root, "demo-evidence-item.json"), AsJSON(evidence, true))) return false;
+
+	ValueMap revision;
+	revision.Add("id", revision_id); revision.Add("kind", "proposal-revision"); revision.Add("workspace_id", workspace_id);
+	revision.Add("schema_id", "skylark/proposal-revision"); revision.Add("schema_version", "1"); revision.Add("origin_kind", "locally-authored");
+	revision.Add("owner_kind", "local-author"); revision.Add("provenance", provenance); revision.Add("uncertainty", "unassessed");
+	revision.Add("submission_state", "not-submitted"); revision.Add("approval_state", "not-approved"); revision.Add("author_state", "known-local-author");
+	revision.Add("intent_state", "unknown"); revision.Add("hypothetical", false); revision.Add("revision", "draft");
+	revision.Add("proposal_id", proposal_id); revision.Add("revision_id", "r1"); revision.Add("candidate_id", candidate_id);
+	revision.Add("relationships", ValueArray()); revision.Add("envelope", MakeDemoEnvelope("proposal-revision", workspace_id, revision_id, "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-proposal-revision.json"), AsJSON(revision, true))) return false;
+
+	ValueArray evidence_links; evidence_links.Add(evidence_id);
+	ValueMap form;
+	form.Add("id", "demo-proposal-form"); form.Add("kind", "candidate-proposal"); form.Add("workspace_id", workspace_id); form.Add("revision", "1");
+	form.Add("provenance", provenance); form.Add("candidate_id", candidate_id); form.Add("proposal_revision_id", revision_id); form.Add("candidate_kind", "candidate");
+	form.Add("source_identity", source_identity); form.Add("title", "Synthetic local proposal"); form.Add("purpose", "Demonstrate a read-only proposal projection.");
+	form.Add("quality_contract", "No external submission or approval."); form.Add("inputs", "Synthetic evidence only."); form.Add("outputs", "Read-only status view.");
+	form.Add("runtime_resources", "None."); form.Add("assets", "None."); form.Add("verification_plan", "Synthetic tests only.");
+	form.Add("evidence_links", evidence_links); form.Add("draft_state", "draft"); form.Add("submission_state", "not-submitted");
+	form.Add("approval_state", "not-approved"); form.Add("author_state", "unknown"); form.Add("intent_state", "unknown"); form.Add("hypothetical", false);
+	form.Add("envelope", MakeDemoEnvelope("candidate-proposal", workspace_id, "demo-proposal-form", "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-candidate-proposal.json"), AsJSON(form, true))) return false;
+
+	ValueMap proposal_head;
+	proposal_head.Add("id", proposal_head_id); proposal_head.Add("kind", "candidate-proposal-head"); proposal_head.Add("workspace_id", workspace_id);
+	proposal_head.Add("revision", "1"); proposal_head.Add("provenance", provenance); proposal_head.Add("candidate_id", candidate_id);
+	proposal_head.Add("proposal_id", proposal_id); proposal_head.Add("proposal_revision_id", revision_id); proposal_head.Add("revision_id", "r1");
+	proposal_head.Add("envelope", MakeDemoEnvelope("candidate-proposal-head", workspace_id, proposal_head_id, "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-candidate-proposal-head.json"), AsJSON(proposal_head, true))) return false;
+
+	ValueMap stage_event;
+	stage_event.Add("id", stage_event_id); stage_event.Add("kind", "candidate-stage-event"); stage_event.Add("workspace_id", workspace_id);
+	stage_event.Add("revision", "1"); stage_event.Add("provenance", provenance); stage_event.Add("candidate_id", candidate_id);
+	stage_event.Add("candidate_revision", "1"); stage_event.Add("proposal_revision_id", revision_id); stage_event.Add("stage", "draft");
+	stage_event.Add("previous_event_id", "none"); stage_event.Add("reason", "Initial synthetic draft."); stage_event.Add("evidence_ids", ValueArray());
+	stage_event.Add("operation_id", operation_id); stage_event.Add("actor", "demo"); stage_event.Add("authority", "authenticated-admin");
+	stage_event.Add("timestamp", "01/01/2024 00:00:00");
+	stage_event.Add("envelope", MakeDemoEnvelope("candidate-stage-event", workspace_id, stage_event_id, "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-candidate-stage-event.json"), AsJSON(stage_event, true))) return false;
+
+	ValueMap stage_head;
+	stage_head.Add("id", stage_head_id); stage_head.Add("kind", "candidate-stage-head"); stage_head.Add("workspace_id", workspace_id);
+	stage_head.Add("revision", "1"); stage_head.Add("provenance", provenance); stage_head.Add("candidate_id", candidate_id);
+	stage_head.Add("proposal_revision_id", revision_id); stage_head.Add("stage", "draft"); stage_head.Add("event_id", stage_event_id);
+	stage_head.Add("envelope", MakeDemoEnvelope("candidate-stage-head", workspace_id, stage_head_id, "private", provenance));
+	return SaveFile(AppendFileName(data_root, "demo-candidate-stage-head.json"), AsJSON(stage_head, true));
+}
+
+bool ManagerSkylarkApp::SeedSyntheticReviewData(const String& data_root, const String& workspace_id, const String& source_identity)
+{
+	if(data_root.IsEmpty() || workspace_id.IsEmpty() || source_identity.IsEmpty()) return false;
+	String provenance = "synthetic-demo";
+	String package_id = "demo-package", revision_id = "demo-review-revision", thread_id = "demo-review-thread";
+	String patch = "diff --git a/src/synthetic.cpp b/src/synthetic.cpp\nindex 1111111..2222222 100644\n--- a/src/synthetic.cpp\n+++ b/src/synthetic.cpp\n@@ -1 +1 @@\n-old\n+new\n";
+	String patch_hash = DataStore::ContentDigest(patch);
+
+	ValueMap goal;
+	goal.Add("id", "demo-goal"); goal.Add("kind", "goal"); goal.Add("title", "Synthetic Goal");
+	goal.Add("envelope", MakeDemoEnvelope("goal", workspace_id, "demo-goal", "public", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-goal.json"), AsJSON(goal, true))) return false;
+
+	ValueMap topology;
+	topology.Add("id", "demo-topology"); topology.Add("kind", "topology"); topology.Add("name", "Synthetic Topology");
+	topology.Add("workspace_id", workspace_id); topology.Add("visibility", "public"); topology.Add("classification", "public");
+	ValueMap node; node.Add("id", "demo-node"); node.Add("type", "component"); node.Add("name", "Synthetic Component");
+	ValueArray nodes; nodes.Add(node); topology.Add("nodes", nodes);
+	topology.Add("envelope", MakeDemoEnvelope("topology", workspace_id, "demo-topology", "public", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-topology.json"), AsJSON(topology, true))) return false;
+
+	ValueMap hidden_check;
+	hidden_check.Add("id", "private-check"); hidden_check.Add("kind", "paper"); hidden_check.Add("title", "Private synthetic check");
+	hidden_check.Add("source", "synthetic"); hidden_check.Add("status", "draft"); hidden_check.Add("classification", "private");
+	hidden_check.Add("envelope", MakeDemoEnvelope("paper", workspace_id, "private-check", "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-private-check.json"), AsJSON(hidden_check, true))) return false;
+
+	ValueMap package;
+	package.Add("id", revision_id); package.Add("kind", "review-package-revision"); package.Add("workspace_id", workspace_id);
+	package.Add("package_id", package_id); package.Add("goal_id", "demo-goal"); package.Add("scope_id", "demo-topology");
+	package.Add("base_revision", "base-r1"); package.Add("base_state", "available"); package.Add("head_revision", "head-r1");
+	package.Add("previous_revision", "none"); ValueArray paths; paths.Add("src/synthetic.cpp"); package.Add("selected_paths", paths);
+	package.Add("patch_bytes", patch); package.Add("patch_sha256", patch_hash); package.Add("artifact_refs", ValueArray());
+	ValueArray check_refs; check_refs.Add("private-check"); check_refs.Add("missing-check"); package.Add("check_refs", check_refs);
+	package.Add("artifacts", ValueArray()); package.Add("author", "synthetic-reviewer"); package.Add("author_state", "known-local-author");
+	package.Add("capture_state", "captured"); package.Add("envelope", MakeDemoEnvelope("review-package-revision", workspace_id, revision_id, "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-review-package.json"), AsJSON(package, true))) return false;
+
+	ValueMap thread;
+	thread.Add("id", thread_id); thread.Add("kind", "review-thread"); thread.Add("workspace_id", workspace_id);
+	thread.Add("package_id", package_id); thread.Add("revision_id", revision_id); thread.Add("revision_hash", patch_hash);
+	thread.Add("source_identity", source_identity); thread.Add("envelope", MakeDemoEnvelope("review-thread", workspace_id, thread_id, "private", provenance));
+	if(!SaveFile(AppendFileName(data_root, "demo-review-thread.json"), AsJSON(thread, true))) return false;
+
+	auto save_comment = [&](const String& id, const String& type, const String& author_kind, const String& author, const String& body_text, const ValueArray& refs) {
+		ValueMap comment;
+		comment.Add("id", id); comment.Add("kind", "review-comment"); comment.Add("workspace_id", workspace_id);
+		comment.Add("package_id", package_id); comment.Add("revision_id", revision_id); comment.Add("revision_hash", patch_hash);
+		comment.Add("thread_id", thread_id); comment.Add("record_type", type); comment.Add("author_kind", author_kind);
+		comment.Add("author", author); comment.Add("body", body_text); comment.Add("artifact_refs", ValueArray());
+		comment.Add("check_refs", refs); comment.Add("source_identity", source_identity);
+		comment.Add("envelope", MakeDemoEnvelope("review-comment", workspace_id, id, "private", provenance));
+		return SaveFile(AppendFileName(data_root, "demo-review-comment-" + id + ".json"), AsJSON(comment, true));
+	};
+	ValueArray no_refs, hidden_refs; hidden_refs.Add("private-check"); hidden_refs.Add("missing-check");
+	return save_comment("human-comment", "comment", "human", "Private Synthetic Reviewer", "SYNTHETIC HUMAN COMMENT BODY", no_refs) &&
+	       save_comment("agent-note", "agent-note", "agent", "Private Synthetic Agent", "SYNTHETIC AGENT NOTE BODY", no_refs) &&
+	       save_comment("external-evidence", "external-evidence", "external", "Private External Author", "SYNTHETIC EXTERNAL BODY", hidden_refs);
+}
+
+void ManagerSkylarkApp::LoadSitePolicy()
+{
+	instance_policy = ScopedPolicyService::Defaults();
+	workspace_policy = ScopedPolicyService::Defaults();
+	operator_policy = ScopedPolicyService::Defaults();
+	trusted_policy_registry = TrustedPolicyRegistry();
+	if(!custom_site_dir) return;
+	String path = AppendFileName(site_dir, "policy.json");
+	if(!FileExists(path)) return;
+	int64 size = GetFileLength(path);
+	if(size < 0 || size > 64 * 1024) {
+		RLOG("Site policy configuration rejected by size limit; sensitive-source visibility remains denied.");
+		return;
+	}
+	Value root;
+	try { root = ParseJSON(LoadFile(path)); }
+	catch(Exc) { RLOG("Site policy configuration is invalid; sensitive-source visibility remains denied."); return; }
+	if(!root.Is<ValueMap>()) { RLOG("Site policy configuration is invalid; sensitive-source visibility remains denied."); return; }
+	ValueMap map = root;
+	if(map.GetCount() != 2 || map.Find("instance") < 0 || map.Find("registry") < 0) {
+		RLOG("Site policy configuration fields are invalid; sensitive-source visibility remains denied.");
+		return;
+	}
+	PolicySettings instance;
+	TrustedPolicyRegistry registry;
+	String error;
+	if(!ReadPolicySettings(map["instance"], instance) || !instance.configured ||
+	   !TrustedPolicyRegistry::LoadValue(map["registry"], registry, error)) {
+		RLOG("Site policy configuration did not validate; sensitive-source visibility remains denied.");
+		return;
+	}
+	instance_policy = instance;
+	trusted_policy_registry.configured = registry.configured;
+	trusted_policy_registry.sources = pick(registry.sources);
+	trusted_policy_registry.ancestry = pick(registry.ancestry);
+	trusted_policy_registry.providers = pick(registry.providers);
+	trusted_policy_registry.workspaces = pick(registry.workspaces);
+	trusted_policy_registry.protected_ancestry = pick(registry.protected_ancestry);
 }
 
 ManagerSkylarkApp& ManagerSkylarkApp::Get()
@@ -27,8 +321,92 @@ ManagerSkylarkApp& ManagerSkylarkApp::Get()
 
 void ManagerSkylarkApp::InitApp()
 {
-	v2_store.Load();
-	local_store.LoadAll();
+	if(custom_site_dir) {
+		v2_store.Load(AppendFileName(site_dir, "v2"));
+		local_store.SetRootDir(AppendFileName(site_dir, "mgr"));
+		local_store.LoadAll();
+	}
+	else {
+		v2_store.Load();
+		local_store.LoadAll();
+	}
+	if(demo_site) {
+		String data_root = AppendFileName(site_dir, "data");
+		RealizeDirectory(AppendFileName(data_root, "candidates"));
+		ValueMap paper;
+		paper.Add("id", "demo-paper");
+		paper.Add("kind", "paper");
+		paper.Add("title", "Synthetic Research Paper");
+		paper.Add("source", "demo");
+		paper.Add("status", "draft");
+		paper.Add("envelope", MakeDemoEnvelope("paper", "demo-workspace", "demo-paper", "public", "synthetic-demo"));
+		SaveFile(AppendFileName(data_root, "paper.json"), AsJSON(paper, true));
+		SaveFile(AppendFileName(AppendFileName(data_root, "candidates"), "visible.json"), AsJSON(MakeDemoCandidate("demo-candidate"), true));
+		SaveFile(AppendFileName(AppendFileName(data_root, "candidates"), "hidden.json"), AsJSON(MakeDemoCandidate("hidden-candidate", "private-source"), true));
+		SeedSyntheticCandidateWorkflow(data_root, "demo-workspace", "demo-candidate", "demo-source");
+		SeedSyntheticReviewData(data_root, "demo-workspace", "demo-source");
+		ValueMap registration;
+		registration.Add("root", data_root);
+		SaveFile(AppendFileName(site_dir, "data-root.json"), AsJSON(registration, true));
+		SaveFile(AppendFileName(site_dir, "policy.json"), AsJSON(MakeDemoPolicyConfig(), true));
+		DataStore::SetRootRegistrationPath(AppendFileName(site_dir, "data-root.json"));
+	}
+	LoadSitePolicy();
+	data_store.Load();
+	if(demo_site && local_store.Projects().IsEmpty()) {
+		Project project;
+		project.slug = "demo-project";
+		project.title = "Synthetic Demo Project";
+		project.status = "active";
+		project.description = "Example content isolated to this temporary demo installation.";
+		local_store.SaveProject(project);
+		Phase phase;
+		phase.project = project.slug;
+		phase.seq = 1;
+		phase.slug = "demo-phase";
+		phase.title = "Example Phase";
+		phase.status = "open";
+		local_store.SavePhase(phase);
+		Task task;
+		task.project = project.slug;
+		task.phase_seq = phase.seq;
+		task.seq = 1;
+		task.slug = "demo-task";
+		task.title = "Example Task";
+		task.status = "open";
+		local_store.SaveTask(task);
+		local_store.LoadAll();
+	}
+}
+
+bool ManagerSkylarkApp::FilterHandler(Http& http)
+{
+	return test_mode || SystemAuthService::AuthorizeRequest(http);
+}
+
+EffectivePolicy ManagerSkylarkApp::ResolveEffectivePolicy(const PolicyInput& input) const
+{
+	return ScopedPolicyService::Resolve(instance_policy, workspace_policy, operator_policy,
+	                                    trusted_policy_registry, input);
+}
+
+bool ManagerSkylarkApp::IsAssessmentSourceVisible(const String& workspace_id, const String& source_identity) const
+{
+	if(workspace_id.IsEmpty() || source_identity.IsEmpty()) return false;
+	for(const PolicyProviderFact& provider : trusted_policy_registry.providers) {
+		PolicyInput input;
+		input.workspace.workspace_id = workspace_id;
+		input.workspace.object_id = workspace_id;
+		PolicyIdentity source;
+		source.workspace_id = workspace_id;
+		source.object_id = source_identity;
+		input.sources.Add(source);
+		input.provider = provider.identity;
+		EffectivePolicy policy = ResolveEffectivePolicy(input);
+		if(policy.source_visible && policy.status == "evaluated")
+			return true;
+	}
+	return false;
 }
 
 void ManagerSkylarkApp::StopServer()
@@ -47,17 +425,58 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.SetDescription("ManagerSkylark - Web application following ../Manager/v2 design");
 	cla.AddArg("help", 'h', "Show help options", false);
 	cla.AddArg("port", 'p', "HTTP server port", true, "port");
+	cla.AddArg("site-dir", 0, "Site installation directory (auth.json, data-root.json, v2/, mgr/)", true, "directory");
+	cla.AddArg("set-site-password", 0, "Create or update a site account using MANAGERSKYLARK_SITE_PASSWORD", true, "username");
+	cla.AddArg("demo-site", 0, "Run an isolated synthetic, read-only demo site", false);
 	cla.AddArg("test", 0, "Run automated HTTP and store verification", false);
 
 	if(!cla.Parse(args))
 		return false;
-
 	if(cla.IsArg('h') || cla.IsArg("help")) {
 		cla.PrintHelp();
 		return false;
 	}
 
 	test_mode = cla.IsArg("test");
+	demo_site = cla.IsArg("demo-site");
+	String set_site_user = cla.GetArg("set-site-password");
+	if(demo_site && !set_site_user.IsEmpty()) {
+		Cerr() << "--set-site-password cannot be combined with --demo-site.\n";
+		return false;
+	}
+	String configured_site_dir = cla.GetArg("site-dir");
+	if(demo_site) {
+		if(!configured_site_dir.IsEmpty())
+			site_dir = AppendFileName(NormalizePath(configured_site_dir), "demo-" + Format(Uuid::Create()));
+		else
+			site_dir = GetTempFileName("ManagerSkylarkDemo");
+		custom_site_dir = true;
+	}
+	else if(!configured_site_dir.IsEmpty()) {
+		site_dir = NormalizePath(configured_site_dir);
+		custom_site_dir = true;
+	}
+	if(custom_site_dir)
+		RealizeDirectory(site_dir);
+	if(custom_site_dir && !DirectoryExists(site_dir))
+		return false;
+	SystemAuthService::ConfigureSite(site_dir, demo_site);
+	DataStore::SetRootRegistrationPath(custom_site_dir ? AppendFileName(site_dir, "data-root.json") : String());
+	if(!set_site_user.IsEmpty()) {
+		String password = GetEnv("MANAGERSKYLARK_SITE_PASSWORD");
+		if(password.IsEmpty()) {
+			Cerr() << "Set MANAGERSKYLARK_SITE_PASSWORD in the environment before configuring an account.\n";
+			return false;
+		}
+		if(!SystemAuthService::SetSitePassword(site_dir, set_site_user, password)) {
+			Cerr() << "Failed to write site credentials.\n";
+			return false;
+		}
+		Cout() << "Configured site account '" << set_site_user << "' in " << AppendFileName(site_dir, "auth.json") << "\n";
+		return false;
+	}
+	if(!demo_site && !FileExists(AppendFileName(site_dir, "auth.json")))
+		RLOG("No site credentials configured; use --set-site-password USER to create an account.");
 
 	String p_str = cla.GetArg('p');
 	if(p_str.IsEmpty())
@@ -175,6 +594,10 @@ NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav)
 	sec_ai_ops.Add("sweagent", "SweAgent", "/sweagent", "terminal", "Autonomous SWE-Agent runner and task execution").Active(active_nav == "sweagent");
 	sec_ai_ops.Add("projects", "Local Shadow Drafts", "/projects", "layers", "Local low-friction drafts, phases, and task execution").Active(active_nav == "projects");
 	sec_ai_ops.Add("goals", "Manager v2 Goals", "/goals", "flag", "High-level milestones and roadmaps").Active(active_nav == "goals");
+	sec_ai_ops.Add("data", "Data Catalog", "/data", "database", "Read-only schema-validated site data").Active(active_nav == "data");
+	sec_ai_ops.Add("research", "Research Library", "/research", "book", "Read-only paper metadata").Active(active_nav == "research");
+	sec_ai_ops.Add("candidates", "Candidate Lineage", "/candidates", "code", "Read-only candidate provenance").Active(active_nav == "candidates");
+	sec_ai_ops.Add("reviews", "Review Packages", "/reviews", "eye", "Immutable read-only review snapshots").Active(active_nav == "reviews");
 
 	NavSection& sec_ai_api = cat_ai.AddSection("API & Diagnostics");
 	sec_ai_api.Add("spec", "Framework Spec", "/api/framework/spec", "code", "Semantic JSON tree and API surface for agents").Badge("JSON", "cyan").Active(active_nav == "spec");

@@ -8,6 +8,9 @@
 #include <WebChat/WebChat.h>
 #include <WebFramework/WebFramework.h>
 #include "V2Model.h"
+#include "DataStore.h"
+#include "ScopedPolicy.h"
+#include "CandidateLineage.h"
 #include "GitHubPlatform.h"
 #include "SourceForgePlatform.h"
 #include "SystemAuth.h"
@@ -17,16 +20,28 @@ NAMESPACE_UPP
 class ManagerSkylarkApp : public SkylarkApp {
 public:
 	ManagerSkylarkApp();
+	~ManagerSkylarkApp() override;
 
 	bool Initialize(const Vector<String>& args);
 	void InitApp();
+	bool FilterHandler(Http& http) override;
+
+	bool IsDemoSite() const { return demo_site; }
+	bool IsTestMode() const { return test_mode; }
+	String GetSiteDir() const { return site_dir; }
 
 	V2Store&      GetV2Store()      { return v2_store; }
 	ManagerStore& GetLocalStore()   { static StaticMutex sMutex; Mutex::Lock __(sMutex); local_store.LoadAll(); return local_store; }
+	const DataStore& GetDataStore() const { return data_store; }
+	EffectivePolicy ResolveEffectivePolicy(const PolicyInput& input) const;
+	bool IsAssessmentSourceVisible(const String& workspace_id, const String& source_identity) const;
+	static bool SeedSyntheticCandidateWorkflow(const String& data_root, const String& workspace_id, const String& candidate_id, const String& source_identity);
+	static bool SeedSyntheticReviewData(const String& data_root, const String& workspace_id, const String& source_identity);
 
 	static ManagerSkylarkApp& Get();
 
 	void StopServer();
+	void LoadSitePolicy();
 
 	static bool RunSelfTests(int port = 18080);
 
@@ -44,8 +59,16 @@ private:
 	static ManagerSkylarkApp* s_instance;
 
 	V2Store      v2_store;
+	DataStore    data_store;
 	ManagerStore local_store;
+	PolicySettings instance_policy;
+	PolicySettings workspace_policy;
+	PolicySettings operator_policy;
+	TrustedPolicyRegistry trusted_policy_registry;
 	bool         test_mode;
+	bool         demo_site;
+	bool         custom_site_dir;
+	String       site_dir;
 	int          custom_port;
 };
 

@@ -9,6 +9,19 @@ SKYLARK(HomePage, "")
 	ManagerStore& local = app.GetLocalStore();
 	V2Store& v2 = app.GetV2Store();
 	UserSession session = SystemAuthService::GetCurrentSession(http);
+	if(app.IsDemoSite() || app.IsTestMode()) {
+		String demo;
+		String heading = app.IsDemoSite() ? "Synthetic ManagerSkylark Demo" : "Manager Skylark Test Fixture";
+		String note = app.IsDemoSite() ? "This isolated demo uses temporary sample data. Site files, host details, repositories, providers, and write operations are not available." : "This page uses only the isolated synthetic self-test fixture.";
+		demo << "<section class=\"card\"><h1>" << EscapeHtml(heading) << "</h1>"
+		     << "<p>" << EscapeHtml(note) << "</p>"
+		     << "<h2>Sample projects</h2><ul>";
+		for(const Project& project : local.Projects())
+			demo << "<li><a href=\"/project/" << UrlEncode(project.slug) << "\">" << EscapeHtml(project.title) << "</a></li>";
+		demo << "</ul><p>Goals, issues, and releases in this demo are intentionally empty.</p></section>";
+		http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage(heading, "home", demo, &http);
+		return;
+	}
 
 	String host_name = GetComputerName();
 	if(host_name.IsEmpty()) host_name = "sblo-desktop";
