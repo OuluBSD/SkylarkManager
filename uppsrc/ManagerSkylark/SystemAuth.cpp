@@ -336,7 +336,8 @@ String SystemAuthService::RenderLoginForm(const String& redirect_url, const Stri
 	String username_label = ConfiguredDemoSite() ? "Demo Username" : "Site Username";
 	String password_label = ConfiguredDemoSite() ? "Demo Password" : "Site Password";
 	String preset_username = ConfiguredDemoSite() ? "demo" : "";
-	String helper = ConfiguredDemoSite() ? "Use the synthetic demo account: demo / demo" : "Use an account configured in this site's auth.json file.";
+	String helper = ConfiguredDemoSite() ? "Use the synthetic demo account: demo / demo" :
+	                "Use an account from this site's auth.json. Configure one in the server terminal with --set-site-password USER (and the same --site-dir, if set).";
 	h << "<div style=\"max-width:420px; margin:4rem auto; padding:0 1rem;\">\n"
 	  << "  <div class=\"wf-card\">\n"
 	  << "    <div class=\"wf-card-header\">\n"
