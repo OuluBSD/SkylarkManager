@@ -111,7 +111,7 @@ public:
 
 private:
 	Vector<BrokerDiagEntry> diag;
-	StaticMutex mutex;
+	Mutex  mutex;
 	VectorMap<String, One<IBrokerService> > services;
 	static const int DIAG_MAX = 1000;
 };

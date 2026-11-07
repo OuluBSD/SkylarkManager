@@ -1,0 +1,9 @@
+description "Canonical forge domain suite shared by the GitHub, SourceForge, and PrivateHub webapps: backend-qualified identity, provenance model, capability-declaring backend interface\377";
+
+uses
+	Core;
+
+file
+	AGENTS.md,
+	ForgeCore.h,
+	ForgeCore.cpp;

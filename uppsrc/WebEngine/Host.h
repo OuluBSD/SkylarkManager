@@ -36,7 +36,7 @@ private:
 	struct Listener {
 		TcpSocket   server;
 		int         port = 0;
-		StaticMutex accept_mutex;
+		Mutex  accept_mutex;
 	};
 
 	void ListenerLoop(int listener_index);

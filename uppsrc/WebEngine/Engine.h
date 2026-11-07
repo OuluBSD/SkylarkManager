@@ -38,7 +38,7 @@ private:
 	VectorMap<int, int>     port_site;   // port -> sites index
 	int                     default_port_site = -1;
 	WebBroker               broker;
-	StaticMutex             mutex;
+	Mutex                          mutex;
 };
 
 WebEngine& TheWebEngine();

@@ -148,7 +148,7 @@ private:
 	int          ttl_hours;
 	One<JsonFileStore> users_store;
 	One<JsonFileStore> sessions_store;
-	StaticMutex  mutex;
+	Mutex    mutex;
 };
 
 // Self-test helpers for host --test suites and the engine fence test.

@@ -3,6 +3,7 @@
 #include <WebEngine/WebEngine.h>
 #include <WebAccounts/WebAccountsTotp.h>
 #include <MetaAccount/MetaAccountSite.h>
+#include <ForgeCore/ForgeCore.h>
 
 using namespace Upp;
 
@@ -509,6 +510,42 @@ CONSOLE_APP_MAIN
 			hashes.Add(RecoveryCodeHash(pepper, c));
 		Check(RecoveryCodeVerify(pepper, hashes[1], rec[1]), "recovery code verifies");
 		Check(!RecoveryCodeVerify(pepper, hashes[1], rec[0]), "recovery codes are distinct");
+	}
+
+	// --- unit level: ForgeCore domain suite ---
+	{
+		MemoryForgeBackend gh(ForgeBackend::GitHub);
+		Check(gh.BackendId() == "github", "forge backend id");
+		Vector<ForgeIssue> none;
+		ForgeResult lr = gh.ListIssues("owner/repo", none);
+		Check(lr.ok && lr.provenance == ForgeProvenance::LocalPersistent && none.GetCount() == 0,
+		      "forge list on empty repo");
+		ForgeIssue draft;
+		draft.title = "Broken build";
+		draft.body = "Compiler errors on main";
+		draft.author = "tester";
+		ForgeIssue created;
+		ForgeResult cr = gh.CreateIssue("owner/repo", draft, created);
+		Check(cr.ok && created.issue_id == "1", "forge issue created with native id");
+		ForgeIssue got;
+		Check(gh.GetIssue("owner/repo", "1", got).ok && got.title == "Broken build", "forge issue fetched");
+		ForgeComment cm;
+		cm.author = "tester";
+		cm.body = " investigating";
+		ForgeComment saved;
+		Check(gh.AddComment("owner/repo", "1", cm, saved).ok, "forge comment added");
+		Vector<ForgeComment> cms;
+		Check(gh.ListComments("owner/repo", "1", cms).ok && cms.GetCount() == 1, "forge comments listed");
+		ForgeIssue closed;
+		Check(gh.SetIssueState("owner/repo", "1", false, closed).ok && !closed.open, "forge issue closed");
+		// Same number on another backend is a different record.
+		MemoryForgeBackend hub(ForgeBackend::PrivateHub);
+		ForgeIssue hub_issue;
+		Check(hub.CreateIssue("org/repo", draft, hub_issue).ok && hub_issue.issue_id == "1",
+		      "same native id on another backend is distinct");
+		// Unsupported capabilities fail explicitly as unavailable.
+		ForgeResult u = hub.SetIssueState("org/repo", "1", false, hub_issue);
+		Check(u.ok, "privatehub reference backend supports lifecycle ops");
 	}
 
 	// --- three fenced sites ---

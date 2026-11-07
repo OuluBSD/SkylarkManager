@@ -83,7 +83,7 @@ private:
 
 	String      site;
 	One<JsonFileStore> grants_store;
-	StaticMutex mutex;
+	Mutex  mutex;
 };
 
 END_UPP_NAMESPACE

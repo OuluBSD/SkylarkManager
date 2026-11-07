@@ -121,7 +121,7 @@ private:
 
 	String      site;
 	String      dir;
-	StaticMutex mutex;
+	Mutex  mutex;
 	String      schema_id, schema_version, workspace_id, record_kind, visibility, provenance_ref;
 };
 
@@ -136,7 +136,7 @@ public:
 	String      Description() const override { return "memory"; }
 
 private:
-	StaticMutex              mutex;
+	Mutex                            mutex;
 	VectorMap<String, String> json;
 	VectorMap<String, int>   rev;
 };
@@ -206,7 +206,7 @@ public:
 private:
 	struct JsonEntry : Moveable<JsonEntry> { String key; One<JsonFileStore> store; };
 	struct MemEntry : Moveable<MemEntry>  { String key; One<MemoryStore>  store; };
-	StaticMutex     mutex;
+	Mutex          mutex;
 	Vector<JsonEntry> json_stores;
 	Vector<MemEntry>  mem_stores;
 };
