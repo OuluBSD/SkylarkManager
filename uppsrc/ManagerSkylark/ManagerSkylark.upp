@@ -70,7 +70,11 @@ file
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
 	WebViews.cpp,
-	RestApi.cpp;
+	RestApi.cpp,
+	RestApiProjects.cpp,
+	RestApiSweAgent.cpp,
+	RestApiGitHub.cpp,
+	RestApiSelfTests.cpp;
 
 mainconfig
 	"" = "MT";
