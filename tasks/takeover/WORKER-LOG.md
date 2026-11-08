@@ -290,3 +290,14 @@ present; fence 116/116, Manager PASSED (CLANG+GCC), Company ALL PASSED +
 GCC rc 0. On-disk DataStoreSelfTests change: keep as-on-disk. Next:
 WORKER-BRIEF-06.md (slice 6, final T01 slice: Host argv conversion,
 SourceForge/PrivateHub wiring, local-store migration, fence additions).
+
+## Worker entry — WORKER-BRIEF-06 (T01 slice 6, final T01 slice)
+
+**Step 1 — HostPlatform argv-only conversion (`8f33310`).**
+- All `sh -c` and `"sh",` sites in `Host*.cpp` now run through `HostExec::Run` (LocalProcess argv, no shell). `grep -rn 'sh -c\|"sh",' uppsrc/ManagerSkylark/Host*.cpp` → 0.
+- Count: the brief says 16 sites. The grep finds 18: 16 in HostPlatform.cpp, plus one each in HostViews.cpp (remote file browser) and HostAdminViews.cpp (remote `df` probe). Both view sites were converted too.
+- Validation before argv: user, host, remote path, repo name, hash, build method and flags, git subcommand (allowlist plus refused options).
+- Residual risk: the git subcommand allowlist is partial. Git options not on the refuse list are not individually checked. Remote strings still go through the remote login shell (ssh's design), built only from validated tokens.
+- Out-of-brief fix (required to build): HostViews.cpp used `VividIcon`, `UserSession`, `SystemAuthService` without including their headers. It built only through earlier units' includes. A clean worktree of HEAD `51031d7` fails the same way (22 errors). Added `ManagerSkylark.h` and `SystemAuth.h`.
+- `HostExec.{h,cpp}` added to `ManagerSkylark.upp` after `HostRoutes.cpp`.
+- Verification: fence `WebEngineTests` 116/116; `ManagerSkylark --test` PASSED; `CompanySkylark --test` ALL TESTS PASSED (CLANG). GCC rc 0 for `ManagerSkylark`, `WebEngineTests`, `CompanySkylark`.
