@@ -12,7 +12,8 @@ uses
 	ForgeCore,
 	GitHubForge,
 	SourceForgeForge,
-	PrivateHubWorkspace;
+	PrivateHubWorkspace,
+	Science;
 
 file
 	AGENTS.md,

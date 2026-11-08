@@ -508,14 +508,14 @@ bool SchemaRegistry::Validate(const SchemaCard& card, const ValueMap& doc, Strin
 {
 	for(const SchemaField& f : card.fields) {
 		int q = doc.Find(f.name);
-		bool present = q >= 0 && !doc[q].IsNull();
+		bool present = q >= 0 && !doc.GetValue(q).IsNull();
 		if(f.required && !present) {
 			error = "missing required field '" + f.name + "'";
 			return false;
 		}
 		if(!present)
 			continue;
-		Value v = doc[q];
+		Value v = doc.GetValue(q);
 		if(f.type == "string") {
 			if(!v.Is<String>()) {
 				error = "field '" + f.name + "' must be a string";

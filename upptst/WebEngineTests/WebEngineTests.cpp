@@ -7,6 +7,8 @@
 #include <GitHubForge/GitHubForge.h>
 #include <SourceForgeForge/SourceForgeForge.h>
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
+#include <Science/ScienceModel.h>
+#include <Science/ScienceSite.h>
 
 using namespace Upp;
 
@@ -773,6 +775,63 @@ CONSOLE_APP_MAIN
 		ForgeIssue noauth = draft;
 		noauth.author.Clear();
 		Check(!ph.CreateIssue("oulubsd/demo", noauth, made).ok, "privatehub rejects authorless issues");
+	}
+
+	// --- unit level: Science corpus + article trees ---
+	{
+		String corpus = AppendFileName(s_root, "science-corpus");
+		RealizeDirectory(corpus);
+		// Flat corpus record, exactly like AnthologyPrivate/site/data.
+		String paper1 =
+			"{\"id\":\"2611.04292\",\"kind\":\"paper\",\"title\":\"How Risky Is Your Data-Driven Policy?\","
+			"\"source\":\"https://arxiv.org/abs/2611.04292\",\"status\":\"draft\","
+			"\"abstract\":\"CVaR of loss over training sample.\",\"arxiv_id\":\"2611.04292\","
+			"\"envelope\":{\"schema_id\":\"skylark/paper\",\"schema_version\":\"1\",\"workspace_id\":\"science\","
+			"\"stable_id\":\"2611.04292\",\"record_kind\":\"paper\",\"revision\":\"1\",\"visibility\":\"public\",\"provenance_ref\":\"\"}}";
+		SaveFile(AppendFileName(corpus, "2611.04292.json"), paper1);
+		String paper2 =
+			"{\"id\":\"2610.36601\",\"kind\":\"paper\",\"title\":\"Second paper\",\"status\":\"draft\","
+			"\"abstract\":\"Second abstract.\","
+			"\"envelope\":{\"schema_id\":\"skylark/paper\",\"schema_version\":\"1\",\"workspace_id\":\"science\","
+			"\"stable_id\":\"2610.36601\",\"record_kind\":\"paper\",\"revision\":\"3\",\"visibility\":\"public\",\"provenance_ref\":\"\"}}";
+		SaveFile(AppendFileName(corpus, "2610.36601.json"), paper2);
+
+		String sci_root = AppendFileName(s_root, "science-articles");
+		ScienceCorpus corpus_reader(corpus, sci_root);
+		Vector<SciencePaper> papers;
+		Check(corpus_reader.ListPapers(papers) && papers.GetCount() == 2, "science lists corpus papers");
+		Check(papers[0].id == "2610.36601" && papers[1].id == "2611.04292", "science papers sorted by id");
+		Check(!papers[1].has_article, "science paper starts metadata-only");
+
+		ScienceArticleTree tree;
+		ForgeResult gf = corpus_reader.GetArticleTree("2611.04292", tree);
+		Check(!gf.ok && gf.error.Find("no structured article") >= 0, "science missing article reports unavailable");
+
+		// Author a structured article tree.
+		ScienceNode s1; s1.id = "s1"; s1.type = "section"; s1.heading = "Introduction";
+		ScienceNode p1; p1.id = "p1"; p1.type = "paragraph"; p1.text = "We study tail risk.";
+		ScienceNode e1; e1.id = "e1"; e1.type = "equation"; e1.latex = "\\mathrm{CVaR}_\\alpha(L)";
+		ScienceNode t1; t1.id = "t1"; t1.type = "table"; t1.caption = "Results";
+		t1.rows.Add("alpha\\tCVaR");
+		t1.rows.Add("0.95\\t1.23");
+		ScienceNode r1; r1.id = "r1"; r1.type = "reference"; r1.ref_key = "smith2024"; r1.source_ref = "Smith 2024";
+		tree.nodes.Add(s1); tree.nodes.Add(p1); tree.nodes.Add(e1); tree.nodes.Add(t1); tree.nodes.Add(r1);
+		ForgeResult sr = corpus_reader.SaveArticleTree("2611.04292", tree, "1", "agent-7");
+		if(!sr.ok)
+			Cout() << "[sci] save err: " << sr.error << "\n";
+		Check(sr.ok, "science article tree saved against paper revision");
+		Check(corpus_reader.HasArticleTree("2611.04292"), "science article sidecar present");
+		ScienceArticleTree loaded;
+		Check(corpus_reader.GetArticleTree("2611.04292", loaded).ok
+		   && loaded.nodes.GetCount() == 5 && loaded.nodes[2].latex.GetCount() > 0,
+		      "science article tree round-trips");
+
+		// Revision drift and schema violations are rejected.
+		ForgeResult drift = corpus_reader.SaveArticleTree("2611.04292", tree, "99", "agent-7");
+		Check(!drift.ok && drift.error.Find("revision drift") >= 0, "science save rejects revision drift");
+		ScienceArticleTree empty;
+		ForgeResult nope = corpus_reader.SaveArticleTree("2610.36601", empty, "3", "agent-7");
+		Check(!nope.ok && nope.error.Find("no nodes") >= 0, "science save rejects empty tree");
 	}
 
 	// --- three fenced sites ---
