@@ -1,4 +1,7 @@
+#include "ManagerSkylark.h"
+#include "SystemAuth.h"
 #include "HostPlatform.h"
+#include "HostExec.h"
 
 NAMESPACE_UPP
 
@@ -333,12 +336,14 @@ String HostPlatformService::RenderFiles(Http& http, const String& node_id, const
 		int port = node.ssh_port > 0 ? node.ssh_port : 22;
 		String target_path = safe_rel.IsEmpty() ? "~" : ("~/" + safe_rel);
 
-		String cmd = Format("ssh -o BatchMode=yes -o ConnectTimeout=3 -p %d %s@%s "
-		                    "\"if [ -d %s ]; then echo IS_DIR; find %s/ -mindepth 1 -maxdepth 1 -printf '%%y|%%s|%%T@|%%f\\n'; "
-		                    "elif [ -f %s ]; then echo IS_FILE; cat %s; else echo NOT_FOUND; fi\"",
-		                    port, user, node.hostname, target_path, target_path, target_path, target_path);
-
-		String out = Sys("sh", {"-c", cmd});
+		String out;
+		if(HostExec::SafeUser(user) && HostExec::SafeHost(node.hostname) && HostExec::SafeRemotePath(target_path)) {
+			String script = "if [ -d " + target_path + " ]; then echo IS_DIR; find " + target_path + "/ -mindepth 1 -maxdepth 1 -printf '%y|%s|%T@|%f\\n'; "
+			                "elif [ -f " + target_path + " ]; then echo IS_FILE; cat " + target_path + "; else echo NOT_FOUND; fi";
+			Vector<String> ssh_args = HostExec::SshArgs(port, user, node.hostname, 3);
+			ssh_args.Add(script);
+			out = HostExec::Run("ssh", ssh_args, false);
+		}
 		Vector<String> lines = Split(out, '\n', false);
 
 		if(lines.GetCount() > 0 && lines[0] == "IS_DIR") {

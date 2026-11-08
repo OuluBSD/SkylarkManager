@@ -72,6 +72,8 @@ file
 	HostViews.cpp,
 	HostAdminViews.cpp,
 	HostRoutes.cpp,
+	HostExec.cpp,
+	HostExec.h,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
 	ManagerSkylarkSetup.cpp,

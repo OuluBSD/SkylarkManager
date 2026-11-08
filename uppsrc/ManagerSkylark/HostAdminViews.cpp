@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "HostPlatform.h"
+#include "HostExec.h"
 #ifdef PLATFORM_POSIX
 #include <sys/statvfs.h>
 #endif
@@ -608,9 +609,10 @@ String HostPlatformService::RenderStorage(Http& http, const String& node_id)
 		// Remote SSH df -k -P
 		String user = node.ssh_user.IsEmpty() ? "sblo" : node.ssh_user;
 		int port = node.ssh_port > 0 ? node.ssh_port : 22;
-		String cmd = Format("ssh -o BatchMode=yes -o ConnectTimeout=3 -p %d %s@%s \"df -k -P\"",
-		                    port, user, node.hostname);
-		String out = Sys("sh", {"-c", cmd});
+		if(!HostExec::SafeUser(user) || !HostExec::SafeHost(node.hostname)) return "";
+		Vector<String> ssh_args = HostExec::SshArgs(port, user, node.hostname, 3);
+		ssh_args.Add("df -k -P");
+		String out = HostExec::Run("ssh", ssh_args, false);
 		Vector<String> lines = Split(out, '\n');
 
 		for(int i = 1; i < lines.GetCount(); i++) {
