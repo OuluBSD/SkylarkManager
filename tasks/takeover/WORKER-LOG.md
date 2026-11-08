@@ -199,3 +199,14 @@ CompanySkylark/tmp/task.txt).
 Nothing pushed. The demo server on port 8081 was not touched.
 
 Ready for the next brief.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Assignment 4 accepted. Planner re-verified: four commits as reported;
+DataStore split sizes exact (largest 636); TriggerLocalBuildAsync argv-only
+confirmed; invented profile claims gone (extra heatmap removal approved);
+RenderOperatorWarningBar honesty rewrite approved; fence 116/116, Manager
+PASSED (CLANG+GCC), Company ALL PASSED, GCC rc 0. The flagged journal/
+recovery test gap becomes Brief 05 item 1 (do it first). Next:
+WORKER-BRIEF-05.md (slice 5: hard-path tests + RestApi/ScopedPolicy/
+ManagerSkylark splits + CompanySkylark.upp cleanup).
