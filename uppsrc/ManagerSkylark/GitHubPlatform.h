@@ -88,12 +88,12 @@ public:
 	static ValueMap              GetLiveIssueDetail(const String& owner, const String& repo, int number, String* unavailable = NULL);
 	static Vector<ValueMap>      GetLivePullRequests(const String& owner, const String& repo, String* unavailable = NULL);
 	static ValueMap              GetLivePullRequestDetail(const String& owner, const String& repo, int number, String* unavailable = NULL);
-	static String                GetPullRequestDiff(const String& owner, const String& repo, int number);
+	static String                GetPullRequestDiff(const String& owner, const String& repo, int number, String* unavailable = NULL);
 	static String                CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base);
 	static String                MergePullRequest(const String& owner, const String& repo, int number);
 	static String                ClosePullRequest(const String& owner, const String& repo, int number);
 	static String                AddPullRequestComment(const String& owner, const String& repo, int number, const String& body);
-	static Vector<ValueMap>      GetLiveActions(const String& owner, const String& repo);
+	static Vector<ValueMap>      GetLiveActions(const String& owner, const String& repo, String* unavailable = NULL);
 	static String                CreateIssue(const String& owner, const String& repo, const String& title, const String& body);
 	static String                AddComment(const String& owner, const String& repo, int number, const String& body);
 	static String                ToggleIssueState(const String& owner, const String& repo, int number, bool close_it);
@@ -109,7 +109,7 @@ public:
 	static String                        RenderTppDocSite(const String& tpp_dir);
 	static bool                          SaveWorkflowFile(const String& repo_path, const String& filename, const String& content);
 	static void                          TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type);
-	static bool RunIssueAdapterSyntheticTests(const String& scratch_dir);
+	static bool RunGitHubAdapterSyntheticTests(const String& scratch_dir);
 };
 
 // Page renderers used by the GitHub route handlers (GitHubRoutes.cpp)

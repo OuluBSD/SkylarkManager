@@ -76,29 +76,21 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetLiveGitHubRepos(const String& ow
 		return clone(cached_repos);
 
 	Vector<LocalRepoInfo> list;
-	String cmd = "gh repo list " + owner + " --limit 100 --json name,description,isPrivate,pushedAt,stargazerCount,forkCount,primaryLanguage,url 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
+	GitHubForgeBackend backend;
+	Vector<ForgeRepo> repos;
+	if(backend.ListRepos(owner, repos).ok) {
+		for(const ForgeRepo& r : repos) {
 			LocalRepoInfo info;
 			info.owner = owner;
-			info.name = m["name"];
-			info.description = m["description"];
-			info.is_private = m["isPrivate"];
-			info.stars = m["stargazerCount"];
-			info.forks = m["forkCount"];
-			if(!m["primaryLanguage"].IsNull() && !m["primaryLanguage"]["name"].IsNull())
-				info.language = m["primaryLanguage"]["name"];
-			else
-				info.language = "C++";
+			info.name = r.name;
+			info.description = r.description;
+			info.is_private = r.is_private;
+			info.stars = r.stars;
+			info.forks = r.forks;
+			info.language = r.language.IsEmpty() ? String("C++") : r.language;
 
-			String pushed = m["pushedAt"];
-			if(!pushed.IsEmpty() && pushed.GetLength() >= 10)
-				info.last_commit_time = pushed.Left(10);
+			if(r.pushed_at.GetLength() >= 10)
+				info.last_commit_time = r.pushed_at.Left(10);
 			else
 				info.last_commit_time = "recently";
 
@@ -244,55 +236,87 @@ String GitHubPlatformService::ToggleIssueState(const String& owner, const String
 Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
-	String target = owner + "/" + repo;
-	String cmd = "gh pr list -R " + target + " --state all --limit 20 --json number,title,state,author,createdAt,headRefName,baseRefName 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-	if(!val.Is<ValueArray>()) {
+	GitHubForgeBackend backend;
+	Vector<ForgePullRequest> prs;
+	ForgeResult res = backend.ListPullRequests(owner + "/" + repo, prs);
+	if(!res.ok) {
 		if(unavailable)
-			*unavailable = "gh pr list returned no pull request data";
+			*unavailable = res.error;
 		return list;
 	}
-
-	ValueArray va = val;
-	for(int i = 0; i < va.GetCount(); i++) {
-		Value m = va[i];
+	for(const ForgePullRequest& p : prs) {
 		ValueMap pr;
-		pr.Set("number", (int)m["number"]);
-		pr.Set("title", (String)m["title"]);
-		pr.Set("state", (String)m["state"]);
-		if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
-			pr.Set("author", (String)m["author"]["login"]);
-		else
-			pr.Set("author", owner);
-
-		pr.Set("created_at", ((String)m["createdAt"]).Left(10));
-		pr.Set("head", (String)m["headRefName"]);
-		pr.Set("base", (String)m["baseRefName"]);
+		pr.Set("number", ScanInt(p.pr_id));
+		pr.Set("title", p.title);
+		pr.Set("state", ToUpper(p.state));
+		pr.Set("author", p.author.IsEmpty() ? owner : p.author);
+		pr.Set("created_at", IsoTime(p.created).Left(10));
+		pr.Set("head", p.head);
+		pr.Set("base", p.base);
 		list.Add(pr);
 	}
 	return list;
 }
 
+// Detail keeps the view contract: OPEN/MERGED/CLOSED, author.login, createdAt,
+// headRefName/baseRefName and a comment thread with author.login and body.
 ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, const String& repo, int number, String* unavailable)
 {
 	ValueMap res;
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr view %d -R %s --json number,title,body,state,author,createdAt,comments,reviews,headRefName,baseRefName 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-	if(val.Is<ValueMap>())
-		return val;
-	if(unavailable)
-		*unavailable = Format("gh pr view %d returned no pull request data", number);
+	GitHubForgeBackend backend;
+	String project = owner + "/" + repo;
+	ForgePullRequest pr;
+	ForgeResult pr_res = backend.GetPullRequest(project, AsString(number), pr);
+	if(!pr_res.ok) {
+		if(unavailable)
+			*unavailable = pr_res.error;
+		return res;
+	}
+	Vector<ForgeComment> comments;
+	ForgeResult comments_res = backend.ListComments(project, AsString(number), comments);
+	if(!comments_res.ok) {
+		if(unavailable)
+			*unavailable = comments_res.error;
+		return res;
+	}
+
+	res.Set("number", number);
+	res.Set("title", pr.title);
+	res.Set("body", pr.body);
+	res.Set("state", ToUpper(pr.state));
+	ValueMap author;
+	if(!pr.author.IsEmpty())
+		author.Set("login", pr.author);
+	res.Set("author", author);
+	res.Set("createdAt", IsoTime(pr.created));
+	res.Set("headRefName", pr.head);
+	res.Set("baseRefName", pr.base);
+	ValueArray thread;
+	for(const ForgeComment& c : comments) {
+		ValueMap comment;
+		ValueMap comment_author;
+		if(!c.author.IsEmpty())
+			comment_author.Set("login", c.author);
+		comment.Set("author", comment_author);
+		comment.Set("body", c.body);
+		comment.Set("createdAt", IsoTime(c.created));
+		thread.Add(comment);
+	}
+	res.Set("comments", thread);
 	return res;
 }
 
-String GitHubPlatformService::GetPullRequestDiff(const String& owner, const String& repo, int number)
+String GitHubPlatformService::GetPullRequestDiff(const String& owner, const String& repo, int number, String* unavailable)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr diff %d -R %s 2>/dev/null", number, target);
-	return Sys("sh", {"-c", cmd});
+	GitHubForgeBackend backend;
+	String diff;
+	ForgeResult res = backend.GetPullRequestDiff(owner + "/" + repo, AsString(number), diff);
+	if(!res.ok) {
+		if(unavailable)
+			*unavailable = res.error;
+		return String();
+	}
+	return diff;
 }
 
 String GitHubPlatformService::CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base)

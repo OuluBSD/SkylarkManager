@@ -2,6 +2,7 @@
 #include "GitHubPlatform.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
+#include <GitHubForge/GitHubForge.h>
 
 NAMESPACE_UPP
 
@@ -708,7 +709,7 @@ void GitHubPlatformService::TriggerWorkflowRunAsync(const String& owner, const S
 	});
 }
 
-Vector<ValueMap> GitHubPlatformService::GetLiveActions(const String& owner, const String& repo)
+Vector<ValueMap> GitHubPlatformService::GetLiveActions(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
 	{
@@ -717,25 +718,25 @@ Vector<ValueMap> GitHubPlatformService::GetLiveActions(const String& owner, cons
 			list.Add(r);
 		}
 	}
-	String target = owner + "/" + repo;
-	String cmd = "gh run list -R " + target + " --limit 15 --json id,name,status,conclusion,headBranch,createdAt,event 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap run;
-			run.Set("id", (int64)m["id"]);
-			run.Set("name", (String)m["name"]);
-			run.Set("status", (String)m["status"]);
-			run.Set("conclusion", (String)m["conclusion"]);
-			run.Set("branch", (String)m["headBranch"]);
-			run.Set("created_at", ((String)m["createdAt"]).Left(10));
-			run.Set("event", (String)m["event"]);
-			list.Add(run);
-		}
+	GitHubForgeBackend backend;
+	Vector<ForgeRun> runs;
+	ForgeResult res = backend.ListRuns(owner + "/" + repo, 15, runs);
+	if(!res.ok) {
+		// Runs started from this site are still listed; GitHub runs are not.
+		if(unavailable)
+			*unavailable = res.error;
+		return list;
+	}
+	for(const ForgeRun& r : runs) {
+		ValueMap run;
+		run.Set("id", r.run_id);
+		run.Set("name", r.name);
+		run.Set("status", r.status);
+		run.Set("conclusion", r.conclusion);
+		run.Set("branch", r.head_branch);
+		run.Set("created_at", r.created_at.Left(10));
+		run.Set("event", r.event);
+		list.Add(run);
 	}
 	return list;
 }

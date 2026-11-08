@@ -57,7 +57,8 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 		}
 	} else {
 		content << GitHubPlatformService::RenderOperatorWarningBar(owner, repo);
-		Vector<ValueMap> live_actions = GitHubPlatformService::GetLiveActions(owner, repo);
+		String actions_error;
+		Vector<ValueMap> live_actions = GitHubPlatformService::GetLiveActions(owner, repo, &actions_error);
 		content
 			<< "<div class=\"wf-card\">\n"
 			<< "  <div class=\"wf-card-header\"><span>Workflow Runs &middot; All Workflows</span>"
@@ -91,10 +92,13 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 					<< "          <td>" << (String)run["created_at"] << "</td>\n"
 					<< "        </tr>\n";
 			}
-		} else {
+		}
+		if(!actions_error.IsEmpty())
+			content
+				<< "        <tr><td colspan=\"5\">Workflow runs are unavailable from GitHub: " << GitHubPlatformService::EscapeHtml(actions_error) << "</td></tr>\n";
+		else if(live_actions.IsEmpty())
 			content
 				<< "        <tr><td colspan=\"5\">No workflow runs were returned by GitHub.</td></tr>\n";
-		}
 		content << "      </tbody>\n    </table>\n  </div>\n</div>\n";
 	}
 }

@@ -135,7 +135,8 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 		<< "</div>\n";
 
 	// Files Changed Section (Diff Box)
-	String diff_text = GitHubPlatformService::GetPullRequestDiff(owner, repo, pr_num);
+	String diff_error;
+	String diff_text = GitHubPlatformService::GetPullRequestDiff(owner, repo, pr_num, &diff_error);
 	content
 		<< "<div id=\"pr-diff-section\" style=\"display:none;\">\n"
 		<< "  <div class=\"wf-card\" style=\"margin-bottom:1.5rem;\">\n"
@@ -148,7 +149,9 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 	// Render diff lines
 	Vector<String> diff_lines = Split(diff_text, '\n');
 	content << "      <div style=\"font-family:monospace; font-size:0.8rem; background:var(--wf-bg-view,#0d1117); overflow-x:auto;\">\n";
-	if(diff_text.IsEmpty())
+	if(!diff_error.IsEmpty())
+		content << "        <div class=\"wf-alert wf-alert-warning\">Diff is unavailable from GitHub: " << GitHubPlatformService::EscapeHtml(diff_error) << "</div>\n";
+	else if(diff_text.IsEmpty())
 		content << "        <div class=\"wf-alert wf-alert-warning\">No diff is available from GitHub for this pull request.</div>\n";
 	for(int i = 0; i < diff_lines.GetCount() && !diff_text.IsEmpty(); i++) {
 		String line = diff_lines[i];
