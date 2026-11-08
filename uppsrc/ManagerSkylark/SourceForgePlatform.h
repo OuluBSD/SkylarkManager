@@ -1,7 +1,7 @@
 #ifndef _reference_ManagerSkylark_SourceForgePlatform_h_
 #define _reference_ManagerSkylark_SourceForgePlatform_h_
 
-#include "ManagerSkylark.h"
+#include <Core/Core.h>
 
 NAMESPACE_UPP
 

@@ -1,7 +1,7 @@
 #ifndef _reference_ManagerSkylark_GitHubPlatform_h_
 #define _reference_ManagerSkylark_GitHubPlatform_h_
 
-#include "ManagerSkylark.h"
+#include <Core/Core.h>
 
 NAMESPACE_UPP
 
