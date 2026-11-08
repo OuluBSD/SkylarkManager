@@ -25,6 +25,8 @@ file
 	DataStorePrepare.cpp,
 	DataStoreWrite.cpp,
 	DataStoreInternal.h,
+	DataStoreSelfTests.cpp,
+	DataStoreSelfTests.h,
 	ScopedPolicy.h,
 	ScopedPolicy.cpp,
 	AssessmentService.h,

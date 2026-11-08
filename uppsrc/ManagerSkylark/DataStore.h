@@ -149,6 +149,7 @@ struct DataWriteAuthorization : Moveable<DataWriteAuthorization> {
 	String source_id;
 	String workspace_id;
 	friend class DataStore;
+	friend class DataStoreSelfTests;
 	friend class SystemAuthService;
 	friend class ManagerSkylarkApp;
 };
@@ -350,6 +351,7 @@ public:
 
 private:
 	friend class ManagerSkylarkApp;
+	friend class DataStoreSelfTests; // hard-path self-tests (DataStoreSelfTests.h)
 	bool LoadFixtureForTests(const String& fixture_root);
 	bool LoadWriteFixtureForTests(const String& fixture_root, const String& synthetic_source_id);
 	bool LoadRoot(const String& root_dir, const String& registered_source_id, bool writable = false, bool test_source = false);

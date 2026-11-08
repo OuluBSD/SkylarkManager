@@ -2,6 +2,7 @@
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
 #include "AssessmentViews.h"
+#include "DataStoreSelfTests.h"
 
 NAMESPACE_UPP
 
@@ -554,6 +555,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		return false;
 	}
 	DataStore::SetRootRegistrationPath(AppendFileName(fixture.path, "data-root.json"));
+	if(!DataStoreSelfTests::RunSyntheticTests(fixture.path)) {
+		Cerr() << "FAILED: DataStore hard-path synthetic tests\n";
+		return false;
+	}
 	if(!ScopedPolicyService::RunSyntheticTests()) {
 		Cerr() << "FAILED: scoped-policy synthetic tests\n";
 		return false;
