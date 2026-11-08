@@ -40,6 +40,7 @@ file
 	SourceForgePlatform.h,
 	SourceForgePlatform.cpp,
 	SourceForgeRoutes.cpp,
+	SourceForgeViews.cpp,
 	AgentPlatform.h,
 	AgentPlatform.cpp,
 	SystemAuth.h,

@@ -174,6 +174,9 @@ public:
 	static Vector<SourceForgeReleaseFile> GetFiles(const String& project);
 };
 
+// Display helper shared by the SourceForge service and view renderers
+String CapitalizeWord(const String& s);
+
 // Page renderer used by the SourceForge route handlers (SourceForgeRoutes.cpp)
 void RenderSourceForgeView(Http& http, const String& project, const String& subpath);
 
