@@ -600,10 +600,10 @@ String GitHubPlatformService::RenderRepoHeader(const LocalRepoInfo& info)
 	  << "        <button class=\"wf-gh-btn\">" << VividIcon::Get("eye", 14) << " Watch <span class=\"wf-gh-counter\">1</span></button>\n"
 	  << "      </div>\n"
 	  << "      <div class=\"wf-gh-btn-group\">\n"
-	  << "        <button class=\"wf-gh-btn\">" << VividIcon::Get("star", 14) << " Star <span class=\"wf-gh-counter\">" << info.stars << "</span></button>\n"
+	  << "        <button class=\"wf-gh-btn\">" << VividIcon::Get("star", 14) << " Star <span class=\"wf-gh-counter\">" << (info.stars < 0 ? String("n/a") : AsString(info.stars)) << "</span></button>\n"
 	  << "      </div>\n"
 	  << "      <div class=\"wf-gh-btn-group\">\n"
-	  << "        <button class=\"wf-gh-btn\">" << VividIcon::Get("git-fork", 14) << " Fork <span class=\"wf-gh-counter\">" << info.forks << "</span></button>\n"
+	  << "        <button class=\"wf-gh-btn\">" << VividIcon::Get("git-fork", 14) << " Fork <span class=\"wf-gh-counter\">" << (info.forks < 0 ? String("n/a") : AsString(info.forks)) << "</span></button>\n"
 	  << "      </div>\n"
 	  << "    </div>\n"
 	  << "  </div>\n";

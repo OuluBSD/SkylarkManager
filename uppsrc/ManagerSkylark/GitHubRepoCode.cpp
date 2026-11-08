@@ -193,14 +193,12 @@ void RenderRepoCodeTab(GitHubRepoPage& page)
 		<< "  <span class=\"wf-gh-sidebar-title\">About</span>\n"
 		<< "  <p style=\"color:var(--wf-fg-inactive,#7d8590);\">"
 		<< (!info.description.IsEmpty() ? info.description : "No description provided.") << "</p>\n"
-		<< "  <div>" << VividIcon::Get("activity", 14) << " Activity: <strong>Daily</strong></div>\n"
-		<< "  <div>" << VividIcon::Get("star", 14) << " Stars: <strong>" << info.stars << "</strong></div>\n"
-		<< "  <div>" << VividIcon::Get("eye", 14) << " Watching: <strong>1</strong></div>\n"
-		<< "  <div>" << VividIcon::Get("git-fork", 14) << " Forks: <strong>" << info.forks << "</strong></div>\n"
+		<< "  <div>" << VividIcon::Get("star", 14) << " Stars: <strong>" << (info.stars < 0 ? String("not loaded") : AsString(info.stars)) << "</strong></div>\n"
+		<< "  <div>" << VividIcon::Get("git-fork", 14) << " Forks: <strong>" << (info.forks < 0 ? String("not loaded") : AsString(info.forks)) << "</strong></div>\n"
 		<< "</div>\n"
 		<< "<div class=\"wf-gh-sidebar-section\">\n"
 		<< "  <span class=\"wf-gh-sidebar-title\">Languages</span>\n"
-		<< "  <div style=\"font-size:0.85rem;\"><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << info.language << " 100%</div>\n"
+		<< "  <div style=\"font-size:0.85rem;\"><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << info.language << "</div>\n"
 		<< "</div>\n";
 }
 

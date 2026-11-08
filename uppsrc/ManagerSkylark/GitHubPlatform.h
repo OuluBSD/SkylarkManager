@@ -19,8 +19,8 @@ struct LocalRepoInfo : Moveable<LocalRepoInfo> {
 	String description;
 	String language;
 	bool   is_private = false;
-	int    stars = 0;
-	int    forks = 0;
+	int    stars = -1; // -1 = not read from GitHub
+	int    forks = -1;
 	int    open_issues = 0;
 
 	void Jsonize(JsonIO& io) {
