@@ -317,3 +317,20 @@ SourceForge/PrivateHub wiring, local-store migration, fence additions).
 - Step 3 assumes a PrivateHub webapp with issues that can be moved onto `PrivateHubWorkspaceBackend`. None exists: no PrivateHub routes or views in ManagerSkylark or CompanySkylark, and the WebEngine host is not composed into ManagerSkylark. The only PrivateHub code is `PrivateHubWorkspace` itself, which the fence test exercises. Question for the planner: should step 3 build a minimal PrivateHub issues surface, or should the brief be re-scoped?
 - Step 4 depends on the PrivateHub storage model. Tickets map onto `ForgeIssue`. Wiki pages, discussion topics and release files have no PrivateHub record type, so the converter needs a schema decision for those.
 - Steps 4 and 5 are not started.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Brief 06 steps 1–2 accepted. Planner re-verified: 0 sh -c sites in Host*,
+HostExec added, SourceForgeForgeBackend wired with stub-transport tests,
+scraped data read-only + badge, slug validation added; fence 116/116,
+Manager PASSED (CLANG+GCC), Company ALL PASSED. Out-of-brief HostViews
+include fix and 18-site conversion approved; allowlist tightening noted as
+backlog; live sourceforge.net smoke deferred as manual follow-up.
+
+RE-SCOPE (worker's blocker question): no PrivateHub webapp exists to
+migrate into; engine-host composition belongs with the PrivateHub UI work
+(T04). Brief 06 steps 3–5 replaced by WORKER-BRIEF-06A.md: PrivateHub record
+kinds (wiki-page/discussion-topic/release-file), --migrate-sf-local
+converter (originals untouched), PrivateHub broker service in ManagerSkylark.
+PrivateHub engine-site UI + fence additions + host composition deferred to
+T04 (recorded as deferral).
