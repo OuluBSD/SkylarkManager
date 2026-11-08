@@ -151,6 +151,42 @@ struct ForgeComment : Moveable<ForgeComment> {
 	}
 };
 
+// Pull requests, repositories and workflow runs. Only the GitHub adapter
+// produces these today; they are plain records with no backend policy.
+struct ForgePullRequest : Moveable<ForgePullRequest> {
+	String pr_id;        // native number at the backend
+	String project;
+	String title;
+	String body;
+	String author;
+	String state;        // "open" | "closed" | "merged"
+	Time   created;
+	String head;         // source branch
+	String base;         // target branch
+	String url;          // web URL of the pull request
+};
+
+struct ForgeRepo : Moveable<ForgeRepo> {
+	String name;
+	String owner;
+	String description;
+	String language;
+	String pushed_at;    // ISO-8601 as reported by the backend
+	bool   is_private = false;
+	int    stars = 0;
+	int    forks = 0;
+};
+
+struct ForgeRun : Moveable<ForgeRun> {
+	int64  run_id = 0;
+	String name;
+	String status;       // "queued" | "in_progress" | "completed" (backend values)
+	String conclusion;   // "success" | "failure" | ... (empty while running)
+	String head_branch;
+	String event;
+	String created_at;   // ISO-8601 as reported by the backend
+};
+
 // Capability flags declared by each backend; unsupported operations must be
 // rejected explicitly instead of faked.
 struct ForgeCapabilities {

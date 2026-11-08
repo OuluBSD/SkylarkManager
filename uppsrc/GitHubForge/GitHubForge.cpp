@@ -327,4 +327,303 @@ ForgeResult GitHubForgeBackend::ListComments(const String& project, const String
 	return Ok("list-comments", project, ForgeProvenance::Remote);
 }
 
+bool GitHubForgeBackend::IsValidLogin(const String& login)
+{
+	if(login.IsEmpty() || login.GetCount() > 39 || login[0] == '-')
+		return false;
+	for(int i = 0; i < login.GetCount(); i++) {
+		int c = login[i];
+		if(!(IsAlpha(c) || IsDigit(c) || c == '-'))
+			return false;
+	}
+	return true;
+}
+
+bool GitHubForgeBackend::IsValidBranchName(const String& branch)
+{
+	if(branch.IsEmpty() || branch.GetCount() > 200 || branch[0] == '-')
+		return false;
+	for(int i = 0; i < branch.GetCount(); i++) {
+		int c = branch[i];
+		bool safe = IsAlpha(c) || IsDigit(c) || c == '.' || c == '_' || c == '-' || c == '/';
+		if(!safe)
+			return false;
+	}
+	return true;
+}
+
+static String Field(const ValueMap& m, const char *key)
+{
+	Value v = m.Get(key);
+	return v.IsNull() ? String() : AsString(v);
+}
+
+// Reads one string from a nested object such as user.login or head.ref.
+static String SubField(const Value& v, const char *key)
+{
+	if(!v.Is<ValueMap>())
+		return String();
+	ValueMap nested = v;
+	return Field(nested, key);
+}
+
+static bool ParseGhJson(const String& text, Value& v, String& error)
+{
+	try {
+		v = ParseJSON(text);
+	}
+	catch(Exc& e) {
+		error = String("bad JSON from gh: ") + e;
+		return false;
+	}
+	return true;
+}
+
+ForgePullRequest GitHubForgeBackend::PullRequestFromJson(const ValueMap& m, const String& project)
+{
+	ForgePullRequest pr;
+	pr.project = project;
+	pr.pr_id = AsString((int)m.Get("number"));
+	pr.title = Field(m, "title");
+	pr.body = Field(m, "body");
+	pr.author = SubField(m.Get("user"), "login");
+	pr.created = ParseGhTime(Field(m, "created_at"));
+	pr.head = SubField(m.Get("head"), "ref");
+	pr.base = SubField(m.Get("base"), "ref");
+	pr.url = Field(m, "html_url");
+	// REST reports merged pulls as "closed" with a merged_at timestamp.
+	if(!Field(m, "merged_at").IsEmpty())
+		pr.state = "merged";
+	else
+		pr.state = Field(m, "state") == "closed" ? String("closed") : String("open");
+	return pr;
+}
+
+ForgeRepo GitHubForgeBackend::RepoFromJson(const ValueMap& m, const String& owner)
+{
+	ForgeRepo r;
+	r.owner = owner;
+	r.name = Field(m, "name");
+	r.description = Field(m, "description");
+	r.is_private = (bool)m.Get("isPrivate");
+	r.stars = (int)m.Get("stargazerCount");
+	r.forks = (int)m.Get("forkCount");
+	r.language = SubField(m.Get("primaryLanguage"), "name");
+	r.pushed_at = Field(m, "pushedAt");
+	return r;
+}
+
+ForgeRun GitHubForgeBackend::RunFromJson(const ValueMap& m)
+{
+	ForgeRun r;
+	r.run_id = (int64)m.Get("id");
+	r.name = Field(m, "name");
+	r.status = Field(m, "status");
+	r.conclusion = Field(m, "conclusion");
+	r.head_branch = Field(m, "head_branch");
+	r.event = Field(m, "event");
+	r.created_at = Field(m, "created_at");
+	return r;
+}
+
+ForgeResult GitHubForgeBackend::ListPullRequests(const String& project, Vector<ForgePullRequest>& out)
+{
+	out.Clear();
+	if(!IsValidRepoSlug(project))
+		return Failed("list-pulls", project, "invalid repository slug");
+	GhOutcome gh = GhRun({"api", "repos/" + project + "/pulls?state=all&per_page=20"});
+	if(!gh.ok)
+		return GhFail("list-pulls", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("list-pulls", project, error);
+	if(!v.Is<ValueArray>())
+		return Failed("list-pulls", project, "gh did not return an array");
+	const ValueArray& arr = v;
+	for(int i = 0; i < arr.GetCount(); i++)
+		if(arr[i].Is<ValueMap>()) {
+			ValueMap m = arr[i];
+			out.Add(PullRequestFromJson(m, project));
+		}
+	return Ok("list-pulls", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::GetPullRequest(const String& project, const String& pr_id, ForgePullRequest& out)
+{
+	if(!IsValidRepoSlug(project))
+		return Failed("get-pull", project, "invalid repository slug");
+	if(!IsValidIssueId(pr_id))
+		return Failed("get-pull", project, "invalid pull request number");
+	GhOutcome gh = GhRun({"api", "repos/" + project + "/pulls/" + pr_id});
+	if(!gh.ok)
+		return GhFail("get-pull", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("get-pull", project, error);
+	if(!v.Is<ValueMap>())
+		return Failed("get-pull", project, "gh did not return an object");
+	ValueMap m = v;
+	out = PullRequestFromJson(m, project);
+	return Ok("get-pull", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::GetPullRequestDiff(const String& project, const String& pr_id, String& out)
+{
+	out.Clear();
+	if(!IsValidRepoSlug(project))
+		return Failed("pull-diff", project, "invalid repository slug");
+	if(!IsValidIssueId(pr_id))
+		return Failed("pull-diff", project, "invalid pull request number");
+	GhOutcome gh = GhRun({"pr", "diff", pr_id, "-R", project});
+	if(!gh.ok)
+		return GhFail("pull-diff", project, gh);
+	out = gh.output;
+	return Ok("pull-diff", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::CreatePullRequest(const String& project, const String& title, const String& body,
+                                                  const String& head, const String& base, ForgePullRequest& out)
+{
+	if(!IsValidRepoSlug(project))
+		return Failed("create-pull", project, "invalid repository slug");
+	if(title.IsEmpty())
+		return Failed("create-pull", project, "pull request needs a title");
+	if(!IsValidBranchName(head))
+		return Failed("create-pull", project, "invalid head branch");
+	if(!IsValidBranchName(base))
+		return Failed("create-pull", project, "invalid base branch");
+	Vector<String> args;
+	args.Add("api");
+	args.Add("-X");
+	args.Add("POST");
+	args.Add("repos/" + project + "/pulls");
+	args.Add("-f");
+	args.Add("title=" + title);
+	args.Add("-f");
+	args.Add("head=" + head);
+	args.Add("-f");
+	args.Add("base=" + base);
+	args.Add("-f");
+	args.Add("body=" + body);
+	GhOutcome gh = GhRun(args);
+	if(!gh.ok)
+		return GhFail("create-pull", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("create-pull", project, error);
+	if(!v.Is<ValueMap>())
+		return Failed("create-pull", project, "gh did not return an object");
+	ValueMap m = v;
+	out = PullRequestFromJson(m, project);
+	return Ok("create-pull", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::SetPullRequestState(const String& project, const String& pr_id, bool open, ForgePullRequest& out)
+{
+	if(!IsValidRepoSlug(project))
+		return Failed("set-pull-state", project, "invalid repository slug");
+	if(!IsValidIssueId(pr_id))
+		return Failed("set-pull-state", project, "invalid pull request number");
+	Vector<String> args;
+	args.Add("api");
+	args.Add("-X");
+	args.Add("PATCH");
+	args.Add("repos/" + project + "/pulls/" + pr_id);
+	args.Add("-f");
+	args.Add(open ? String("state=open") : String("state=closed"));
+	GhOutcome gh = GhRun(args);
+	if(!gh.ok)
+		return GhFail("set-pull-state", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("set-pull-state", project, error);
+	if(!v.Is<ValueMap>())
+		return Failed("set-pull-state", project, "gh did not return an object");
+	ValueMap m = v;
+	out = PullRequestFromJson(m, project);
+	return Ok("set-pull-state", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::MergePullRequest(const String& project, const String& pr_id, String& message)
+{
+	message.Clear();
+	if(!IsValidRepoSlug(project))
+		return Failed("merge-pull", project, "invalid repository slug");
+	if(!IsValidIssueId(pr_id))
+		return Failed("merge-pull", project, "invalid pull request number");
+	GhOutcome gh = GhRun({"api", "-X", "PUT", "repos/" + project + "/pulls/" + pr_id + "/merge", "-f", "merge_method=merge"});
+	if(!gh.ok)
+		return GhFail("merge-pull", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("merge-pull", project, error);
+	if(!v.Is<ValueMap>())
+		return Failed("merge-pull", project, "gh did not return an object");
+	ValueMap m = v;
+	message = Field(m, "message");
+	if(!(bool)m.Get("merged"))
+		return Failed("merge-pull", project, message.IsEmpty() ? String("pull request was not merged") : message);
+	return Ok("merge-pull", project, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::ListRepos(const String& owner, Vector<ForgeRepo>& out)
+{
+	out.Clear();
+	if(!IsValidLogin(owner))
+		return Failed("list-repos", owner, "invalid owner login");
+	GhOutcome gh = GhRun({"repo", "list", owner, "--limit", "100", "--json",
+	                      "name,description,isPrivate,pushedAt,stargazerCount,forkCount,primaryLanguage,url"});
+	if(!gh.ok)
+		return GhFail("list-repos", owner, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("list-repos", owner, error);
+	if(!v.Is<ValueArray>())
+		return Failed("list-repos", owner, "gh did not return an array");
+	const ValueArray& arr = v;
+	for(int i = 0; i < arr.GetCount(); i++)
+		if(arr[i].Is<ValueMap>()) {
+			ValueMap m = arr[i];
+			out.Add(RepoFromJson(m, owner));
+		}
+	return Ok("list-repos", owner, ForgeProvenance::Remote);
+}
+
+ForgeResult GitHubForgeBackend::ListRuns(const String& project, int limit, Vector<ForgeRun>& out)
+{
+	out.Clear();
+	if(!IsValidRepoSlug(project))
+		return Failed("list-runs", project, "invalid repository slug");
+	if(limit < 1)
+		limit = 1;
+	if(limit > 100)
+		limit = 100;
+	GhOutcome gh = GhRun({"api", "repos/" + project + "/actions/runs?per_page=" + AsString(limit)});
+	if(!gh.ok)
+		return GhFail("list-runs", project, gh);
+	Value v;
+	String error;
+	if(!ParseGhJson(gh.output, v, error))
+		return Failed("list-runs", project, error);
+	if(!v.Is<ValueMap>())
+		return Failed("list-runs", project, "gh did not return an object");
+	ValueMap m = v;
+	Value runs = m.Get("workflow_runs");
+	if(!runs.Is<ValueArray>())
+		return Failed("list-runs", project, "gh did not return workflow runs");
+	const ValueArray& arr = runs;
+	for(int i = 0; i < arr.GetCount(); i++)
+		if(arr[i].Is<ValueMap>()) {
+			ValueMap run = arr[i];
+			out.Add(RunFromJson(run));
+		}
+	return Ok("list-runs", project, ForgeProvenance::Remote);
+}
+
 END_UPP_NAMESPACE

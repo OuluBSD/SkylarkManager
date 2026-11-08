@@ -8,7 +8,7 @@ suite: implements `IForgeBackend` against the real github.com through the
 
 | File | Role |
 |------|------|
-| `GitHubForge.h/.cpp` | `GitHubForgeBackend` (issue list/get/create/comment/state via `gh api`), GitHub JSON mapping, ISO-8601 time parsing, repo-slug validation |
+| `GitHubForge.h/.cpp` | `GitHubForgeBackend` (issue list/get/create/comment/state via `gh api`; pull request list/get/diff/create/state/merge, repo list via `gh repo list`, workflow run list via `gh api`), GitHub JSON mapping, ISO-8601 time parsing, repo-slug and login/branch validation |
 
 ## Binding rules
 
