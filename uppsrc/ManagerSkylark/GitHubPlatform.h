@@ -86,8 +86,8 @@ public:
 	static Vector<LocalRepoInfo> GetLiveGitHubRepos(const String& owner = "SeppoPakonen");
 	static Vector<ValueMap>      GetLiveIssues(const String& owner, const String& repo, String* unavailable = NULL);
 	static ValueMap              GetLiveIssueDetail(const String& owner, const String& repo, int number, String* unavailable = NULL);
-	static Vector<ValueMap>      GetLivePullRequests(const String& owner, const String& repo);
-	static ValueMap              GetLivePullRequestDetail(const String& owner, const String& repo, int number);
+	static Vector<ValueMap>      GetLivePullRequests(const String& owner, const String& repo, String* unavailable = NULL);
+	static ValueMap              GetLivePullRequestDetail(const String& owner, const String& repo, int number, String* unavailable = NULL);
 	static String                GetPullRequestDiff(const String& owner, const String& repo, int number);
 	static String                CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base);
 	static String                MergePullRequest(const String& owner, const String& repo, int number);

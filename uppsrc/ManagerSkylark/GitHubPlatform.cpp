@@ -239,79 +239,42 @@ String GitHubPlatformService::ToggleIssueState(const String& owner, const String
 	return close_it ? "closed" : "reopened";
 }
 
-Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo)
+// Live pull requests come from gh only. A failed or unparseable call is
+// reported as unavailable; nothing is filled in from local stores or samples.
+Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
 	String target = owner + "/" + repo;
 	String cmd = "gh pr list -R " + target + " --state all --limit 20 --json number,title,state,author,createdAt,headRefName,baseRefName 2>/dev/null";
 	String out = Sys("sh", {"-c", cmd});
 	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap pr;
-			pr.Set("number", (int)m["number"]);
-			pr.Set("title", (String)m["title"]);
-			pr.Set("state", (String)m["state"]);
-			if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
-				pr.Set("author", (String)m["author"]["login"]);
-			else
-				pr.Set("author", owner);
-
-			pr.Set("created_at", ((String)m["createdAt"]).Left(10));
-			pr.Set("head", (String)m["headRefName"]);
-			pr.Set("base", (String)m["baseRefName"]);
-			list.Add(pr);
-		}
+	if(!val.Is<ValueArray>()) {
+		if(unavailable)
+			*unavailable = "gh pr list returned no pull request data";
+		return list;
 	}
 
-	// Check local PR store for additional or mocked PRs
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value sv = ParseJSON(LoadFile(store_path));
-		if(sv.Is<ValueArray>()) {
-			ValueArray va = sv;
-			for(int i = 0; i < va.GetCount(); i++) {
-				Value m = va[i];
-				int num = (int)m["number"];
-				bool exists = false;
-				for(int j = 0; j < list.GetCount(); j++) {
-					if((int)list[j]["number"] == num) { exists = true; break; }
-				}
-				if(!exists) {
-					ValueMap pr;
-					pr.Set("number", num);
-					pr.Set("title", (String)m["title"]);
-					pr.Set("state", (String)m["state"]);
-					Value author = m["author"];
-					pr.Set("author", author.Is<ValueMap>() && !author["login"].IsNull() ? (String)author["login"] : owner);
-					pr.Set("created_at", ((String)m["createdAt"]).Left(10));
-					pr.Set("head", (String)m["headRefName"]);
-					pr.Set("base", (String)m["baseRefName"]);
-					list.Add(pr);
-				}
-			}
-		}
-	}
-
-	// Default fallback PR #7 if list is empty
-	if(list.IsEmpty()) {
+	ValueArray va = val;
+	for(int i = 0; i < va.GetCount(); i++) {
+		Value m = va[i];
 		ValueMap pr;
-		pr.Set("number", 7);
-		pr.Set("title", "Add SourceForge template and dynamic platform switcher");
-		pr.Set("state", "OPEN");
-		pr.Set("author", "sblo");
-		pr.Set("created_at", "2026-10-30");
-		pr.Set("head", "feature/platform-parity");
-		pr.Set("base", "master");
+		pr.Set("number", (int)m["number"]);
+		pr.Set("title", (String)m["title"]);
+		pr.Set("state", (String)m["state"]);
+		if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
+			pr.Set("author", (String)m["author"]["login"]);
+		else
+			pr.Set("author", owner);
+
+		pr.Set("created_at", ((String)m["createdAt"]).Left(10));
+		pr.Set("head", (String)m["headRefName"]);
+		pr.Set("base", (String)m["baseRefName"]);
 		list.Add(pr);
 	}
 	return list;
 }
 
-ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, const String& repo, int number)
+ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, const String& repo, int number, String* unavailable)
 {
 	ValueMap res;
 	String target = owner + "/" + repo;
@@ -320,53 +283,8 @@ ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, co
 	Value val = ParseJSON(out);
 	if(val.Is<ValueMap>())
 		return val;
-
-	// Check local PR store
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value sv = ParseJSON(LoadFile(store_path));
-		if(sv.Is<ValueArray>()) {
-			ValueArray va = sv;
-			for(int i = 0; i < va.GetCount(); i++) {
-				Value m = va[i];
-				if((int)m["number"] == number)
-					return m;
-			}
-		}
-	}
-
-	// Default fallback PR #7
-	if(number == 7) {
-		res.Set("number", 7);
-		res.Set("title", "Add SourceForge template and dynamic platform switcher");
-		res.Set("body",
-			"### Pull Request Summary\n"
-			"This PR introduces the complete **SourceForge Platform Parity** tool suite:\n"
-			"- SourceForge template with dual sidebar/full layouts\n"
-			"- Real-time platform switcher cookie (`wf_platform_pref`)\n"
-			"- Wiki CMS with live markdown rendering\n"
-			"- Tickets tracker and discussion forums\n"
-			"- Autonomous SweAgent pair programming workspace\n\n"
-			"### Verification\n"
-			"- Automated Aria Marionette/WebDriver tests 1-51 passing.");
-		res.Set("state", "OPEN");
-		ValueMap author;
-		author.Set("login", "sblo");
-		res.Set("author", author);
-		res.Set("createdAt", "2026-10-30T18:00:00Z");
-		res.Set("headRefName", "feature/platform-parity");
-		res.Set("baseRefName", "master");
-
-		ValueArray comments;
-		ValueMap c1;
-		ValueMap c1_author;
-		c1_author.Set("login", "SeppoPakonen");
-		c1.Set("author", c1_author);
-		c1.Set("createdAt", "2026-10-30T19:30:00Z");
-		c1.Set("body", "Architecture and template integration looks very clean. All 51 Aria scraper tests passed cleanly.");
-		comments.Add(c1);
-		res.Set("comments", comments);
-	}
+	if(unavailable)
+		*unavailable = Format("gh pr view %d returned no pull request data", number);
 	return res;
 }
 
@@ -374,25 +292,7 @@ String GitHubPlatformService::GetPullRequestDiff(const String& owner, const Stri
 {
 	String target = owner + "/" + repo;
 	String cmd = Format("gh pr diff %d -R %s 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	if(!out.IsEmpty())
-		return out;
-
-	// Fallback unified diff for PR #7
-	return
-		"diff --git a/reference/ManagerSkylark/SourceForgePlatform.cpp b/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"index 4d2206b..6b3f97e 100644\n"
-		"--- a/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"+++ b/reference/ManagerSkylark/SourceForgePlatform.cpp\n"
-		"@@ -1264,7 +1264,8 @@ static void RenderSourceForgeView(Http& http, const String& project, const Strin\n"
-		"+    // 13. SweAgent Pair View (native embedded, zero iframe)\n"
-		"+    WebChatView::RenderSnippet();\n"
-		"diff --git a/reference/ManagerSkylark/GitHubPlatform.cpp b/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"--- a/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"+++ b/reference/ManagerSkylark/GitHubPlatform.cpp\n"
-		"@@ -853,6 +853,10 @@ static void RenderRepoView(...)\n"
-		"+    // View mode toggle: Markdown Preview vs Numbered Code\n"
-		"+    toggleFileView('preview');\n";
+	return Sys("sh", {"-c", cmd});
 }
 
 String GitHubPlatformService::CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base)

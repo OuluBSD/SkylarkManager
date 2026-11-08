@@ -14,7 +14,14 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 	const int& pr_num = page.pr_num;
 	String& content = page.content;
 
-	ValueMap pr_detail = GitHubPlatformService::GetLivePullRequestDetail(owner, repo, pr_num);
+	String unavailable;
+	ValueMap pr_detail = GitHubPlatformService::GetLivePullRequestDetail(owner, repo, pr_num, &unavailable);
+	if(!unavailable.IsEmpty()) {
+		content
+			<< "<div class=\"wf-alert wf-alert-warning\">Pull request #" << pr_num << " is unavailable from GitHub: "
+			<< GitHubPlatformService::EscapeHtml(unavailable) << "</div>\n";
+		return;
+	}
 	String pr_title = pr_detail["title"];
 	String pr_state = pr_detail["state"]; // "OPEN", "MERGED", "CLOSED"
 	String pr_body = pr_detail["body"];
@@ -24,8 +31,8 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 	String pr_created = ((String)pr_detail["createdAt"]).Left(10);
 	String pr_head = pr_detail["headRefName"];
 	String pr_base = pr_detail["baseRefName"];
-	if(pr_head.IsEmpty()) pr_head = "feature/platform-parity";
-	if(pr_base.IsEmpty()) pr_base = "master";
+	if(pr_head.IsEmpty()) pr_head = "(unknown)";
+	if(pr_base.IsEmpty()) pr_base = "(unknown)";
 	bool is_open = (pr_state == "OPEN");
 	bool is_merged = (pr_state == "MERGED");
 
@@ -48,7 +55,7 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 	content
 		<< "<div class=\"wf-view-toggle\" style=\"margin-bottom:1.5rem;\">\n"
 		<< "  <button type=\"button\" id=\"btn-pr-convo\" class=\"active\" onclick=\"switchPrTab('convo')\">" << VividIcon::Get("message-square", 14) << " Conversation</button>\n"
-		<< "  <button type=\"button\" id=\"btn-pr-diff\" onclick=\"switchPrTab('diff')\">" << VividIcon::Get("code", 14) << " Files changed <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.7rem;\">+145 -12</span></button>\n"
+		<< "  <button type=\"button\" id=\"btn-pr-diff\" onclick=\"switchPrTab('diff')\">" << VividIcon::Get("code", 14) << " Files changed</button>\n"
 		<< "</div>\n";
 
 	// Conversation Section
@@ -81,20 +88,9 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 			<< "  </div>\n";
 	}
 
-	// CI Checks Status Box
+	// CI status is not loaded by this view; say so instead of showing sample results.
 	content
-		<< "  <div class=\"wf-card\" style=\"margin-bottom:1.5rem; border-left:4px solid #238636;\">\n"
-		<< "    <div class=\"wf-card-header\">\n"
-		<< "      <span style=\"color:#238636; display:flex; align-items:center; gap:6px;\">" << VividIcon::Get("check", 16) << " All checks have passed</span>\n"
-		<< "      <span class=\"wf-badge wf-badge-emerald\">51 / 51 tests passed</span>\n"
-		<< "    </div>\n"
-		<< "    <div class=\"wf-card-body\" style=\"padding:10px 16px; font-size:0.85rem;\">\n"
-		<< "      <div style=\"display:flex; justify-content:space-between; align-items:center;\">\n"
-		<< "        <span>" << VividIcon::Get("check", 14) << " Aria Automated Browser Scraper &amp; WebDriver Test Suite (CLANG)</span>\n"
-		<< "        <span style=\"color:var(--wf-fg-inactive,#7d8590);\">Successful in 1m 24s</span>\n"
-		<< "      </div>\n"
-		<< "    </div>\n"
-		<< "  </div>\n";
+		<< "  <div class=\"wf-alert wf-alert-info\" style=\"margin-bottom:1.5rem;\">CI checks are not loaded for this pull request.</div>\n";
 
 	// Interactive Merge Box (when OPEN)
 	if(is_open) {
@@ -152,7 +148,9 @@ void RenderRepoPullDetail(GitHubRepoPage& page)
 	// Render diff lines
 	Vector<String> diff_lines = Split(diff_text, '\n');
 	content << "      <div style=\"font-family:monospace; font-size:0.8rem; background:var(--wf-bg-view,#0d1117); overflow-x:auto;\">\n";
-	for(int i = 0; i < diff_lines.GetCount(); i++) {
+	if(diff_text.IsEmpty())
+		content << "        <div class=\"wf-alert wf-alert-warning\">No diff is available from GitHub for this pull request.</div>\n";
+	for(int i = 0; i < diff_lines.GetCount() && !diff_text.IsEmpty(); i++) {
 		String line = diff_lines[i];
 		String line_bg = "transparent";
 		String line_fg = "var(--wf-fg-normal,#e6edf3)";
@@ -207,15 +205,18 @@ void RenderRepoPullsList(GitHubRepoPage& page)
 	const String& repo = page.repo;
 	String& content = page.content;
 
-	Vector<ValueMap> live_prs = GitHubPlatformService::GetLivePullRequests(owner, repo);
+	String unavailable;
+	Vector<ValueMap> live_prs = GitHubPlatformService::GetLivePullRequests(owner, repo, &unavailable);
+	if(!unavailable.IsEmpty()) {
+		content
+			<< "<div class=\"wf-alert wf-alert-warning\">Pull requests are unavailable from GitHub: "
+			<< GitHubPlatformService::EscapeHtml(unavailable) << "</div>\n";
+		return;
+	}
 	int pr_open = 0, pr_closed = 0;
 	for(const ValueMap& p : live_prs) {
 		if((String)p["state"] == "OPEN") pr_open++;
 		else pr_closed++;
-	}
-	if(live_prs.IsEmpty()) {
-		pr_open = 1;
-		pr_closed = 28;
 	}
 
 	content

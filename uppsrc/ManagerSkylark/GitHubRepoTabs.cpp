@@ -62,7 +62,7 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 			<< "<div class=\"wf-card\">\n"
 			<< "  <div class=\"wf-card-header\"><span>Workflow Runs &middot; All Workflows</span>"
 			<< "    <div style=\"display:flex; gap:10px; align-items:center;\">"
-			<< "      <span class=\"wf-badge wf-badge-emerald\">" << (live_actions.IsEmpty() ? "CI Active" : "Live Runs") << "</span>"
+			<< "      <span class=\"wf-badge wf-badge-emerald\">" << (live_actions.IsEmpty() ? "No runs" : "Live Runs") << "</span>"
 			<< "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" id=\"btn-new-workflow-table\" class=\"wf-btn\" style=\"background:#238636; color:#ffffff; font-weight:600; font-size:0.8rem; padding:4px 10px; text-decoration:none;\">"
 			<< VividIcon::Get("plus", 13) << " New workflow</a>"
 			<< "    </div>"
@@ -93,27 +93,7 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 			}
 		} else {
 			content
-				<< "        <tr>\n"
-				<< "          <td><span style=\"color:#238636; font-size:1.1rem;\">&#10004;</span> <span class=\"wf-badge wf-badge-emerald\">CACHED (0s)</span></td>\n"
-				<< "          <td><strong>U++ Build System &middot; Pre-cached Dependencies (8 pkgs)</strong><br><span style=\"font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590);\">Source and dependency hashes verified identical</span></td>\n"
-				<< "          <td>push</td>\n"
-				<< "          <td><code>master</code></td>\n"
-				<< "          <td>0s (cached)</td>\n"
-				<< "        </tr>\n"
-				<< "        <tr>\n"
-				<< "          <td><span style=\"color:#238636; font-size:1.1rem;\">&#10004;</span> <span class=\"wf-badge wf-badge-cyan\">COMPILED (1m 14s)</span></td>\n"
-				<< "          <td><strong>Build ManagerSkylark &amp; Aria (CLANG)</strong></td>\n"
-				<< "          <td>push</td>\n"
-				<< "          <td><code>master</code></td>\n"
-				<< "          <td>1m 14s</td>\n"
-				<< "        </tr>\n"
-				<< "        <tr>\n"
-				<< "          <td><span style=\"color:#238636; font-size:1.1rem;\">&#10004;</span> <span class=\"wf-badge wf-badge-emerald\">TESTED</span></td>\n"
-				<< "          <td><strong>Aria Verification Suite (57 tests)</strong><br><span style=\"font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590);\">All 57 tests passed cleanly</span></td>\n"
-				<< "          <td>push</td>\n"
-				<< "          <td><code>master</code></td>\n"
-				<< "          <td>38s</td>\n"
-				<< "        </tr>\n";
+				<< "        <tr><td colspan=\"5\">No workflow runs were returned by GitHub.</td></tr>\n";
 		}
 		content << "      </tbody>\n    </table>\n  </div>\n</div>\n";
 	}
