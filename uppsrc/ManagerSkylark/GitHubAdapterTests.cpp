@@ -191,6 +191,23 @@ bool GitHubPlatformService::RunGitHubAdapterSyntheticTests(const String& scratch
 		return Fail("workflow runs must report unavailable when gh cannot run");
 	Cout() << "ok    workflow runs report unavailable when gh cannot run\n";
 
+	// Visibility: unknown, public and private each render their own label.
+	if(GitHubPlatformService::VisibilityLabel(-1) != "Unknown" || GitHubPlatformService::VisibilityLabel(0) != "Public" ||
+	   GitHubPlatformService::VisibilityLabel(1) != "Private")
+		return Fail("visibility labels must render unknown, public and private");
+	LocalRepoInfo vis;
+	vis.owner = "acme";
+	vis.name = "tools";
+	vis.path = scratch_dir;
+	for(int v = -1; v <= 1; v++) {
+		vis.is_private = v;
+		String header = GitHubPlatformService::RenderRepoHeader(vis);
+		String expect = String("<span class=\"wf-gh-badge\">") + GitHubPlatformService::VisibilityLabel(v) + "</span>";
+		if(header.Find(expect) < 0)
+			return Fail("repo header did not render the visibility badge for is_private=" + AsString(v));
+	}
+	Cout() << "ok    repo header renders unknown, public and private visibility\n";
+
 	GitHubRepoPage claims;
 	claims.owner = "acme";
 	claims.repo = "tools";

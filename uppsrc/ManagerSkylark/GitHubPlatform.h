@@ -18,7 +18,7 @@ struct LocalRepoInfo : Moveable<LocalRepoInfo> {
 	String last_commit_msg;
 	String description;
 	String language;
-	bool   is_private = false;
+	int    is_private = -1; // -1 unknown, 0 public, 1 private
 	int    stars = -1; // -1 = not read from GitHub
 	int    forks = -1;
 	int    open_issues = 0;
@@ -80,6 +80,7 @@ public:
 	static Vector<ValueMap> GetCommits(const String& repo_path, int limit = 30);
 	static String EscapeHtml(const String& s);
 	static String FormatFileSize(int64 bytes);
+	static String VisibilityLabel(int is_private);
 
 	// Live GitHub dynamic queries via gh CLI
 	static bool                  IsGhCliAvailable();

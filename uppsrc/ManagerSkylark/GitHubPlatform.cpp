@@ -23,6 +23,13 @@ String GitHubPlatformService::EscapeHtml(const String& s)
 	return r;
 }
 
+String GitHubPlatformService::VisibilityLabel(int is_private)
+{
+	if(is_private < 0)
+		return "Unknown";
+	return is_private ? "Private" : "Public";
+}
+
 String GitHubPlatformService::FormatFileSize(int64 bytes)
 {
 	if(bytes < 1024)
@@ -103,7 +110,7 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetLiveGitHubRepos(const String& ow
 			info.owner = owner;
 			info.name = r.name;
 			info.description = r.description;
-			info.is_private = r.is_private;
+			info.is_private = r.is_private ? 1 : 0;
 			info.stars = r.stars;
 			info.forks = r.forks;
 			info.language = r.language.IsEmpty() ? String("C++") : r.language;
@@ -421,7 +428,7 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetRepositories(const String& owner
 						info.description = d;
 				}
 
-				info.is_private = true;
+				// Visibility is not known for a local checkout; it stays unknown.
 				list.Add(pick(info));
 			}
 		}
@@ -470,7 +477,7 @@ LocalRepoInfo GitHubPlatformService::GetRepo(const String& owner, const String& 
 			ValueMap ov = sc["overview"];
 			info.branch = ov["branch"];
 			info.description = ov["description"];
-			info.is_private = ov["is_private"];
+			info.is_private = ov["is_private"].IsNull() ? -1 : ((bool)ov["is_private"] ? 1 : 0);
 		}
 	}
 
@@ -589,7 +596,7 @@ String GitHubPlatformService::RenderRepoHeader(const LocalRepoInfo& info)
 	  << "      " << VividIcon::Get("git-repo", 20) << "\n"
 	  << "      <a href=\"/user/" << info.owner << "\">" << info.owner << "</a> / "
 	  << "      <strong><a href=\"/repo/" << info.owner << "/" << info.name << "\">" << info.name << "</a></strong>\n"
-	  << "      <span class=\"wf-gh-badge\">" << (info.is_private ? "Private" : "Public") << "</span>\n"
+	  << "      <span class=\"wf-gh-badge\">" << VisibilityLabel(info.is_private) << "</span>\n"
 	  << "    </div>\n"
 	  << "    <div class=\"wf-gh-actions\">\n"
 	  << "      <a href=\"/projects/" << info.name << "/\" class=\"wf-gh-btn\" title=\"Switch to SourceForge Platform Style\" style=\"color:#ee6524; font-weight:600; text-decoration:none;\">\n"

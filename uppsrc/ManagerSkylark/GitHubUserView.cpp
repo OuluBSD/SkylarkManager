@@ -47,7 +47,7 @@ void RenderUserProfile(Http& http, const String& username)
 				<< "      <div class=\"wf-card-header\">\n"
 				<< "        <a href=\"/repo/" << uname << "/" << r.name << "\" style=\"font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;\">"
 				<< VividIcon::Get("git-repo", 16) << " " << r.name << "</a>\n"
-				<< "        <span class=\"wf-gh-badge\">" << (r.is_private ? "Private" : "Public") << "</span>\n"
+				<< "        <span class=\"wf-gh-badge\">" << GitHubPlatformService::VisibilityLabel(r.is_private) << "</span>\n"
 				<< "      </div>\n"
 				<< "      <div class=\"wf-card-body\" style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590);\">\n"
 				<< "        <p>" << (!r.description.IsEmpty() ? r.description : "Ultimate++ Agentic repository in ~/Dev/" + r.name) << "</p>\n"
@@ -86,7 +86,7 @@ void RenderUserProfile(Http& http, const String& username)
 				<< "    <div>\n"
 				<< "      <div style=\"display:flex; align-items:center; gap:8px;\">\n"
 				<< "        <a href=\"/repo/" << uname << "/" << r.name << "\" style=\"font-size:1.1rem; font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;\">" << r.name << "</a>\n"
-				<< "        <span class=\"wf-gh-badge\">" << (r.is_private ? "Private" : "Public") << "</span>\n";
+				<< "        <span class=\"wf-gh-badge\">" << GitHubPlatformService::VisibilityLabel(r.is_private) << "</span>\n";
 			if(r.stars > 0)
 				content << "        <span style=\"font-size:0.8rem; color:#e3b341;\">★ " << r.stars << "</span>\n";
 			if(r.forks > 0)
