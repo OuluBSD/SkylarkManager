@@ -108,7 +108,7 @@ public:
 	static String                        RenderOperatorWarningBar(const String& owner, const String& repo);
 	static String                        RenderTppDocSite(const String& tpp_dir);
 	static bool                          SaveWorkflowFile(const String& repo_path, const String& filename, const String& content);
-	static void                          TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type);
+	static void                          TriggerLocalBuildAsync();
 	static bool RunGitHubAdapterSyntheticTests(const String& scratch_dir);
 };
 

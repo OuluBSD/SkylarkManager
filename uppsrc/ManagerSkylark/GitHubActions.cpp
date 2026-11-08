@@ -673,30 +673,36 @@ bool GitHubPlatformService::SaveWorkflowFile(const String& repo_path, const Stri
 	return SaveFile(full_path, content);
 }
 
-void GitHubPlatformService::TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type)
+// Starts the local ai-upp build. This is not a GitHub Actions run: the record
+// is labelled as a local build, and the command is argv-only with no user data.
+void GitHubPlatformService::TriggerLocalBuildAsync()
 {
 	int64 run_id = 20000 + (Random() % 10000);
 	ValueMap run;
 	run.Set("id", run_id);
-	run.Set("name", workflow_name.IsEmpty() ? "U++ Build & Test (SysProcess)" : workflow_name);
+	run.Set("name", "Local build: reference/ManagerSkylark");
 	run.Set("status", "running");
 	run.Set("conclusion", "");
-	run.Set("branch", "master");
+	run.Set("branch", "local");
 	run.Set("created_at", "Just now");
-	run.Set("event", run_type.IsEmpty() ? "workflow_dispatch" : run_type);
+	run.Set("event", "local_build");
 
 	{
 		Mutex::Lock __(sRunLock);
 		sCustomRuns.Insert(0, run);
 	}
 
+	String exe = AppendFileName(GetHomeDirFile("Dev/ai-upp"), "bin/build");
 	Thread().Run([=] {
+		Vector<String> args;
+		args.Add("reference/ManagerSkylark");
+		int exit_code = -1;
 		LocalProcess p;
-		String cmd = AppendFileName(GetHomeDirFile("Dev/ai-upp"), "bin/build") + " reference/ManagerSkylark";
-		p.Start(cmd);
-		String out;
-		p.Finish(out);
-		int exit_code = p.GetExitCode();
+		if(p.Start2(exe, args)) {
+			String out;
+			p.Finish(out);
+			exit_code = p.GetExitCode();
+		}
 
 		Mutex::Lock __(sRunLock);
 		for(int i = 0; i < sCustomRuns.GetCount(); i++) {

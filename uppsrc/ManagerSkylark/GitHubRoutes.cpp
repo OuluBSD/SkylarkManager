@@ -263,16 +263,11 @@ SKYLARK(ApiSaveWorkflow, "api/gh/workflows/save:POST_RAW")
 SKYLARK(ApiTriggerAction, "api/gh/actions/trigger:POST_RAW")
 {
 	Value json = ParseJSON(http.GetRequestContent());
-	String owner = json["owner"];
-	String repo = json["repo"];
-	String workflow = json["workflow"];
-	String type = json["type"];
-
-	GitHubPlatformService::TriggerWorkflowRunAsync(owner, repo, workflow, type);
+	GitHubPlatformService::TriggerLocalBuildAsync();
 
 	ValueMap out;
 	out.Set("status", "ok");
-	out.Set("message", "Workflow dispatched asynchronously via SysProcess");
+	out.Set("message", "Local build started. This is not a GitHub Actions run.");
 	http.ContentType("application/json") << AsJSON(out);
 }
 
