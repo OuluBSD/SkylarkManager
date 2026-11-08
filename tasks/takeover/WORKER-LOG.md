@@ -210,3 +210,72 @@ PASSED (CLANG+GCC), Company ALL PASSED, GCC rc 0. The flagged journal/
 recovery test gap becomes Brief 05 item 1 (do it first). Next:
 WORKER-BRIEF-05.md (slice 5: hard-path tests + RestApi/ScopedPolicy/
 ManagerSkylark splits + CompanySkylark.upp cleanup).
+
+## 2026-11-09 — WORKER-BRIEF-05 (Assignment 5, T01 slice 5) — done
+
+**Commits:**
+- `6232cdb` ManagerSkylark: direct self-tests for DataStore write hard paths (SkylarkManager).
+- `ba79bfc` ManagerSkylark: split RestApi.cpp by route area.
+- `eea3698` ManagerSkylark: split ScopedPolicy.cpp by responsibility.
+- `c2915f0` ManagerSkylark: split ManagerSkylark.cpp by responsibility.
+- `599ee15` CompanySkylark.upp: trailing newline (CompanySkylark repo).
+
+**1. DataStore hard-path tests (done first, `6232cdb`).**
+- New `DataStoreSelfTests.{h,cpp}`, run from `--test` against a fresh writable temp source per case. The brief allowed a private-friendship header if documented: `DataStoreSelfTests` is a friend of `DataStore` and `DataWriteAuthorization`, and the header says so. The test-only load path `LoadWriteFixtureForTests` had no callers before this; it is now used.
+- Covered: `WriteRecord` (commit, same-key replay, stale revision, out-of-scope source); `PublishBatch` (commit, replay, reused op id with a different request); `PrepareJournal` round-trip (manifest written to disk parses back with the staged op and record; publish blocked while pending; recovery clears it); crash recovery at two failpoints (after the record replace and before it): a second publish does not re-execute, recovery rolls back to the original content, a second recovery is `clean`, the retry commits once, and a replay is `already_committed`.
+- Crash simulation uses the in-process batch failpoints, not a real kill. Crafted journal files were not used; the public API and a real temp dir were enough.
+
+**Defect found by the new tests (not fixed here; planner decision needed).**
+- A committed batch leaves `.mgr-journal/<op>` in place. `PublishBatch` returns `committed` with the journal still present.
+- No production code calls `RecoverPendingBatches` (grep: only the tests). After the first batch on a source, every further publish returns `journal_recovery_required` until something runs recovery.
+- A replay before recovery returns `journal_recovery_required`, not the prior result. AGENTS rule 7 says duplicates return the prior result.
+- The tests assert the current lifecycle: blocked before recovery, `already_committed` after. They do not present the wedge as expected behavior.
+- Options for the planner: (a) remove the journal inside `PublishBatch` after the receipt is stored (the receipt is durable first, so cleanup is safe); (b) have each write path run `RecoverPendingBatches` first. (a) matches rule 7 more closely.
+- The candidate-write boundary is still disabled in production, so no live data is affected today.
+
+**2. `RestApi.cpp` (1241) split by route area (`ba79bfc`).**
+- `RestApi.cpp` 85: core routes (`api/health`, `api/framework/spec`, `quit`) and `CONSOLE_APP_MAIN`, which stays in the main package.
+- `RestApiProjects.cpp` 266: projects, project detail, task next/claim/done, goals, issues, releases.
+- `RestApiSweAgent.cpp` 37: `api/sweagent/run`.
+- `RestApiGitHub.cpp` 33: `api/project/*/sync-github`.
+- `RestApiSelfTests.cpp` 864: fixtures and `RunSelfTests`. Test harness, not production code. One sequential harness shares locals across the whole run, so it stays whole. **Logged exception** (the ~800-line rule covers non-test files).
+- The brief names a "chat" area; this file has no chat routes, so none was created.
+- The 13 `SKYLARK` registrations are unchanged (checked as a sorted set against the original).
+
+**3. `ScopedPolicy.cpp` (973) split by responsibility (`eea3698`).**
+- `ScopedPolicy.cpp` 155: classification, defaults and settings validation, redacted view, `Resolve` orchestration, external-model and publication grants, review granularity.
+- `ScopedPolicyIdentity.cpp` 131: identity validity and keys, identity field parsing, request-source and provider lookups.
+- `ScopedPolicyAncestry.cpp` 42: the source ancestry walk, with its depth and consistency checks.
+- `ScopedPolicyRegistry.cpp` 272: `TrustedPolicyRegistry` validation and loading.
+- `ScopedPolicySelfTests.cpp` 405: `RunSyntheticTests` (test file).
+- `ScopedPolicyInternal.h`: shared limits and helper declarations (not public API). No name collisions elsewhere in the assembly.
+- Deviation from the brief's list: external-model and publication grants stayed in `Resolve`, not separate files. They are short boolean expressions over the same locals; a split would pass many values for no gain.
+- Checked as a line multiset: the only changes are the `return result;` → `return false;` rewrite inside the moved helpers, the braces and signatures, and the new call sites. Each early return keeps its original status and reason.
+
+**4. `ManagerSkylark.cpp` (920) split (`c2915f0`).**
+- `ManagerSkylark.cpp` 130: constructor, destructor, singleton accessor, `Initialize`, `StopServer` (shutdown).
+- `ManagerSkylarkSetup.cpp` 135: `LoadSitePolicy`, `InitApp` (site setup and registration). `ReadPolicySettings` moved with `LoadSitePolicy`, its only caller.
+- `ManagerSkylarkSeed.cpp` 264 + `ManagerSkylarkSeed.h`: demo and synthetic fixture seeding. The four entry points are declared in the header because `InitApp` calls them. They lost `static` and their default arguments, which moved to the declarations.
+- `ManagerSkylarkFilters.cpp` 40: `FilterHandler`, `ResolveEffectivePolicy`, `IsAssessmentSourceVisible` (filter hooks).
+- `ManagerSkylarkNavigation.cpp` 248: `BuildNavigation` and the projects, mesh and goals trees.
+- `ManagerSkylarkRender.cpp` 154: `RenderBadge`, `RenderProgressBar`, `RenderHtmlPage`, `AddMarkdownSupport`.
+- Checked as a line multiset: no original line missing.
+
+**5. Trailing newline (`599ee15`, CompanySkylark repo).** Diff was one blank line; committed with the brief's path-scoped command.
+
+**Size rule (brief item 4).** Largest non-test file in ManagerSkylark is now `CandidateWorkflow.cpp` at 758. The only file over 800 is `RestApiSelfTests.cpp` (864), a logged test-harness exception.
+
+**Verification (after every commit, CLANG; GCC after each step):**
+- Fence: `WebEngineTests` 116/116 checks passed.
+- `ManagerSkylark --test`: PASSED (includes the new hard-path tests and the RestApi self-tests).
+- `CompanySkylark --test`: ALL TESTS PASSED.
+- GCC: `ManagerSkylark`, `WebEngineTests`, `CompanySkylark` each rc 0 after every commit.
+
+**Gaps and notes:**
+- MSVC (non-POSIX) branches were not compiled here; CI covers them.
+- `DataStoreSelfTests.{h,cpp}` changed on disk once during the step (formatting only; contents matched my edits). I kept the file as it is on disk.
+- Slice 6 is untouched: SourceForge/PrivateHub wiring, the `~/.aria/sites/sourceforge` migration, HostPlatform argv conversion, T02+.
+
+Nothing pushed. The demo server on port 8081 was not touched.
+
+Ready for the planner.
