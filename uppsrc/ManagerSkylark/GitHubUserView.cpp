@@ -63,21 +63,14 @@ void RenderUserProfile(Http& http, const String& username)
 		}
 		content << "  </div>\n</div>\n";
 
-		// Contribution activity heatmap
+		// Contribution activity is not read from GitHub; say so instead of drawing a pattern.
 		content
 			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>2,842 contributions in the last year</span><span class=\"wf-badge wf-badge-emerald\">Active Daily</span></div>\n"
-			<< "  <div class=\"wf-card-body\" style=\"overflow-x:auto;\">\n"
-			<< "    <div style=\"display:grid; grid-template-columns:repeat(52, 12px); gap:3px;\">\n";
-		for(int c = 0; c < 52 * 7; c++) {
-			int intensity = (c * 17 + 3) % 5;
-			const char* col = (intensity == 0) ? "rgba(110,118,129,0.15)" :
-			                  (intensity == 1) ? "#0e4429" :
-			                  (intensity == 2) ? "#006d32" :
-			                  (intensity == 3) ? "#26a641" : "#39d353";
-			content << "<div style=\"width:12px; height:12px; border-radius:2px; background:" << col << ";\" title=\"Commit activity\"></div>";
-		}
-		content << "    </div>\n  </div>\n</div>\n";
+			<< "  <div class=\"wf-card-header\"><span>Contribution activity</span></div>\n"
+			<< "  <div class=\"wf-card-body\">\n"
+			<< "    <div class=\"wf-alert wf-alert-info\">Contribution activity is not loaded by this view.</div>\n"
+			<< "  </div>\n"
+			<< "</div>\n";
 	}
 	else if(active_tab == "repositories") {
 		content
@@ -118,16 +111,9 @@ void RenderUserProfile(Http& http, const String& username)
 	else if(active_tab == "projects") {
 		content
 			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Active GitHub Projects &amp; Kanban Boards</span><a href=\"/repo/" << uname << "/ai-upp/projects\" class=\"wf-btn wf-btn-primary\" style=\"font-size:0.75rem;\">Open ai-upp Board</a></div>\n"
+			<< "  <div class=\"wf-card-header\"><span>GitHub Projects &amp; Kanban Boards</span></div>\n"
 			<< "  <div class=\"wf-card-body\">\n"
-			<< "    <p style=\"color:var(--wf-fg-inactive,#7d8590); margin-bottom:1rem;\">Interactive Project Kanban workflow synchronized with local Manager project states and phases.</p>\n"
-			<< "    <div style=\"display:flex; gap:12px; flex-wrap:wrap;\">\n"
-			<< "      <div style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:1rem; flex:1; min-width:260px;\">\n"
-			<< "        <div style=\"font-weight:700; font-size:1rem; margin-bottom:6px;\"><a href=\"/repo/" << uname << "/ai-upp/projects\">ai-upp Core Delivery</a></div>\n"
-			<< "        <p style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:10px;\">Manager v2 &amp; Skylark Platform parity, Aria scraper integration.</p>\n"
-			<< "        <span class=\"badge-v2\" style=\"background:#00aa7f;\">Active Sprint</span>\n"
-			<< "      </div>\n"
-			<< "    </div>\n"
+			<< "    <div class=\"wf-alert wf-alert-info\">Projects are not loaded by this view. No project boards are shown.</div>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
 	}
