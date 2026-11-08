@@ -32,6 +32,8 @@ file
 	DataViews.cpp,
 	GitHubPlatform.h,
 	GitHubPlatform.cpp,
+	GitHubActions.cpp,
+	GitHubWorkflowViews.cpp,
 	GitHubRoutes.cpp,
 	GitHubUserView.cpp,
 	GitHubRepoView.cpp,
