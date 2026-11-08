@@ -84,8 +84,8 @@ public:
 	// Live GitHub dynamic queries via gh CLI
 	static bool                  IsGhCliAvailable();
 	static Vector<LocalRepoInfo> GetLiveGitHubRepos(const String& owner = "SeppoPakonen");
-	static Vector<ValueMap>      GetLiveIssues(const String& owner, const String& repo);
-	static ValueMap              GetLiveIssueDetail(const String& owner, const String& repo, int number);
+	static Vector<ValueMap>      GetLiveIssues(const String& owner, const String& repo, String* unavailable = NULL);
+	static ValueMap              GetLiveIssueDetail(const String& owner, const String& repo, int number, String* unavailable = NULL);
 	static Vector<ValueMap>      GetLivePullRequests(const String& owner, const String& repo);
 	static ValueMap              GetLivePullRequestDetail(const String& owner, const String& repo, int number);
 	static String                GetPullRequestDiff(const String& owner, const String& repo, int number);
@@ -109,6 +109,7 @@ public:
 	static String                        RenderTppDocSite(const String& tpp_dir);
 	static bool                          SaveWorkflowFile(const String& repo_path, const String& filename, const String& content);
 	static void                          TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type);
+	static bool RunIssueAdapterSyntheticTests(const String& scratch_dir);
 };
 
 // Page renderers used by the GitHub route handlers (GitHubRoutes.cpp)

@@ -14,7 +14,14 @@ void RenderRepoIssueDetail(GitHubRepoPage& page)
 	const int& issue_num = page.issue_num;
 	String& content = page.content;
 
-	ValueMap is_detail = GitHubPlatformService::GetLiveIssueDetail(owner, repo, issue_num);
+	String unavailable;
+	ValueMap is_detail = GitHubPlatformService::GetLiveIssueDetail(owner, repo, issue_num, &unavailable);
+	if(!unavailable.IsEmpty()) {
+		content
+			<< "<div class=\"wf-alert wf-alert-warning\">Issue #" << issue_num << " is unavailable from GitHub: "
+			<< GitHubPlatformService::EscapeHtml(unavailable) << "</div>\n";
+		return;
+	}
 	String is_title = is_detail["title"];
 	String is_state = is_detail["state"];
 	String is_body = is_detail["body"];
@@ -110,7 +117,8 @@ void RenderRepoIssuesList(GitHubRepoPage& page)
 	const String& repo = page.repo;
 	String& content = page.content;
 
-	Vector<ValueMap> live_issues = GitHubPlatformService::GetLiveIssues(owner, repo);
+	String unavailable;
+	Vector<ValueMap> live_issues = GitHubPlatformService::GetLiveIssues(owner, repo, &unavailable);
 	int open_count = 0, closed_count = 0;
 	for(const ValueMap& is : live_issues) {
 		if((String)is["state"] == "OPEN") open_count++;
@@ -151,7 +159,13 @@ void RenderRepoIssuesList(GitHubRepoPage& page)
 		<< "    else alert('Error creating issue: ' + (data.error || 'unknown error'));\n"
 		<< "  });\n"
 		<< "}\n"
-		<< "</script>\n"
+		<< "</script>\n";
+	if(!unavailable.IsEmpty()) {
+		content << "<div class=\"wf-alert wf-alert-warning\">GitHub issues are unavailable: " << GitHubPlatformService::EscapeHtml(unavailable) << "</div>\n";
+		return;
+	}
+
+	content
 		<< "<div class=\"wf-gh-file-box\">\n"
 		<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
 		<< "    <div style=\"display:flex; gap:16px; font-size:0.88rem;\">\n"

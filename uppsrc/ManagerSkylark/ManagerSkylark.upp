@@ -8,6 +8,7 @@ uses
 	SweAgent,
 	WebChat,
 	WebAuth,
+	GitHubForge,
 	WebFramework;
 
 file
@@ -42,6 +43,7 @@ file
 	GitHubRepoPulls.cpp,
 	GitHubRepoTabs.cpp,
 	GitHubRepoPage.h,
+	GitHubAdapterTests.cpp,
 	SourceForgePlatform.h,
 	SourceForgePlatform.cpp,
 	SourceForgeRoutes.cpp,

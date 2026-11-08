@@ -570,6 +570,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: assessment projection synthetic tests\n";
 		return false;
 	}
+	if(!GitHubPlatformService::RunIssueAdapterSyntheticTests(fixture.path)) {
+		Cerr() << "FAILED: GitHub issue adapter synthetic tests\n";
+		return false;
+	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));
 	if(!auth_config.Is<ValueMap>()) {
 		Cerr() << "FAILED: site credential file was not a JSON object\n";

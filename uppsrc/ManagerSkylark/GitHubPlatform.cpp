@@ -2,6 +2,7 @@
 #include "GitHubPlatform.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
+#include <GitHubForge/GitHubForge.h>
 
 NAMESPACE_UPP
 
@@ -117,82 +118,125 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetLiveGitHubRepos(const String& ow
 	return list;
 }
 
-Vector<ValueMap> GitHubPlatformService::GetLiveIssues(const String& owner, const String& repo)
+// REST timestamps for the views: "2026-11-08T12:34:56Z" (empty when unknown).
+// U++ Format() does not pad like printf, so build the two-digit fields by hand.
+static String TwoDigits(int v)
+{
+	return v < 10 ? "0" + AsString(v) : AsString(v);
+}
+
+static String IsoTime(const Time& t)
+{
+	if(IsNull(t))
+		return String();
+	return AsString(t.year) + "-" + TwoDigits(t.month) + "-" + TwoDigits(t.day) + "T" +
+	       TwoDigits(t.hour) + ":" + TwoDigits(t.minute) + ":" + TwoDigits(t.second) + "Z";
+}
+
+// Issue operations run through the argv-only GitHub adapter. A fresh backend
+// per call reads GHFORGE_GH at call time; failures surface as unavailable, never
+// as fabricated data.
+Vector<ValueMap> GitHubPlatformService::GetLiveIssues(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
-	String target = owner + "/" + repo;
-	String cmd = "gh issue list -R " + target + " --state all --limit 20 --json number,title,state,author,createdAt,comments 2>/dev/null";
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-
-	if(val.Is<ValueArray>()) {
-		ValueArray va = val;
-		for(int i = 0; i < va.GetCount(); i++) {
-			Value m = va[i];
-			ValueMap issue;
-			issue.Set("number", (int)m["number"]);
-			issue.Set("title", (String)m["title"]);
-			issue.Set("state", (String)m["state"]);
-			if(!m["author"].IsNull() && !m["author"]["login"].IsNull())
-				issue.Set("author", (String)m["author"]["login"]);
-			else
-				issue.Set("author", owner);
-
-			issue.Set("created_at", ((String)m["createdAt"]).Left(10));
-			if(m["comments"].Is<ValueArray>())
-				issue.Set("comments", ((ValueArray)m["comments"]).GetCount());
-			else
-				issue.Set("comments", 0);
-
-			list.Add(issue);
-		}
+	GitHubForgeBackend backend;
+	Vector<ForgeIssue> issues;
+	ForgeResult res = backend.ListIssues(owner + "/" + repo, issues);
+	if(!res.ok) {
+		if(unavailable)
+			*unavailable = res.error;
+		return list;
+	}
+	for(const ForgeIssue& iss : issues) {
+		ValueMap issue;
+		issue.Set("number", ScanInt(iss.issue_id));
+		issue.Set("title", iss.title);
+		issue.Set("state", String(iss.open ? "OPEN" : "CLOSED"));
+		issue.Set("author", iss.author.IsEmpty() ? owner : iss.author);
+		issue.Set("created_at", IsoTime(iss.created).Left(10));
+		issue.Set("comments", iss.comment_count);
+		list.Add(issue);
 	}
 	return list;
 }
 
-ValueMap GitHubPlatformService::GetLiveIssueDetail(const String& owner, const String& repo, int number)
+ValueMap GitHubPlatformService::GetLiveIssueDetail(const String& owner, const String& repo, int number, String* unavailable)
 {
 	ValueMap res;
-	String target = owner + "/" + repo;
-	String cmd = Format("gh issue view %d -R %s --json number,title,body,state,author,createdAt,comments 2>/dev/null", number, target);
-	String out = Sys("sh", {"-c", cmd});
-	Value val = ParseJSON(out);
-	if(val.Is<ValueMap>())
-		return val;
+	GitHubForgeBackend backend;
+	String project = owner + "/" + repo;
+	ForgeIssue issue;
+	ForgeResult issue_res = backend.GetIssue(project, AsString(number), issue);
+	if(!issue_res.ok) {
+		if(unavailable)
+			*unavailable = issue_res.error;
+		return res;
+	}
+	Vector<ForgeComment> comments;
+	ForgeResult comments_res = backend.ListComments(project, AsString(number), comments);
+	if(!comments_res.ok) {
+		if(unavailable)
+			*unavailable = comments_res.error;
+		return res;
+	}
+
+	res.Set("number", number);
+	res.Set("title", issue.title);
+	res.Set("body", issue.body);
+	res.Set("state", String(issue.open ? "OPEN" : "CLOSED"));
+	ValueMap author;
+	if(!issue.author.IsEmpty())
+		author.Set("login", issue.author);
+	res.Set("author", author);
+	res.Set("createdAt", IsoTime(issue.created));
+	ValueArray thread;
+	for(const ForgeComment& c : comments) {
+		ValueMap comment;
+		ValueMap comment_author;
+		if(!c.author.IsEmpty())
+			comment_author.Set("login", c.author);
+		comment.Set("author", comment_author);
+		comment.Set("body", c.body);
+		comment.Set("createdAt", IsoTime(c.created));
+		thread.Add(comment);
+	}
+	res.Set("comments", thread);
 	return res;
 }
 
 String GitHubPlatformService::CreateIssue(const String& owner, const String& repo, const String& title, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_issue_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh issue create -R %s --title %s --body-file %s 2>&1",
-	                    target, AsCString(title), AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-	return TrimBoth(out);
+	GitHubForgeBackend backend;
+	ForgeIssue draft;
+	draft.title = title;
+	draft.body = body;
+	ForgeIssue created;
+	ForgeResult res = backend.CreateIssue(owner + "/" + repo, draft, created);
+	if(!res.ok)
+		return "error: " + res.error;
+	return "https://github.com/" + owner + "/" + repo + "/issues/" + created.issue_id;
 }
 
 String GitHubPlatformService::AddComment(const String& owner, const String& repo, int number, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_comment_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh issue comment %d -R %s --body-file %s 2>&1",
-	                    number, target, AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-	return TrimBoth(out);
+	GitHubForgeBackend backend;
+	ForgeComment comment;
+	comment.body = body;
+	ForgeComment posted;
+	ForgeResult res = backend.AddComment(owner + "/" + repo, AsString(number), comment, posted);
+	if(!res.ok)
+		return "error: " + res.error;
+	return "https://github.com/" + owner + "/" + repo + "/issues/" + AsString(number) + "#issuecomment-" + posted.comment_id;
 }
 
 String GitHubPlatformService::ToggleIssueState(const String& owner, const String& repo, int number, bool close_it)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh issue %s %d -R %s 2>&1", close_it ? "close" : "reopen", number, target);
-	return TrimBoth(Sys("sh", {"-c", cmd}));
+	GitHubForgeBackend backend;
+	ForgeIssue updated;
+	ForgeResult res = backend.SetIssueState(owner + "/" + repo, AsString(number), !close_it, updated);
+	if(!res.ok)
+		return "error: " + res.error;
+	return close_it ? "closed" : "reopened";
 }
 
 Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo)
