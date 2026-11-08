@@ -12,6 +12,41 @@ own records.
 |------|------|
 | `PrivateHubWorkspace.h/.cpp` | `PrivateHubWorkspaceBackend` (IForgeBackend over per-repo JSON issue stores), `RepoInfo`/`ListOrganizations`/`ListRepositories`/`RepoStatus` (branch + dirty state via argv-only `git -C ... status --porcelain`), path containment helpers |
 
+## Record kinds (site store)
+
+All kinds live in the site-scoped `WebStorage` store as envelope records (see
+`WebStorage` `RecordEnvelope`). Collections are `<kind>-<project>` with `/`
+flattened to `__`. Schema cards are registered by `RegisterSchemas()`.
+
+| Kind (collection) | Record id | Data fields | Child records |
+|---|---|---|---|
+| `privatehub/wiki-page` (`wiki-`) | page slug | `slug`, `title` (required), `body` (wikitext), `updated`, `provenance` | none |
+| `privatehub/discussion-topic` (`discussion-`) | topic slug (no `.`) | `slug`, `forum`, `title` (required), `author` (required), `created`, `provenance` | posts |
+| `privatehub/discussion-post` (child of a topic, same collection) | `<topic>.<post_id>` | `post_id`, `topic`, `author`, `body` (all required), `created`, `provenance` | none |
+| `privatehub/release-file` (`release-`) | file name (dots allowed) | `name` (required), `release`, `size_bytes`, `url`, `updated`, `provenance` | none |
+| issues (`issues-`) | `phi_<uuid>` | `ForgeIssue` fields | comments `<issue>.<comment>` |
+
+Rules:
+
+1. **Revisions are envelope revisions.** The `revision` field on the C++ structs
+   is filled on read and never stored in data. A `Put*` with a non-empty
+   expected revision is a conflict check; an empty one creates or overwrites.
+2. **Provenance is data plus envelope.** `provenance` is `local` for records
+   made in PrivateHub, or `migrated-from-legacy` for imports. The envelope
+   `provenance_ref` holds the source path for imports.
+3. **Children are found by prefix.** Top-level listings skip ids containing
+   `.`; post listings take ids starting with `<topic>.`. Topic slugs cannot
+   contain `.` for this reason. The issue listing skips comment records too.
+4. **Ids and keys are validated before the store.** Record ids are
+   `[A-Za-z0-9_-]` (plus `.` for release file names). Project keys are one or
+   two `[A-Za-z0-9._-]` segments. Traversal names are rejected.
+5. **Writes go through the store.** `PutRecord` validates data against the
+   schema card and writes the envelope through `JsonFileStore::PutOpaque`, which
+   takes the lock, writes a temp file, fsyncs, and renames. Nothing writes
+   the files directly.
+6. **Corrupt records fail loudly.** A listing that meets a corrupt record
+   returns a failed `ForgeResult` naming the record. It does not skip it.
+
 ## Binding rules
 
 1. **Containment first**: organization/repository names and derived paths are

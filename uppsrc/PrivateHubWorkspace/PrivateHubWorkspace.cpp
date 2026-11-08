@@ -30,14 +30,25 @@ PrivateHubWorkspaceBackend::PrivateHubWorkspaceBackend(const String& workspace_r
 	caps.add_comment = true;
 	caps.set_issue_state = true;
 	caps.list_comments = true;
+	RegisterSchemas();
 }
 
-IRecordCollection& PrivateHubWorkspaceBackend::Issues(const String& project)
+String PrivateHubWorkspaceBackend::CollectionFor(const char *kind, const String& project)
 {
 	// Store collection ids must be filesystem-safe: flatten "org/repo".
 	String safe = project;
 	safe.Replace("/", "__");
-	return TheStoreManager().JsonCollection("privatehub", issues_root, "issues-" + safe);
+	return String(kind) + "-" + safe;
+}
+
+IRecordCollection& PrivateHubWorkspaceBackend::Store(const char *kind, const String& project)
+{
+	return TheStoreManager().JsonCollection("privatehub", issues_root, CollectionFor(kind, project));
+}
+
+IRecordCollection& PrivateHubWorkspaceBackend::Issues(const String& project)
+{
+	return Store("issues", project);
 }
 
 bool PrivateHubWorkspaceBackend::IsContained(const String& rel) const
@@ -201,6 +212,8 @@ ForgeResult PrivateHubWorkspaceBackend::ListIssues(const String& project, Vector
 	if(!lr.ok)
 		return Failed("list-issues", project, lr.error);
 	for(const String& id : ids) {
+		if(id.Find('.') >= 0) // comment records are "<issue>.<comment>"
+			continue;
 		String json, rev;
 		if(!Issues(project).Get(id, json, rev).ok)
 			continue;
@@ -328,6 +341,302 @@ ForgeResult PrivateHubWorkspaceBackend::ListComments(const String& project, cons
 		catch(...) {}
 	}
 	return Ok("list-comments", project, ForgeProvenance::LocalPersistent);
+}
+
+// --- record kinds ---------------------------------------------------------
+
+// Project keys are one or two [A-Za-z0-9._-] segments ("slug" or "org/repo").
+static bool ValidProjectKey(const String& project)
+{
+	if(project.IsEmpty() || project.GetCount() > 201)
+		return false;
+	Vector<String> parts = Split(project, '/', false);
+	if(parts.GetCount() < 1 || parts.GetCount() > 2)
+		return false;
+	for(const String& part : parts)
+		if(!PrivateHubWorkspaceBackend::ValidName(part))
+			return false;
+	return true;
+}
+
+// Record ids: [A-Za-z0-9_-], plus '.' where the kind allows it (release files).
+static bool SafeRecordId(const String& id, bool allow_dot)
+{
+	if(id.IsEmpty() || id.GetCount() > 100 || id == "." || id == "..")
+		return false;
+	for(int i = 0; i < id.GetCount(); i++) {
+		int c = id[i];
+		bool safe = IsAlpha(c) || IsDigit(c) || c == '_' || c == '-' || (allow_dot && c == '.');
+		if(!safe)
+			return false;
+	}
+	return true;
+}
+
+static void AddCardField(SchemaCard& card, const char *name, const char *type, bool required, int max_len)
+{
+	SchemaField f;
+	f.name = name;
+	f.type = type;
+	f.required = required;
+	f.max_len = max_len;
+	card.fields.Add(f);
+}
+
+void PrivateHubWorkspaceBackend::RegisterSchemas()
+{
+	SchemaCard wiki;
+	wiki.schema_id = PRIVATEHUB_SCHEMA_WIKI_PAGE;
+	wiki.version = "1";
+	AddCardField(wiki, "slug", "string", true, 100);
+	AddCardField(wiki, "title", "string", true, 256);
+	AddCardField(wiki, "body", "string", false, 0);
+	AddCardField(wiki, "updated", "string", false, 64);
+	AddCardField(wiki, "provenance", "string", false, 64);
+	SchemaRegistry::Register(wiki);
+
+	SchemaCard topic;
+	topic.schema_id = PRIVATEHUB_SCHEMA_DISCUSSION_TOPIC;
+	topic.version = "1";
+	AddCardField(topic, "slug", "string", true, 100);
+	AddCardField(topic, "forum", "string", false, 100);
+	AddCardField(topic, "title", "string", true, 256);
+	AddCardField(topic, "author", "string", true, 100);
+	AddCardField(topic, "created", "string", false, 64);
+	AddCardField(topic, "provenance", "string", false, 64);
+	SchemaRegistry::Register(topic);
+
+	SchemaCard post;
+	post.schema_id = PRIVATEHUB_SCHEMA_DISCUSSION_POST;
+	post.version = "1";
+	AddCardField(post, "post_id", "string", true, 100);
+	AddCardField(post, "topic", "string", true, 100);
+	AddCardField(post, "author", "string", true, 100);
+	AddCardField(post, "body", "string", true, 0);
+	AddCardField(post, "created", "string", false, 64);
+	AddCardField(post, "provenance", "string", false, 64);
+	SchemaRegistry::Register(post);
+
+	SchemaCard file;
+	file.schema_id = PRIVATEHUB_SCHEMA_RELEASE_FILE;
+	file.version = "1";
+	AddCardField(file, "name", "string", true, 100);
+	AddCardField(file, "release", "string", false, 100);
+	AddCardField(file, "size_bytes", "int", false, 0);
+	AddCardField(file, "url", "string", false, 1024);
+	AddCardField(file, "updated", "string", false, 64);
+	AddCardField(file, "provenance", "string", false, 64);
+	SchemaRegistry::Register(file);
+}
+
+StoreResult PrivateHubWorkspaceBackend::PutRecord(IRecordCollection& coll, const String& schema_id,
+                                                  const String& record_kind, const String& workspace_id,
+                                                  const String& id, const ValueMap& data,
+                                                  const String& provenance_ref,
+                                                  const String& expected_revision, String& new_revision)
+{
+	JsonFileStore *store = dynamic_cast<JsonFileStore*>(&coll);
+	if(!store)
+		return StoreResult("collection is not a JSON file store");
+	SchemaCard card;
+	String err;
+	if(SchemaRegistry::Find(schema_id, card) && !SchemaRegistry::Validate(card, data, err))
+		return StoreResult("schema validation failed: " + err);
+	ValueMap env;
+	env.Add("schema_id", schema_id);
+	env.Add("schema_version", "1");
+	env.Add("workspace_id", workspace_id);
+	env.Add("stable_id", id);
+	env.Add("record_kind", record_kind);
+	env.Add("revision", "");
+	env.Add("visibility", "private");
+	env.Add("provenance_ref", provenance_ref);
+	return store->PutOpaque(id, AsJSON(Value(env)), AsJSON(Value(data)), expected_revision, new_revision);
+}
+
+// Reads one record's data and envelope revision. Corrupt data is an error.
+static bool ReadDoc(IRecordCollection& coll, const String& id, ValueMap& data, String& rev, String& error)
+{
+	String json;
+	StoreResult g = coll.Get(id, json, rev);
+	if(!g.ok) {
+		error = g.error;
+		return false;
+	}
+	try {
+		Value v = ParseJSON(json);
+		if(!v.Is<ValueMap>()) {
+			error = "corrupt record (data is not an object)";
+			return false;
+		}
+		data = (ValueMap)v;
+	}
+	catch(Exc& e) {
+		error = String("corrupt record: ") + e;
+		return false;
+	}
+	return true;
+}
+
+// Lists records of one kind. Top-level records have no '.' in their id; with
+// a prefix, only child records "<prefix><id>" are loaded.
+template <class T>
+static ForgeResult LoadRecords(IRecordCollection& coll, const char *op, const String& project,
+                               const String& prefix, Vector<T>& out)
+{
+	out.Clear();
+	Vector<String> ids;
+	StoreResult lr = coll.List(ids);
+	if(!lr.ok)
+		return IForgeBackend::Failed(op, project, lr.error);
+	for(const String& id : ids) {
+		if(prefix.IsEmpty() ? id.Find('.') >= 0 : !id.StartsWith(prefix))
+			continue;
+		ValueMap data;
+		String rev, err;
+		if(!ReadDoc(coll, id, data, rev, err))
+			return IForgeBackend::Failed(op, project, "record '" + id + "': " + err);
+		T item;
+		LoadFromJsonValue(item, Value(data));
+		item.revision = rev;
+		out.Add(item);
+	}
+	return IForgeBackend::Ok(op, project, ForgeProvenance::LocalPersistent);
+}
+
+template <class T>
+static ForgeResult GetRecord(IRecordCollection& coll, const char *op, const String& project,
+                             const String& id, T& out)
+{
+	ValueMap data;
+	String rev, err;
+	if(!ReadDoc(coll, id, data, rev, err))
+		return IForgeBackend::Failed(op, project, "record '" + id + "': " + err);
+	LoadFromJsonValue(out, Value(data));
+	out.revision = rev;
+	return IForgeBackend::Ok(op, project, ForgeProvenance::LocalPersistent);
+}
+
+template <class T>
+static ForgeResult PutKind(IRecordCollection& coll, const char *op, const String& project,
+                           const char *schema_id, const char *record_kind, const String& id,
+                           const T& item, const String& expected_revision, String& new_revision)
+{
+	Value stored = StoreAsJsonValue(item);
+	if(!stored.Is<ValueMap>())
+		return IForgeBackend::Failed(op, project, "record cannot be serialized");
+	StoreResult r = PrivateHubWorkspaceBackend::PutRecord(coll, schema_id, record_kind, project, id,
+	                                                      (ValueMap)stored, String(), expected_revision,
+	                                                      new_revision);
+	if(!r.ok)
+		return IForgeBackend::Failed(op, project, r.error);
+	return IForgeBackend::Ok(op, project, ForgeProvenance::LocalPersistent);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::ListWikiPages(const String& project, Vector<PrivateHubWikiPage>& out)
+{
+	if(!ValidProjectKey(project))
+		return Failed("wiki-list", project, "invalid project key");
+	return LoadRecords(Store("wiki", project), "wiki-list", project, String(), out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::GetWikiPage(const String& project, const String& slug, PrivateHubWikiPage& out)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(slug, false))
+		return Failed("wiki-get", project, "invalid project key or page slug");
+	return GetRecord(Store("wiki", project), "wiki-get", project, slug, out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::PutWikiPage(const String& project, const PrivateHubWikiPage& page,
+                                                    const String& expected_revision, String& new_revision)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(page.slug, false))
+		return Failed("wiki-put", project, "invalid project key or page slug");
+	return PutKind(Store("wiki", project), "wiki-put", project, PRIVATEHUB_SCHEMA_WIKI_PAGE,
+	               PRIVATEHUB_SCHEMA_WIKI_PAGE, page.slug, page, expected_revision, new_revision);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::ListDiscussionTopics(const String& project, Vector<PrivateHubDiscussionTopic>& out)
+{
+	if(!ValidProjectKey(project))
+		return Failed("topic-list", project, "invalid project key");
+	return LoadRecords(Store("discussion", project), "topic-list", project, String(), out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::GetDiscussionTopic(const String& project, const String& slug, PrivateHubDiscussionTopic& out)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(slug, false))
+		return Failed("topic-get", project, "invalid project key or topic slug");
+	return GetRecord(Store("discussion", project), "topic-get", project, slug, out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::PutDiscussionTopic(const String& project, const PrivateHubDiscussionTopic& topic,
+                                                           const String& expected_revision, String& new_revision)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(topic.slug, false))
+		return Failed("topic-put", project, "invalid project key or topic slug");
+	return PutKind(Store("discussion", project), "topic-put", project, PRIVATEHUB_SCHEMA_DISCUSSION_TOPIC,
+	               PRIVATEHUB_SCHEMA_DISCUSSION_TOPIC, topic.slug, topic, expected_revision, new_revision);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::ListDiscussionPosts(const String& project, const String& topic_slug, Vector<PrivateHubPost>& out)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(topic_slug, false))
+		return Failed("post-list", project, "invalid project key or topic slug");
+	return LoadRecords(Store("discussion", project), "post-list", project, topic_slug + ".", out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::PutDiscussionPost(const String& project, const PrivateHubPost& post,
+                                                          const String& expected_revision, String& new_revision)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(post.topic, false) || !SafeRecordId(post.post_id, false))
+		return Failed("post-put", project, "invalid project key, topic or post id");
+	ValueMap topic_data;
+	String topic_rev, err;
+	if(!ReadDoc(Store("discussion", project), post.topic, topic_data, topic_rev, err))
+		return Failed("post-put", project, "topic '" + post.topic + "' not found: " + err);
+	return PutKind(Store("discussion", project), "post-put", project, PRIVATEHUB_SCHEMA_DISCUSSION_POST,
+	               PRIVATEHUB_SCHEMA_DISCUSSION_TOPIC, post.topic + "." + post.post_id, post,
+	               expected_revision, new_revision);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::ListReleaseFiles(const String& project, Vector<PrivateHubReleaseFile>& out)
+{
+	if(!ValidProjectKey(project))
+		return Failed("release-list", project, "invalid project key");
+	// Release file names contain dots, so the top-level filter cannot apply here.
+	out.Clear();
+	Vector<String> ids;
+	StoreResult lr = Store("release", project).List(ids);
+	if(!lr.ok)
+		return Failed("release-list", project, lr.error);
+	for(const String& id : ids) {
+		ValueMap data;
+		String rev, err;
+		if(!ReadDoc(Store("release", project), id, data, rev, err))
+			return Failed("release-list", project, "record '" + id + "': " + err);
+		PrivateHubReleaseFile item;
+		LoadFromJsonValue(item, Value(data));
+		item.revision = rev;
+		out.Add(item);
+	}
+	return Ok("release-list", project, ForgeProvenance::LocalPersistent);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::GetReleaseFile(const String& project, const String& name, PrivateHubReleaseFile& out)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(name, true))
+		return Failed("release-get", project, "invalid project key or file name");
+	return GetRecord(Store("release", project), "release-get", project, name, out);
+}
+
+ForgeResult PrivateHubWorkspaceBackend::PutReleaseFile(const String& project, const PrivateHubReleaseFile& file,
+                                                       const String& expected_revision, String& new_revision)
+{
+	if(!ValidProjectKey(project) || !SafeRecordId(file.name, true))
+		return Failed("release-put", project, "invalid project key or file name");
+	return PutKind(Store("release", project), "release-put", project, PRIVATEHUB_SCHEMA_RELEASE_FILE,
+	               PRIVATEHUB_SCHEMA_RELEASE_FILE, file.name, file, expected_revision, new_revision);
 }
 
 END_UPP_NAMESPACE

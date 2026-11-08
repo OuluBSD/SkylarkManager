@@ -385,7 +385,7 @@ StoreResult JsonFileStore::PutOpaque(const String& id, const String& envelope_js
 		doc.Add("envelope", env);
 		doc.Add("data", dv);
 		String error;
-		if(!WriteAtomic(RecordPath(id), StoreAsJson(doc, true), error))
+		if(!WriteAtomic(RecordPath(id), AsJSON(doc, true), error))
 			return StoreResult("atomic write failed for '" + id + "': " + error);
 		out_rev = AsString(next);
 		return StoreResult(true);

@@ -777,6 +777,100 @@ CONSOLE_APP_MAIN
 		Check(!ph.CreateIssue("oulubsd/demo", noauth, made).ok, "privatehub rejects authorless issues");
 	}
 
+	// --- unit level: PrivateHub record kinds (wiki, discussion, release files) ---
+	{
+		String ws = AppendFileName(s_root, "workspace");
+		String store_root = AppendFileName(s_root, "ph-records");
+		PrivateHubWorkspaceBackend ph(ws, store_root);
+		const String proj = "oulubsd/records";
+
+		// Issue listing must not return comment records as issues.
+		ForgeIssue iss_draft;
+		iss_draft.title = "with comment";
+		iss_draft.author = "agent-7";
+		ForgeIssue iss_made;
+		ph.CreateIssue(proj, iss_draft, iss_made);
+		ForgeComment iss_cm;
+		iss_cm.author = "agent-7";
+		iss_cm.body = "a comment";
+		ForgeComment iss_saved;
+		ph.AddComment(proj, iss_made.issue_id, iss_cm, iss_saved);
+		Vector<ForgeIssue> iss_list;
+		Check(ph.ListIssues(proj, iss_list).ok && iss_list.GetCount() == 1,
+		      "privatehub issue list excludes comment records");
+
+		// Wiki pages: create, read back with revision, conflict on stale revision.
+		PrivateHubWikiPage page;
+		page.slug = "home";
+		page.title = "Home";
+		page.body = "= Welcome";
+		page.updated = "2026-11-09";
+		String rev1, rev2, rev3;
+		Check(ph.PutWikiPage(proj, page, "", rev1).ok && rev1 == "1", "privatehub wiki page created at revision 1");
+		PrivateHubWikiPage got;
+		Check(ph.GetWikiPage(proj, "home", got).ok && got.title == "Home" && got.body == "= Welcome"
+		   && got.revision == "1" && got.provenance == "local", "privatehub wiki page round-trips");
+		page.body = "= Edited";
+		Check(ph.PutWikiPage(proj, page, "1", rev2).ok && rev2 == "2", "privatehub wiki edit at current revision");
+		Check(!ph.PutWikiPage(proj, page, "1", rev3).ok, "privatehub wiki stale revision is a conflict");
+		Vector<PrivateHubWikiPage> pages;
+		Check(ph.ListWikiPages(proj, pages).ok && pages.GetCount() == 1, "privatehub wiki pages listed");
+		PrivateHubWikiPage badpage = page;
+		badpage.slug = "../escape";
+		Check(!ph.PutWikiPage(proj, badpage, "", rev3).ok, "privatehub wiki slug with traversal rejected");
+		PrivateHubWikiPage untitled;
+		untitled.slug = "untitled";
+		Check(!ph.PutWikiPage(proj, untitled, "", rev3).ok, "privatehub wiki schema requires a title");
+
+		// Discussion topics and posts: posts are children and stay out of the topic list.
+		PrivateHubDiscussionTopic topic;
+		topic.slug = "t1";
+		topic.title = "Hello";
+		topic.author = "alice";
+		topic.created = "2026-11-09";
+		String trev;
+		Check(ph.PutDiscussionTopic(proj, topic, "", trev).ok, "privatehub topic created");
+		PrivateHubPost post;
+		post.post_id = "p1";
+		post.topic = "t1";
+		post.author = "bob";
+		post.body = "first";
+		post.created = "2026-11-09";
+		String prev;
+		Check(ph.PutDiscussionPost(proj, post, "", prev).ok, "privatehub post added to existing topic");
+		PrivateHubPost orphan = post;
+		orphan.topic = "missing";
+		Check(!ph.PutDiscussionPost(proj, orphan, "", prev).ok, "privatehub post to missing topic rejected");
+		Vector<PrivateHubDiscussionTopic> topics;
+		Check(ph.ListDiscussionTopics(proj, topics).ok && topics.GetCount() == 1,
+		      "privatehub topic list excludes post records");
+		Vector<PrivateHubPost> posts;
+		Check(ph.ListDiscussionPosts(proj, "t1", posts).ok && posts.GetCount() == 1 && posts[0].body == "first",
+		      "privatehub posts listed under their topic");
+		PrivateHubDiscussionTopic dotted = topic;
+		dotted.slug = "a.b";
+		Check(!ph.PutDiscussionTopic(proj, dotted, "", trev).ok, "privatehub topic slug with dot rejected");
+
+		// Release files: names keep their dots; file names with separators are rejected.
+		PrivateHubReleaseFile rel;
+		rel.name = "topside-1.0.0-linux.tar.gz";
+		rel.release = "1.0.0";
+		rel.size_bytes = 14889728;
+		rel.url = "/projects/topside/files/topside-1.0.0-linux.tar.gz";
+		rel.updated = "2026-10-30";
+		String erev;
+		Check(ph.PutReleaseFile(proj, rel, "", erev).ok, "privatehub release file stored");
+		PrivateHubReleaseFile rgot;
+		Check(ph.GetReleaseFile(proj, rel.name, rgot).ok && rgot.size_bytes == 14889728 && rgot.release == "1.0.0",
+		      "privatehub release file round-trips");
+		Vector<PrivateHubReleaseFile> rels;
+		Check(ph.ListReleaseFiles(proj, rels).ok && rels.GetCount() == 1, "privatehub release files listed");
+		PrivateHubReleaseFile badrel = rel;
+		badrel.name = "a/b.tar";
+		Check(!ph.PutReleaseFile(proj, badrel, "", erev).ok, "privatehub release name with separator rejected");
+		Check(!ph.ListWikiPages("bad project/x/y", pages).ok, "privatehub rejects malformed project keys");
+	}
+
 	// --- unit level: Science corpus + article trees ---
 	{
 		String corpus = AppendFileName(s_root, "science-corpus");
