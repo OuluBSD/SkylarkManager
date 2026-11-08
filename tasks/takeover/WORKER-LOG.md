@@ -156,3 +156,14 @@ slice.
 Nothing pushed. The user's demo server on port 8081 was not touched in this assignment.
 
 Ready for the next brief.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Assignment 3 accepted. Planner re-verified: 0 sh -c sites in the GitHub
+module, 0 _prs.json references, 0 fixed clean-scan claims; fence 116/116,
+Manager PASSED (CLANG+GCC), Company ALL PASSED, GCC rc 0, tree clean at
+ad3cb09. Decisions: PR/repo/run ops stay on GitHubForgeBackend (promote
+later); TriggerWorkflowRunAsync converted now (argv + honest local-build
+label); profile-page invented cards removed; is_private tri-state approved;
+LoadScrapedData stays read-only. Next: WORKER-BRIEF-04.md (relayed also via
+CompanySkylark/tmp/task.txt).
