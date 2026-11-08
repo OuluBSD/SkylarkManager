@@ -1,8 +1,8 @@
 #ifndef _reference_ManagerSkylark_HostPlatform_h_
 #define _reference_ManagerSkylark_HostPlatform_h_
 
-#include "ManagerSkylark.h"
-#include "SystemAuth.h"
+#include <Core/Core.h>
+#include <Skylark/Skylark.h>
 
 NAMESPACE_UPP
 

@@ -1,3 +1,4 @@
+#include "ManagerSkylark.h"
 #include "HostPlatform.h"
 #ifdef PLATFORM_POSIX
 #include <sys/statvfs.h>

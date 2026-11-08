@@ -1,3 +1,4 @@
+#include "ManagerSkylark.h"
 #include "HostPlatform.h"
 
 NAMESPACE_UPP
