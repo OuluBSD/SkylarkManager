@@ -28,7 +28,7 @@ bool JsonFileStore::FileLock::Acquire(const String& lock_path, String& error)
 {
 	RealizePath(lock_path);
 #ifdef PLATFORM_WIN32
-	HANDLE h = CreateFileW(ToSystemCharsetW(lock_path), GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+	HANDLE h = CreateFileW((const wchar_t *)~ToSystemCharsetW(lock_path), GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
 	                       FILE_ATTRIBUTE_NORMAL, NULL);
 	if(h == INVALID_HANDLE_VALUE || h == NULL) {
 		error = "cannot open lock file: " + lock_path;
@@ -102,9 +102,9 @@ bool JsonFileStore::WriteAtomic(const String& final_path, const String& data, St
 		return false;
 	}
 	CloseHandle(h);
-	if(!MoveFileExW(ToSystemCharsetW(final_path + ".tmp"), ToSystemCharsetW(final_path),
+	if(!MoveFileExW((const wchar_t *)~ToSystemCharsetW(final_path + ".tmp"), (const wchar_t *)~ToSystemCharsetW(final_path),
 	                MOVEFILE_REPLACE_EXISTING)) {
-		DeleteFileW(ToSystemCharsetW(final_path + ".tmp"));
+		DeleteFileW((const wchar_t *)~ToSystemCharsetW(final_path + ".tmp"));
 		error = "cannot replace file " + final_path;
 		return false;
 	}

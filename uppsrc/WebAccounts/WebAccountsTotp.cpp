@@ -86,7 +86,10 @@ String TotpCode(const String& secret_b32, int64 unix_time, int step_seconds, int
 	int mod = 1;
 	for(int i = 0; i < digits; i++)
 		mod *= 10;
-	return Format("%0*d", digits, bin % mod);
+	String code = AsString(bin % mod);
+	while(code.GetCount() < digits)
+		code = "0" + code;
+	return code;
 }
 
 bool TotpVerify(const String& secret_b32, const String& code, int64 unix_time,

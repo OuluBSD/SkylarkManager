@@ -150,6 +150,22 @@ jobs:
           ls -lh SkylarkManager/bin/WebShowcase
           file SkylarkManager/bin/WebShowcase
 
+      - name: Build WebEngineTests (${{ matrix.bm }})
+        run: |
+          cd SkylarkManager
+          uppbuilder WebEngineTests -m ${{ matrix.bm }} -v
+
+      - name: Verify WebEngineTests Binary
+        run: |
+          test -f SkylarkManager/bin/WebEngineTests
+          ls -lh SkylarkManager/bin/WebEngineTests
+          file SkylarkManager/bin/WebEngineTests
+
+      - name: Run Engine Fence Tests (${{ matrix.bm }})
+        run: |
+          cd SkylarkManager
+          ./bin/WebEngineTests
+
   build-windows:
     name: Windows (windows-latest - MSVC)
     runs-on: windows-latest
@@ -293,3 +309,11 @@ jobs:
         run: |
           if not exist "SkylarkManager\bin\WebShowcase.exe" exit /b 1
           dir "SkylarkManager\bin\WebShowcase.exe"
+
+      # Compile coverage only: the fence-test fixtures include POSIX shell
+      # scripts (fake gh, git invocations), so the run step is POSIX-only.
+      - name: Build WebEngineTests (MSVC)
+        shell: cmd
+        run: |
+          cd SkylarkManager
+          uppbuilder.exe WebEngineTests -m MSVS22x64 -v
