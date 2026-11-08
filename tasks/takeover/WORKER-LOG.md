@@ -279,3 +279,14 @@ ManagerSkylark splits + CompanySkylark.upp cleanup).
 Nothing pushed. The demo server on port 8081 was not touched.
 
 Ready for the planner.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Assignment 5 accepted. Planner re-verified: splits as reported (RestApi 4
+area files + main with CONSOLE_APP_MAIN; 13 SKYLARK set preserved;
+ScopedPolicy grants-deviation approved; CandidateWorkflow.cpp 758 = largest
+non-test; RestApiSelfTests 864 logged exception); DataStore hard-path tests
+present; fence 116/116, Manager PASSED (CLANG+GCC), Company ALL PASSED +
+GCC rc 0. On-disk DataStoreSelfTests change: keep as-on-disk. Next:
+WORKER-BRIEF-06.md (slice 6, final T01 slice: Host argv conversion,
+SourceForge/PrivateHub wiring, local-store migration, fence additions).
