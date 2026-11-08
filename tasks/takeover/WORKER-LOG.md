@@ -97,3 +97,13 @@ templates; AssessmentViews include). Next: WORKER-BRIEF-02.md (T01 slice 2).
 - Nothing pushed. The user's demo server on port 8081 was left running; the capture server on 18090 was stopped.
 
 Ready for the next brief.
+
+## Planner entry — 2026-11-08 (takeover agent)
+
+Assignment 2 accepted. Planner re-verified: fence 116/116, Manager PASSED
+(CLANG+GCC), Company ALL PASSED, GCC builds clean, tree clean at 7b62973.
+Deviations approved (app-package --test placement; no ManagerTypes.h
+needed). Route-capture methodology approved. Next: WORKER-BRIEF-03.md
+(GitHub PR/repos/actions adapter ops, dead _prs.json mirror removal,
+static-claims honesty pass). HostPlatform shell sites deferred to their own
+slice.
