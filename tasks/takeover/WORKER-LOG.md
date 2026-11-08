@@ -107,3 +107,52 @@ needed). Route-capture methodology approved. Next: WORKER-BRIEF-03.md
 (GitHub PR/repos/actions adapter ops, dead _prs.json mirror removal,
 static-claims honesty pass). HostPlatform shell sites deferred to their own
 slice.
+
+## 2026-11-08 — WORKER-BRIEF-03 (Assignment 3, T01 slice 3) — done
+
+**Commits (on main, nothing pushed):**
+- `75960be` GitHubForge: pull request, repo-list and run-list operations (argv-only). No callers yet.
+- `dcd9ccd` Read paths (repo list, PR list/detail/diff, actions runs) go through the adapter.
+- `5f82a91` PR writes (create, merge, close, comment) go through the adapter; `_prs.json` mirror removed; write routes report `status: error` on refusal and the page shows it instead of reloading.
+- `c9ed779` `gh auth status` and the three local `git` reads (repo log, branches, commit log) run argv-only; the synthetic test builds a real fixture repo for the git path.
+- `bed3033` Honesty pass: security, settings and sidebar stop asserting unread facts; unknown star and fork counts show `n/a` / `not loaded`.
+
+**Gh operations now on the adapter (`GitHubForgeBackend`, all via `GhRun` argv):**
+- Pull requests: list `gh api repos/o/r/pulls?state=all&per_page=20`; get `gh api repos/o/r/pulls/N`; diff `gh pr diff N -R o/r` (plain text); create `gh api -X POST repos/o/r/pulls -f title= -f head= -f base= -f body=`; state `gh api -X PATCH repos/o/r/pulls/N -f state=open|closed`; merge `gh api -X PUT repos/o/r/pulls/N/merge -f merge_method=merge`.
+- PR comments reuse the issue endpoints (`AddComment`/`ListComments`), since GitHub treats PR conversation comments as issue comments.
+- Repositories: `gh repo list <owner> --limit 100 --json ...`.
+- Workflow runs: `gh api repos/o/r/actions/runs?per_page=N`.
+- Auth: `gh auth status` (now `GhRun`; success is exit code 0, no longer a string match that also matched "not logged in to github.com").
+- New types in ForgeCore: `ForgePullRequest`, `ForgeRepo`, `ForgeRun`. Owner, branch and number inputs are validated before argv is built.
+- Decision for the planner: these ops live on `GitHubForgeBackend`, not on `IForgeBackend`, so SourceForge and PrivateHub need no stubs. Promote them to the interface when the forge domain grows a PR contract.
+
+**Shell sites:** `grep -rn 'sh -c\|"sh",' uppsrc/ManagerSkylark/GitHub*.{cpp,h}` returns 0. `grep -rn _prs.json uppsrc` returns 0. Not changed, outside the GitHub module:
+- `GitHubActions.cpp` `TriggerWorkflowRunAsync` runs a fixed `~/Dev/ai-upp/bin/build` path with `LocalProcess::Start(cmd)`. No user data is in the command, but it is a string command line. Convert with the rest of the HostPlatform slice.
+- `HostPlatform.cpp` and the views: out of scope per the brief.
+
+**Behavior changes to know about (intentional):**
+- Mutation route responses: `status` is `error` when GitHub refused, with the reason in `result` or `url`. The page JavaScript now alerts on error and no longer reloads or redirects to PR 7 after a failed create.
+- `api/gh/repos/*` JSON: local-only repos carry `stars: -1` and `forks: -1` (unknown) instead of `0`.
+- Pull request diff failure shows `Diff is unavailable from GitHub: <reason>` instead of the empty-diff message.
+- Actions tab: an error shows `Workflow runs are unavailable from GitHub: <reason>` under any locally started runs.
+
+**Verification (exact, after every commit):**
+- `uppbuilder -m CLANG WebEngineTests -v && ./bin/CLANG-Blitz-Clang-Debug-Debug_Full-Linux-Posix-Shared/WebEngineTests` → 116/116 checks passed, exit 0.
+- `uppbuilder -m CLANG ManagerSkylark -v && ./bin/ManagerSkylark --test` → ManagerSkylark verification PASSED, exit 0. The GitHub section now covers: issue list/detail/create; PR list (open and merged states), detail with comment thread, diff text; workflow runs; repo list; local git log and branches through a real fixture repo; PR create (including rejection of an unsafe branch before gh runs), merge (success and refusal), close, comment URL; unavailable state for issues, PRs, PR detail, actions, all with gh missing; security and settings tabs with no fixed claims.
+- `uppbuilder -m CLANG -a ../SkylarkManager/uppsrc CompanySkylark -v && ./bin/CompanySkylark --test` → ALL TESTS PASSED, exit 0.
+- GCC: `uppbuilder -m GCC ManagerSkylark -v`, `uppbuilder -m GCC WebEngineTests -v`, `uppbuilder -m GCC -a ../SkylarkManager/uppsrc CompanySkylark -v` → rc 0 each.
+- REST shape: the real `gh api repos/OuluBSD/CompanySkylark/actions/runs` response has the `workflow_runs` array with `head_branch`, `created_at` and `event`, matching the fixture. No PR object was available to probe live (that repo has no PRs). The PR fixture follows the REST docs, so one live PR check is still open.
+- Not done: a browser or live-server pass of the PR merge, close and comment flows against a real repo. The JavaScript change is covered only by reading it.
+
+**Diff stat (cf728fc..HEAD):** 14 files, +711 / −263. Per commit: `75960be` 4 files; `dcd9ccd` 7; `5f82a91` 4; `c9ed779` 2; `bed3033` 5.
+
+**Open items (not done; for the planner):**
+- Static claims outside the brief's list, left alone: the user profile page's "Active GitHub Projects" cards ("ai-upp Core Delivery", "Active Sprint") are invented. The New-PR form options are unchanged, as the brief said.
+- `GetRepositories` (the local fallback behind the repo list) marks every local repo `is_private = true`, and the repo header's Private/Public badge uses that flag. That is a fixed claim. It needs a tri-state flag, which is a `LocalRepoInfo` schema change.
+- `LoadScrapedData` still reads `~/.aria/sites/github/<owner>_<repo>/summary.json`. It is read-only and fills the local fallback only, but the scraper it reads is not part of this repo.
+- `GitHubPlatform.cpp` `RenderRepoHeader` still shows the `Private`/`Public` label from the flag above.
+- Slice 4 as the brief lists it: `DataStore.cpp`, `RestApi.cpp` (still over target), `ScopedPolicy.cpp`, `ManagerSkylark.cpp`.
+
+Nothing pushed. The user's demo server on port 8081 was not touched in this assignment.
+
+Ready for the next brief.
