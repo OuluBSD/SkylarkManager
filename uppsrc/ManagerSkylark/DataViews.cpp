@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "CandidateWorkflow.h"
+#include "AssessmentViews.h"
 
 NAMESPACE_UPP
 
@@ -43,6 +44,10 @@ SKYLARK(DataIndexPage, "data")
 		body << "<li><a href=\"/api/data/docs?kind=" << UrlEncode(kind) << "\">" << EscapeHtml(kind) << "</a> (" << count << ")</li>";
 	}
 	body << "</ul></section>";
+	String workspace = http["workspace"];
+	if(workspace.IsEmpty() && app.IsDemoSite()) workspace = "demo-workspace";
+	if(workspace.IsEmpty() && app.IsTestMode()) workspace = "synthetic-workspace";
+	body << AssessmentViewService::Render(AssessmentViewService::Build(app, workspace));
 	http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage("Data Catalog", "data", body, &http);
 }
 
@@ -54,6 +59,10 @@ SKYLARK(ApiDataSpec, "api/data/spec")
 	result.Add("read_only", true);
 	result.Add("source_id", store.GetSourceId());
 	result.Add("default_policy", ManagerSkylarkApp::Get().ResolveEffectivePolicy(PolicyInput()).ToRedactedValue());
+	String workspace = http["workspace"];
+	if(workspace.IsEmpty() && ManagerSkylarkApp::Get().IsDemoSite()) workspace = "demo-workspace";
+	if(workspace.IsEmpty() && ManagerSkylarkApp::Get().IsTestMode()) workspace = "synthetic-workspace";
+	result.Add("assessment", AssessmentViewService::Build(ManagerSkylarkApp::Get(), workspace));
 	int visible_invalid = 0;
 	for(const DataDocument& document : store.GetDocuments())
 		if(IsPublicDataRecord(document) && !document.valid) visible_invalid++;

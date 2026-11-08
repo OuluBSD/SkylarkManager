@@ -18,6 +18,10 @@ file
 	DataStore.cpp,
 	ScopedPolicy.h,
 	ScopedPolicy.cpp,
+	AssessmentService.h,
+	AssessmentService.cpp,
+	AssessmentViews.h,
+	AssessmentViews.cpp,
 	CandidateLineage.h,
 	CandidateLineage.cpp,
 	CandidateWorkflow.h,
@@ -43,3 +47,4 @@ file
 
 mainconfig
 	"" = "MT";
+

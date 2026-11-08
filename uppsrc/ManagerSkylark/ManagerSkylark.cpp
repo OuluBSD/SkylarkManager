@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+#include "AssessmentViews.h"
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include "HostPlatform.h"
@@ -127,6 +128,36 @@ static ValueMap MakeDemoPolicyConfig()
 	registry.Add("ancestry", ancestry); registry.Add("providers", providers); registry.Add("protected_ancestry", protected_ancestry);
 	ValueMap config; config.Add("instance", instance); config.Add("registry", registry);
 	return config;
+}
+
+static bool SeedSyntheticAssessmentFiles(const String& site_dir, const String& workspace, const String& candidate, const String& evidence_id)
+{
+	ValueMap rubric;
+	rubric.Add("id", "synthetic-rubric"); rubric.Add("workspace_id", workspace); rubric.Add("revision", "r1");
+	rubric.Add("score_scale", "integer-0-10"); rubric.Add("total_rule", "weighted-mean");
+	ValueArray dimensions, coverage, tiers;
+	for(int i = 0; i < 6; i++) {
+		String id = Format("dimension-%d", i + 1);
+		ValueMap dimension;
+		dimension.Add("id", id); dimension.Add("weight", i + 1); dimension.Add("minimum_score", 0);
+		dimension.Add("maximum_score", 10); dimension.Add("minimum_evidence_count", 1);
+		dimensions.Add(dimension); coverage.Add(id);
+	}
+	rubric.Add("dimensions", dimensions); rubric.Add("coverage_required", coverage);
+	ValueMap low; low.Add("id", "developing"); low.Add("minimum_numerator", 0); low.Add("minimum_denominator", 1); low.Add("maximum_numerator", 5); low.Add("maximum_denominator", 1); tiers.Add(low);
+	ValueMap high; high.Add("id", "promising"); high.Add("minimum_numerator", 5); high.Add("minimum_denominator", 1); high.Add("maximum_numerator", 10); high.Add("maximum_denominator", 1); tiers.Add(high);
+	rubric.Add("tiers", tiers);
+	ValueMap inputs; inputs.Add("workspace_id", workspace);
+	ValueArray scores;
+	for(int i = 0; i < 6; i++) {
+		ValueMap score; score.Add("workspace_id", workspace); score.Add("candidate_id", candidate);
+		score.Add("dimension_id", Format("dimension-%d", i + 1)); score.Add("score", "5");
+		score.Add("provenance", "computed"); ValueArray refs; refs.Add(evidence_id); score.Add("evidence_ids", refs);
+		scores.Add(score);
+	}
+	inputs.Add("scores", scores); inputs.Add("relationships", ValueArray());
+	return SaveFile(AppendFileName(site_dir, "assessment-rubric.json"), AsJSON(rubric, true)) &&
+	       SaveFile(AppendFileName(site_dir, "assessment-inputs.json"), AsJSON(inputs, true));
 }
 
 bool ManagerSkylarkApp::SeedSyntheticCandidateWorkflow(const String& data_root, const String& workspace_id,
@@ -355,6 +386,10 @@ void ManagerSkylarkApp::InitApp()
 	}
 	LoadSitePolicy();
 	data_store.Load();
+	if(custom_site_dir && (demo_site || test_mode) &&
+	   !SeedSyntheticAssessmentFiles(site_dir, demo_site ? "demo-workspace" : "synthetic-workspace",
+	                                demo_site ? "demo-candidate" : "synthetic-candidate", "demo-evidence-item"))
+		RLOG("Synthetic assessment fixtures could not be written; assessment views remain unavailable.");
 	if(demo_site && local_store.Projects().IsEmpty()) {
 		Project project;
 		project.slug = "demo-project";

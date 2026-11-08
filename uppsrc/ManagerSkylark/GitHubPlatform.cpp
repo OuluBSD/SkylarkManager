@@ -315,7 +315,7 @@ Vector<WorkflowTemplate> GitHubPlatformService::GetWorkflowTemplates(const Strin
 			"        with:\n"
 			"          method: CLANG\n"
 			"          packages: reference/ManagerSkylark uppsrc/Aria\n"
-			"          flags: MT DEBUG BLITZ\n\n"
+			"          flags: DEBUG BLITZ\n\n"
 			"      - name: Run Aria Verification Suite\n"
 			"        run: |\n"
 			"          DISPLAY=:0 ./bin/CLANG/Aria site managerskylark test http://127.0.0.1:8080\n";
@@ -831,7 +831,7 @@ Vector<MarketplaceAction> GitHubPlatformService::GetMarketplaceActions()
 			"  with:\n"
 			"    method: CLANG\n"
 			"    packages: reference/ManagerSkylark\n"
-			"    flags: MT DEBUG BLITZ\n";
+			"    flags: DEBUG BLITZ\n";
 	}
 	{
 		MarketplaceAction& a = list.Add();
@@ -897,7 +897,7 @@ Vector<PackageBuildCacheInfo> GitHubPlatformService::GetPackageBuildCaches(const
 	for(int i = 0; i < 8; i++) {
 		PackageBuildCacheInfo& b = list.Add();
 		b.package_name = cached_pkgs[i];
-		b.flags = "MT DEBUG BLITZ";
+		b.flags = "DEBUG BLITZ";
 		b.hash = Sprintf("sha256-%08x", (unsigned)GetHashValue(b.package_name));
 		b.last_status = "success";
 		b.is_cached = true;
@@ -906,7 +906,7 @@ Vector<PackageBuildCacheInfo> GitHubPlatformService::GetPackageBuildCaches(const
 	{
 		PackageBuildCacheInfo& b = list.Add();
 		b.package_name = "Sql";
-		b.flags = "MT DEBUG BLITZ flagUSEMALLOC";
+		b.flags = "DEBUG BLITZ USEMALLOC";
 		b.hash = "untested";
 		b.last_status = "untested";
 		b.is_cached = false;
@@ -915,7 +915,7 @@ Vector<PackageBuildCacheInfo> GitHubPlatformService::GetPackageBuildCaches(const
 	{
 		PackageBuildCacheInfo& b = list.Add();
 		b.package_name = "plugin/pcre";
-		b.flags = "MT DEBUG BLITZ flagUSEMALLOC";
+		b.flags = "DEBUG BLITZ USEMALLOC";
 		b.hash = "untested";
 		b.last_status = "untested";
 		b.is_cached = false;

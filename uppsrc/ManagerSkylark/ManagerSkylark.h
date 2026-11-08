@@ -28,6 +28,7 @@ public:
 
 	bool IsDemoSite() const { return demo_site; }
 	bool IsTestMode() const { return test_mode; }
+	bool HasExplicitSiteDir() const { return custom_site_dir; }
 	String GetSiteDir() const { return site_dir; }
 
 	V2Store&      GetV2Store()      { return v2_store; }

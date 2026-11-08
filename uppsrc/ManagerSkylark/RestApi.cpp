@@ -1,6 +1,7 @@
 #include "ManagerSkylark.h"
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
+#include "AssessmentViews.h"
 
 NAMESPACE_UPP
 
@@ -565,6 +566,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: immutable review-package synthetic tests\n";
 		return false;
 	}
+	if(!AssessmentViewService::RunSyntheticTests()) {
+		Cerr() << "FAILED: assessment projection synthetic tests\n";
+		return false;
+	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));
 	if(!auth_config.Is<ValueMap>()) {
 		Cerr() << "FAILED: site credential file was not a JSON object\n";
@@ -609,6 +614,13 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	   !app.IsAssessmentSourceVisible("synthetic-workspace", "public-source") ||
 	   app.IsAssessmentSourceVisible("synthetic-workspace", "private-source")) {
 		Cerr() << "FAILED: explicitly registered synthetic data root\n";
+		return false;
+	}
+	ValueMap assessment_view = AssessmentViewService::Build(app, "synthetic-workspace");
+	ValueArray assessed_candidates = MapGet(assessment_view, "candidate_assessments");
+	if(MapGetString(assessment_view, "status") != "configured" || assessed_candidates.GetCount() != 1 ||
+	   MapGetString((ValueMap)assessed_candidates[0], "tier") != "promising") {
+		Cerr() << "FAILED: site-scoped evidence assessment projection\n";
 		return false;
 	}
 	ValueMap initial_workflow = CandidateWorkflow::Project(app.GetDataStore(), app, "synthetic-workspace", "synthetic-candidate");
@@ -718,6 +730,34 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 			return false;
 		}
 		Cout() << "ok    /api/data/docs (synthetic read-only catalog)\n";
+	}
+	{
+		HttpRequest req(base_url + "/api/data/spec?workspace=synthetic-workspace");
+		req.Timeout(3000);
+		String res = req.Execute();
+		ValueMap response = ParseJSON(res);
+		ValueMap assessment = MapGet(response, "assessment");
+		ValueArray candidates = MapGet(assessment, "candidate_assessments");
+		if(req.GetStatusCode() != 200 || MapGetString(assessment, "status") != "configured" ||
+		   candidates.GetCount() != 1 || res.Find("demo-evidence-item") >= 0 || res.Find("demo-source") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: synthetic read-only assessment projection or evidence redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		Cout() << "ok    /api/data/spec (synthetic read-only assessment)\n";
+	}
+	{
+		HttpRequest req(base_url + "/data?workspace=synthetic-workspace");
+		req.Timeout(3000);
+		String res = req.Execute();
+		if(req.GetStatusCode() != 200 || res.Find("Assessment") < 0 || res.Find("promising") < 0 ||
+		   res.Find("demo-evidence-item") >= 0 || res.Find("demo-source") >= 0 || res.Find(data_root) >= 0) {
+			Cerr() << "FAILED: synthetic assessment page or evidence redaction\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
 	}
 
 	// Test GET /api/tasks/next/manager-skylark
