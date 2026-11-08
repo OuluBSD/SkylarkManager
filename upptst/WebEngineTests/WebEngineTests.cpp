@@ -817,8 +817,6 @@ CONSOLE_APP_MAIN
 		ScienceNode r1; r1.id = "r1"; r1.type = "reference"; r1.ref_key = "smith2024"; r1.source_ref = "Smith 2024";
 		tree.nodes.Add(s1); tree.nodes.Add(p1); tree.nodes.Add(e1); tree.nodes.Add(t1); tree.nodes.Add(r1);
 		ForgeResult sr = corpus_reader.SaveArticleTree("2611.04292", tree, "1", "agent-7");
-		if(!sr.ok)
-			Cout() << "[sci] save err: " << sr.error << "\n";
 		Check(sr.ok, "science article tree saved against paper revision");
 		Check(corpus_reader.HasArticleTree("2611.04292"), "science article sidecar present");
 		ScienceArticleTree loaded;
