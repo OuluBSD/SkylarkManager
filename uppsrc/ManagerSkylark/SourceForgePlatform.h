@@ -2,6 +2,7 @@
 #define _reference_ManagerSkylark_SourceForgePlatform_h_
 
 #include <Core/Core.h>
+#include <Skylark/Skylark.h>
 
 NAMESPACE_UPP
 
@@ -172,6 +173,9 @@ public:
 	// Files Store
 	static Vector<SourceForgeReleaseFile> GetFiles(const String& project);
 };
+
+// Page renderer used by the SourceForge route handlers (SourceForgeRoutes.cpp)
+void RenderSourceForgeView(Http& http, const String& project, const String& subpath);
 
 END_UPP_NAMESPACE
 

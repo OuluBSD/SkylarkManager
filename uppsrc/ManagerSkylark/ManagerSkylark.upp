@@ -35,6 +35,7 @@ file
 	GitHubRoutes.cpp,
 	SourceForgePlatform.h,
 	SourceForgePlatform.cpp,
+	SourceForgeRoutes.cpp,
 	AgentPlatform.h,
 	AgentPlatform.cpp,
 	SystemAuth.h,
