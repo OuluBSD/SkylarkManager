@@ -2,6 +2,7 @@
 #define _reference_ManagerSkylark_GitHubPlatform_h_
 
 #include <Core/Core.h>
+#include <Skylark/Skylark.h>
 
 NAMESPACE_UPP
 
@@ -109,6 +110,10 @@ public:
 	static bool                          SaveWorkflowFile(const String& repo_path, const String& filename, const String& content);
 	static void                          TriggerWorkflowRunAsync(const String& owner, const String& repo, const String& workflow_name, const String& run_type);
 };
+
+// Page renderers used by the GitHub route handlers (GitHubRoutes.cpp)
+void RenderUserProfile(Http& http, const String& username);
+void RenderRepoView(Http& http, const String& owner, const String& repo, const String& deep_path);
 
 END_UPP_NAMESPACE
 

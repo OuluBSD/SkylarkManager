@@ -32,6 +32,7 @@ file
 	DataViews.cpp,
 	GitHubPlatform.h,
 	GitHubPlatform.cpp,
+	GitHubRoutes.cpp,
 	SourceForgePlatform.h,
 	SourceForgePlatform.cpp,
 	AgentPlatform.h,
