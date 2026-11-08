@@ -125,6 +125,8 @@ ForgeIssue GitHubForgeBackend::IssueFromJson(const ValueMap& m, const String& pr
 		for(const Value& l : (ValueArray)labels)
 			if(l.Is<ValueMap>() && !l["name"].IsNull())
 				iss.labels.Add((String)l["name"]);
+	if(!m.Get("comments").IsNull())
+		iss.comment_count = (int)m.Get("comments");
 	return iss;
 }
 

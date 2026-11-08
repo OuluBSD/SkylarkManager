@@ -93,12 +93,13 @@ struct ForgeIssue : Moveable<ForgeIssue> {
 	Time   created;
 	Time   updated;
 	Vector<String> labels;
+	int    comment_count = 0;
 
 	ForgeIssue() {}
 	ForgeIssue(const ForgeIssue& o)
 		: issue_id(o.issue_id), project(o.project), title(o.title), body(o.body)
 		, author(o.author), open(o.open), created(o.created), updated(o.updated)
-		, labels(clone(o.labels)) {}
+		, labels(clone(o.labels)), comment_count(o.comment_count) {}
 	ForgeIssue& operator=(const ForgeIssue& o) {
 		if(this != &o) {
 			issue_id = o.issue_id;
@@ -110,6 +111,7 @@ struct ForgeIssue : Moveable<ForgeIssue> {
 			created = o.created;
 			updated = o.updated;
 			labels = clone(o.labels);
+			comment_count = o.comment_count;
 		}
 		return *this;
 	}
@@ -117,7 +119,7 @@ struct ForgeIssue : Moveable<ForgeIssue> {
 	void Jsonize(JsonIO& io) {
 		io("issue_id", issue_id)("project", project)("title", title)("body", body)
 		  ("author", author)("open", open)("created", created)("updated", updated)
-		  ("labels", labels);
+		  ("labels", labels)("comment_count", comment_count);
 	}
 };
 
