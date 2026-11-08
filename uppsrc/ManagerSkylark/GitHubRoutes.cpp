@@ -174,13 +174,14 @@ SKYLARK(ApiCreatePullRequest, "api/gh/pulls/*/create:POST_RAW")
 	String base = json["base"];
 	String res = GitHubPlatformService::CreatePullRequest(owner, repo, title, body, head, base);
 	ValueMap out;
-	out.Set("status", "ok");
+	bool failed = res.StartsWith("error:");
+	out.Set("status", failed ? "error" : "ok");
 	out.Set("url", res);
-	int num = 7;
-	int last_slash = res.ReverseFind('/');
-	if(last_slash >= 0 && IsDigit(res[last_slash + 1]))
-		num = ScanInt(res.Mid(last_slash + 1));
-	out.Set("number", num);
+	if(!failed) {
+		int last_slash = res.ReverseFind('/');
+		if(last_slash >= 0 && IsDigit(res[last_slash + 1]))
+			out.Set("number", ScanInt(res.Mid(last_slash + 1)));
+	}
 	http.ContentType("application/json") << AsJSON(out);
 }
 
@@ -192,7 +193,7 @@ SKYLARK(ApiMergePullRequest, "api/gh/pulls/*/merge:POST_RAW")
 	int number = (int)json["number"];
 	String res = GitHubPlatformService::MergePullRequest(owner, repo, number);
 	ValueMap out;
-	out.Set("status", "ok");
+	out.Set("status", res.StartsWith("error:") ? "error" : "ok");
 	out.Set("result", res);
 	http.ContentType("application/json") << AsJSON(out);
 }
@@ -205,7 +206,7 @@ SKYLARK(ApiClosePullRequest, "api/gh/pulls/*/close:POST_RAW")
 	int number = (int)json["number"];
 	String res = GitHubPlatformService::ClosePullRequest(owner, repo, number);
 	ValueMap out;
-	out.Set("status", "ok");
+	out.Set("status", res.StartsWith("error:") ? "error" : "ok");
 	out.Set("result", res);
 	http.ContentType("application/json") << AsJSON(out);
 }
@@ -219,7 +220,7 @@ SKYLARK(ApiCommentPullRequest, "api/gh/pulls/*/comment:POST_RAW")
 	String body = json["body"];
 	String res = GitHubPlatformService::AddPullRequestComment(owner, repo, number, body);
 	ValueMap out;
-	out.Set("status", "ok");
+	out.Set("status", res.StartsWith("error:") ? "error" : "ok");
 	out.Set("result", res);
 	http.ContentType("application/json") << AsJSON(out);
 }

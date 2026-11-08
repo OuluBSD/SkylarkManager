@@ -19,6 +19,16 @@ case "$*" in
 		echo '{"number":3,"title":"Open one","body":"Body text","state":"open","user":{"login":"alice"},"created_at":"2026-10-30T18:00:00Z","comments":1}' ;;
 	*"-X POST repos/acme/tools/issues "*)
 		echo '{"number":9,"title":"New","state":"open","user":{"login":"alice"},"created_at":"2026-11-01T08:00:00Z","comments":0}' ;;
+	*"-X POST repos/acme/tools/pulls "*)
+		echo '{"number":12,"title":"Title","state":"open","user":{"login":"alice"},"created_at":"2026-11-03T09:00:00Z","merged_at":null,"head":{"ref":"feature/x"},"base":{"ref":"master"},"html_url":"https://github.com/acme/tools/pull/12"}' ;;
+	*"-X PUT repos/acme/tools/pulls/7/merge"*)
+		echo '{"sha":"abc123","merged":true,"message":"Pull Request successfully merged"}' ;;
+	*"-X PUT repos/acme/tools/pulls/9/merge"*)
+		echo '{"merged":false,"message":"Pull Request is not mergeable"}' ;;
+	*"-X PATCH repos/acme/tools/pulls/7 "*)
+		echo '{"number":7,"title":"Add parity","state":"closed","user":{"login":"alice"},"created_at":"2026-10-20T09:00:00Z","merged_at":null,"head":{"ref":"feature/parity"},"base":{"ref":"master"},"html_url":"https://github.com/acme/tools/pull/7"}' ;;
+	*"-X POST repos/acme/tools/issues/7/comments "*)
+		echo '{"id":92,"user":{"login":"alice"},"body":"Looks good","created_at":"2026-11-03T10:00:00Z"}' ;;
 	*"repos/acme/tools/pulls?state=all"*)
 		echo '[{"number":7,"title":"Add parity","state":"open","user":{"login":"alice"},"created_at":"2026-10-20T09:00:00Z","merged_at":null,"head":{"ref":"feature/parity"},"base":{"ref":"master"},"html_url":"https://github.com/acme/tools/pull/7"},{"number":8,"title":"Old change","state":"closed","user":{"login":"bob"},"created_at":"2026-10-02T09:00:00Z","merged_at":"2026-10-03T09:00:00Z","head":{"ref":"feature/old"},"base":{"ref":"master"},"html_url":"https://github.com/acme/tools/pull/8"}]' ;;
 	*"repos/acme/tools/issues/7/comments"*)
@@ -111,6 +121,31 @@ bool GitHubPlatformService::RunGitHubAdapterSyntheticTests(const String& scratch
 	   repos[0].language != "C++" || repos[0].last_commit_time != "2026-11-01")
 		return Fail("repository list did not map the adapter result");
 	Cout() << "ok    GitHub repository list maps the adapter result\n";
+
+	String created_pr = GitHubPlatformService::CreatePullRequest("acme", "tools", "Title", "Body", "feature/x", "");
+	if(!created_pr.StartsWith("https://github.com/acme/tools/pull/12"))
+		return Fail("pull request creation did not return the created pull request URL: " + created_pr);
+	Cout() << "ok    GitHub pull request creation returns the created pull request URL\n";
+
+	if(!GitHubPlatformService::CreatePullRequest("acme", "tools", "Title", "Body", "bad branch;rm", "master").StartsWith("error: invalid head branch"))
+		return Fail("pull request creation must reject an unsafe branch name before gh runs");
+	Cout() << "ok    GitHub pull request creation rejects unsafe branch names before gh runs\n";
+
+	if(GitHubPlatformService::MergePullRequest("acme", "tools", 7) != "Pull Request successfully merged")
+		return Fail("pull request merge did not report the GitHub message");
+	String refused = GitHubPlatformService::MergePullRequest("acme", "tools", 9);
+	if(!refused.StartsWith("error:") || refused.Find("not mergeable") < 0)
+		return Fail("a refused pull request merge must report an error, not success: " + refused);
+	Cout() << "ok    GitHub pull request merge reports success and refusal\n";
+
+	if(GitHubPlatformService::ClosePullRequest("acme", "tools", 7) != "Closed successfully")
+		return Fail("pull request close did not report success");
+	Cout() << "ok    GitHub pull request close reports success\n";
+
+	String pr_comment = GitHubPlatformService::AddPullRequestComment("acme", "tools", 7, "Looks good");
+	if(!pr_comment.StartsWith("https://github.com/acme/tools/issues/7#issuecomment-92"))
+		return Fail("pull request comment did not return the comment URL: " + pr_comment);
+	Cout() << "ok    GitHub pull request comment returns the comment URL\n";
 
 	SetEnv("GHFORGE_GH", AppendFileName(scratch_dir, "no-such-gh"));
 	unavailable.Clear();

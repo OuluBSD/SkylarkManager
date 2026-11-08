@@ -321,127 +321,45 @@ String GitHubPlatformService::GetPullRequestDiff(const String& owner, const Stri
 
 String GitHubPlatformService::CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_pr_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String b = base.IsEmpty() ? "master" : base;
-	String cmd = Format("gh pr create -R %s --title %s --body-file %s --head %s --base %s 2>&1",
-	                    target, AsCString(title), AsCString(tmp_file), AsCString(head), AsCString(b));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-
-	// Persist to local store so it is always immediately queryable
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	RealizePath(store_path);
-	ValueArray prs;
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) prs = v;
-	}
-	int new_num = 700 + prs.GetCount() + 1;
-	ValueMap np;
-	np.Set("number", new_num);
-	np.Set("title", title);
-	np.Set("body", body);
-	np.Set("state", "OPEN");
-	ValueMap auth; auth.Set("login", "SeppoPakonen");
-	np.Set("author", auth);
-	np.Set("createdAt", Format("%`", GetSysDate()));
-	np.Set("headRefName", head);
-	np.Set("baseRefName", b);
-	prs.Add(np);
-	SaveFile(store_path, AsJSON(prs, true));
-
-	return TrimBoth(out.IsEmpty() ? ("https://github.com/" + target + "/pull/" + AsString(new_num)) : out);
+	GitHubForgeBackend backend;
+	ForgePullRequest pr;
+	ForgeResult res = backend.CreatePullRequest(owner + "/" + repo, title, body, head, base.IsEmpty() ? String("master") : base, pr);
+	if(!res.ok)
+		return "error: " + res.error;
+	return pr.url.IsEmpty() ? "https://github.com/" + owner + "/" + repo + "/pull/" + pr.pr_id : pr.url;
 }
 
 String GitHubPlatformService::MergePullRequest(const String& owner, const String& repo, int number)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr merge %d -R %s --merge 2>&1", number, target);
-	String out = Sys("sh", {"-c", cmd});
-
-	// Update local store state if present
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					m.Set("state", "MERGED");
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Merged successfully" : out);
+	GitHubForgeBackend backend;
+	String message;
+	ForgeResult res = backend.MergePullRequest(owner + "/" + repo, AsString(number), message);
+	if(!res.ok)
+		return "error: " + res.error;
+	return message.IsEmpty() ? String("Merged successfully") : message;
 }
 
 String GitHubPlatformService::ClosePullRequest(const String& owner, const String& repo, int number)
 {
-	String target = owner + "/" + repo;
-	String cmd = Format("gh pr close %d -R %s 2>&1", number, target);
-	String out = Sys("sh", {"-c", cmd});
-
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					m.Set("state", "CLOSED");
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Closed successfully" : out);
+	GitHubForgeBackend backend;
+	ForgePullRequest pr;
+	ForgeResult res = backend.SetPullRequestState(owner + "/" + repo, AsString(number), false, pr);
+	if(!res.ok)
+		return "error: " + res.error;
+	return "Closed successfully";
 }
 
+// Pull request conversation comments are issue comments on GitHub.
 String GitHubPlatformService::AddPullRequestComment(const String& owner, const String& repo, int number, const String& body)
 {
-	String target = owner + "/" + repo;
-	String tmp_file = AppendFileName(GetHomeDirFile(".tmp"), "gh_pr_comment_body.txt");
-	RealizePath(tmp_file);
-	SaveFile(tmp_file, body);
-	String cmd = Format("gh pr comment %d -R %s --body-file %s 2>&1",
-	                    number, target, AsCString(tmp_file));
-	String out = Sys("sh", {"-c", cmd});
-	FileDelete(tmp_file);
-
-	String store_path = AppendFileName(GetHomeDirFile(".aria/sites/github"), owner + "_" + repo + "_prs.json");
-	if(FileExists(store_path)) {
-		Value v = ParseJSON(LoadFile(store_path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				ValueMap m = va[i];
-				if((int)m["number"] == number) {
-					ValueArray comms = m["comments"];
-					ValueMap c;
-					ValueMap a; a.Set("login", "SeppoPakonen");
-					c.Set("author", a);
-					c.Set("createdAt", Format("%`", GetSysDate()));
-					c.Set("body", body);
-					comms.Add(c);
-					m.Set("comments", comms);
-					va.Set(i, m);
-					break;
-				}
-			}
-			SaveFile(store_path, AsJSON(va, true));
-		}
-	}
-	return TrimBoth(out.IsEmpty() ? "Comment added" : out);
+	GitHubForgeBackend backend;
+	ForgeComment comment;
+	comment.body = body;
+	ForgeComment posted;
+	ForgeResult res = backend.AddComment(owner + "/" + repo, AsString(number), comment, posted);
+	if(!res.ok)
+		return "error: " + res.error;
+	return "https://github.com/" + owner + "/" + repo + "/issues/" + AsString(number) + "#issuecomment-" + posted.comment_id;
 }
 
 Vector<LocalRepoInfo> GitHubPlatformService::GetRepositories(const String& owner)
