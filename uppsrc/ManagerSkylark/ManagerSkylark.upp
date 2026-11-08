@@ -7,6 +7,7 @@ uses
 	Manager,
 	SweAgent,
 	WebChat,
+	WebAuth,
 	WebFramework;
 
 file

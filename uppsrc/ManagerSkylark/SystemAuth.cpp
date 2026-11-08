@@ -1,8 +1,6 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
-#include <Core/SSL/SSL.h>
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
+#include <WebAuth/WebAuth.h>
 
 NAMESPACE_UPP
 
@@ -28,61 +26,7 @@ StaticMutex& SessionMutex()
 
 String NewSessionToken()
 {
-	try {
-		SecureBuffer<byte> random = SecureRandom(32);
-		if(random.IsEmpty()) return String();
-		static const char hex[] = "0123456789abcdef";
-		String token;
-		token.Reserve(64);
-		for(int i = 0; i < 32; i++) {
-			token.Cat(hex[random[i] >> 4]);
-			token.Cat(hex[random[i] & 15]);
-		}
-		return token;
-	}
-	catch(...) { return String(); }
-}
-
-String SiteHexEncode(const byte *data, int len)
-{
-	static const char hex[] = "0123456789abcdef";
-	String out;
-	out.Reserve(len * 2);
-	for(int i = 0; i < len; i++) {
-		out.Cat(hex[data[i] >> 4]);
-		out.Cat(hex[data[i] & 15]);
-	}
-	return out;
-}
-
-bool HexDecode(const String& text, byte *out, int len)
-{
-	if(text.GetCount() != len * 2) return false;
-	auto nibble = [](int ch) -> int {
-		if(ch >= '0' && ch <= '9') return ch - '0';
-		if(ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-		if(ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-		return -1;
-	};
-	for(int i = 0; i < len; i++) {
-		int hi = nibble(text[2 * i]), lo = nibble(text[2 * i + 1]);
-		if(hi < 0 || lo < 0) return false;
-		out[i] = (byte)((hi << 4) | lo);
-	}
-	return true;
-}
-
-bool VerifyPasswordHash(const String& password, const String& encoded)
-{
-	Vector<String> parts = Split(encoded, ':');
-	if(parts.GetCount() != 4 || parts[0] != "pbkdf2-sha256") return false;
-	int iterations = ScanInt(parts[1]);
-	if(iterations < 100000 || iterations > 2000000 || AsString(iterations) != parts[1]) return false;
-	byte salt[16], expected[32], actual[32];
-	if(!HexDecode(parts[2], salt, sizeof(salt)) || !HexDecode(parts[3], expected, sizeof(expected))) return false;
-	if(!PKCS5_PBKDF2_HMAC(~password, password.GetCount(), salt, sizeof(salt), iterations, EVP_sha256(), sizeof(actual), actual))
-		return false;
-	return CRYPTO_memcmp(actual, expected, sizeof(actual)) == 0;
+	return WebAuthRandomBytes(32, true);
 }
 
 }
@@ -98,14 +42,8 @@ bool SystemAuthService::SetSitePassword(const String& site_dir, const String& us
 	if(site_dir.IsEmpty() || username.IsEmpty() || username.GetCount() > 256 ||
 	   password.IsEmpty() || password.GetCount() > 4096)
 		return false;
-	byte salt[16], hash[32];
-	SecureBuffer<byte> random = SecureRandom(sizeof(salt));
-	if(random.IsEmpty()) return false;
-	memcpy(salt, random.Begin(), sizeof(salt));
-	if(!PKCS5_PBKDF2_HMAC(~password, password.GetCount(), salt, sizeof(salt), 210000,
-	                      EVP_sha256(), sizeof(hash), hash))
-		return false;
-	String encoded = "pbkdf2-sha256:210000:" + SiteHexEncode(salt, sizeof(salt)) + ":" + SiteHexEncode(hash, sizeof(hash));
+	String encoded = WebAuthHashPassword(password, 210000);
+	if(encoded.IsEmpty()) return false;
 	String path = AppendFileName(site_dir, "auth.json");
 	ValueMap users;
 	if(FileExists(path)) {
@@ -209,7 +147,7 @@ bool SystemAuthService::VerifySystemPassword(const String& username, const Strin
 					ValueMap record = credential;
 					if(IsString(record["password"]) && (String)record["password"] == password)
 						return true;
-					if(IsString(record["password_hash"]) && VerifyPasswordHash(password, record["password_hash"]))
+					if(IsString(record["password_hash"]) && WebAuthVerifyPassword(password, record["password_hash"]))
 						return true;
 				}
 			}
