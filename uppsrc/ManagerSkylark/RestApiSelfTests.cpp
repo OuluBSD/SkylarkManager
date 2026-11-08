@@ -202,6 +202,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: assessment projection synthetic tests\n";
 		return false;
 	}
+	if(!SourceForgePlatformService::RunSourceForgeSyntheticTests()) {
+		Cerr() << "FAILED: SourceForge adapter synthetic tests\n";
+		return false;
+	}
 	if(!GitHubPlatformService::RunGitHubAdapterSyntheticTests(fixture.path)) {
 		Cerr() << "FAILED: GitHub adapter synthetic tests\n";
 		return false;

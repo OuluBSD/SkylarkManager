@@ -36,6 +36,19 @@ SourceForgeForgeBackend::SourceForgeForgeBackend(const SfConfig& config, const S
 {
 }
 
+bool SourceForgeForgeBackend::ValidProject(const String& project)
+{
+	if(project.IsEmpty() || project.GetCount() > 64 || project == "." || project == "..")
+		return false;
+	for(int i = 0; i < project.GetCount(); i++) {
+		int c = project[i];
+		bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+		if(!ok)
+			return false;
+	}
+	return true;
+}
+
 bool SourceForgeForgeBackend::IsValidTicketId(const String& id)
 {
 	if(id.IsEmpty() || id.GetCount() > 12)
@@ -164,7 +177,7 @@ ForgeResult SourceForgeForgeBackend::FetchTicketDoc(const String& project, const
 ForgeResult SourceForgeForgeBackend::ListIssues(const String& project, Vector<ForgeIssue>& out)
 {
 	out.Clear();
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("list-issues", project, "adapter is bound to project '" + cfg.project + "'");
 	SfHttpResponse res = transport->Request("GET",
 		"/rest/p/" + project + "/" + cfg.tool_mount + "/tickets?limit=100", "");
@@ -192,7 +205,7 @@ ForgeResult SourceForgeForgeBackend::ListIssues(const String& project, Vector<Fo
 
 ForgeResult SourceForgeForgeBackend::GetIssue(const String& project, const String& issue_id, ForgeIssue& out)
 {
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("get-issue", project, "adapter is bound to project '" + cfg.project + "'");
 	if(!IsValidTicketId(issue_id))
 		return Failed("get-issue", project, "invalid ticket id");
@@ -209,7 +222,7 @@ ForgeResult SourceForgeForgeBackend::GetIssue(const String& project, const Strin
 
 ForgeResult SourceForgeForgeBackend::CreateIssue(const String& project, const ForgeIssue& draft, ForgeIssue& out)
 {
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("create-issue", project, "adapter is bound to project '" + cfg.project + "'");
 	ForgeResult gate = GateWrite("create-issue", project);
 	if(!gate.ok)
@@ -256,7 +269,7 @@ ForgeResult SourceForgeForgeBackend::CreateIssue(const String& project, const Fo
 ForgeResult SourceForgeForgeBackend::AddComment(const String& project, const String& issue_id,
                                                 const ForgeComment& comment, ForgeComment& out)
 {
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("add-comment", project, "adapter is bound to project '" + cfg.project + "'");
 	ForgeResult gate = GateWrite("add-comment", project);
 	if(!gate.ok)
@@ -284,7 +297,7 @@ ForgeResult SourceForgeForgeBackend::AddComment(const String& project, const Str
 ForgeResult SourceForgeForgeBackend::SetIssueState(const String& project, const String& issue_id,
                                                    bool open, ForgeIssue& out)
 {
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("set-issue-state", project, "adapter is bound to project '" + cfg.project + "'");
 	ForgeResult gate = GateWrite("set-issue-state", project);
 	if(!gate.ok)
@@ -320,7 +333,7 @@ ForgeResult SourceForgeForgeBackend::SetIssueState(const String& project, const 
 ForgeResult SourceForgeForgeBackend::ListComments(const String& project, const String& issue_id,
                                                   Vector<ForgeComment>& out)
 {
-	if(project.IsEmpty() || project != cfg.project)
+	if(!ValidProject(project) || project != cfg.project)
 		return Failed("list-comments", project, "adapter is bound to project '" + cfg.project + "'");
 	if(!IsValidTicketId(issue_id))
 		return Failed("list-comments", project, "invalid ticket id");

@@ -9,6 +9,8 @@ uses
 	WebChat,
 	WebAuth,
 	GitHubForge,
+	ForgeCore,
+	SourceForgeForge,
 	WebFramework;
 
 file
@@ -63,6 +65,7 @@ file
 	SourceForgePlatform.cpp,
 	SourceForgeRoutes.cpp,
 	SourceForgeViews.cpp,
+	SourceForgeAdapterTests.cpp,
 	AgentPlatform.h,
 	AgentPlatform.cpp,
 	SystemAuth.h,

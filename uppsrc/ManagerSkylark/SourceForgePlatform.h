@@ -3,6 +3,7 @@
 
 #include <Core/Core.h>
 #include <Skylark/Skylark.h>
+#include <ForgeCore/ForgeCore.h>
 
 NAMESPACE_UPP
 
@@ -23,6 +24,7 @@ struct SourceForgeProjectInfo : Moveable<SourceForgeProjectInfo> {
 	String last_update;
 	bool   is_subproject = false;
 	String parent_project;
+	bool   scraped_snapshot = false; // true when summary.json was loaded (read-only)
 
 	Vector<String> features;
 	Vector<String> branches;
@@ -152,26 +154,33 @@ public:
 	static String RenderSidebar(const SourceForgeProjectInfo& info);
 	static String RenderTopNav(const SourceForgeProjectInfo& info);
 
-	// Tickets Store & Operations
-	static Vector<SourceForgeTicket> GetTickets(const String& project);
-	static SourceForgeTicket        GetTicket(const String& project, int num);
-	static int                       CreateTicket(const String& project, const String& summary, const String& description, const String& priority, const String& milestone, const String& author);
-	static bool                      AddTicketComment(const String& project, int num, const String& author, const String& comment);
-	static bool                      ToggleTicketStatus(const String& project, int num, const String& new_status = "");
+	// Forge backend behind every SourceForge surface. SetBackend(NULL) restores
+	// the default SourceForgeForgeBackend, which is read-only without credentials.
+	static void                  SetBackend(IForgeBackend *backend);
+	static IForgeBackend&        Backend(const String& project);
 
-	// Wiki Store & Operations
-	static Vector<SourceForgeWikiPage> GetWikiPages(const String& project);
-	static SourceForgeWikiPage       GetWikiPage(const String& project, const String& slug);
-	static bool                      SaveWikiPage(const String& project, const SourceForgeWikiPage& page);
+	// Tickets are SourceForge issues through the backend. Each call reports its
+	// ForgeResult in *result when given; a failed result means unavailable.
+	static Vector<SourceForgeTicket> GetTickets(const String& project, ForgeResult *result = NULL);
+	static SourceForgeTicket        GetTicket(const String& project, int num, ForgeResult *result = NULL);
+	static int                       CreateTicket(const String& project, const String& summary, const String& description, const String& priority, const String& milestone, const String& author, ForgeResult *result = NULL);
+	static bool                      AddTicketComment(const String& project, int num, const String& author, const String& comment, ForgeResult *result = NULL);
+	static bool                      ToggleTicketStatus(const String& project, int num, const String& new_status = "", ForgeResult *result = NULL);
 
-	// Discussion Store & Operations
-	static Vector<SourceForgeDiscussionTopic> GetDiscussionTopics(const String& project, const String& forum = "");
-	static SourceForgeDiscussionTopic GetDiscussionTopic(const String& project, int id);
-	static int                       CreateDiscussionTopic(const String& project, const String& forum, const String& title, const String& first_post, const String& author);
-	static bool                      AddDiscussionPost(const String& project, int topic_id, const String& author, const String& text);
+	// Wiki, discussion and files have no backend surface yet: they report Unsupported.
+	static Vector<SourceForgeWikiPage> GetWikiPages(const String& project, ForgeResult *result = NULL);
+	static SourceForgeWikiPage       GetWikiPage(const String& project, const String& slug, ForgeResult *result = NULL);
+	static bool                      SaveWikiPage(const String& project, const SourceForgeWikiPage& page, ForgeResult *result = NULL);
+	static Vector<SourceForgeDiscussionTopic> GetDiscussionTopics(const String& project, const String& forum = "", ForgeResult *result = NULL);
+	static SourceForgeDiscussionTopic GetDiscussionTopic(const String& project, int id, ForgeResult *result = NULL);
+	static int                       CreateDiscussionTopic(const String& project, const String& forum, const String& title, const String& first_post, const String& author, ForgeResult *result = NULL);
+	static bool                      AddDiscussionPost(const String& project, int topic_id, const String& author, const String& text, ForgeResult *result = NULL);
 
 	// Files Store
-	static Vector<SourceForgeReleaseFile> GetFiles(const String& project);
+	static Vector<SourceForgeReleaseFile> GetFiles(const String& project, ForgeResult *result = NULL);
+
+	// Stub-transport checks for the webapp wiring (no network)
+	static bool                  RunSourceForgeSyntheticTests();
 };
 
 // Display helper shared by the SourceForge service and view renderers

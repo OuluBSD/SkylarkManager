@@ -3,6 +3,14 @@
 
 NAMESPACE_UPP
 
+// Explicit unavailable state: what failed, the provenance, and the adapter's diagnostic.
+static String RenderUnavailable(const ForgeResult& r, const String& what)
+{
+	return "<div class=\"wf-card\" style=\"margin-bottom:1rem;\"><div class=\"wf-card-body\">"
+	       "<span class=\"wf-badge wf-badge-neutral\">Unavailable</span> " + DeHtml(what) +
+	       " could not be loaded from SourceForge: " + DeHtml(r.error) + "</div></div>\n";
+}
+
 // ---------------------------------------------------------------------------
 // SKYLARK Handlers for SourceForge Parity
 // ---------------------------------------------------------------------------
@@ -82,7 +90,10 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 	}
 	// 2. Files & Download Packages View
 	else if(tab == "files") {
-		Vector<SourceForgeReleaseFile> files = SourceForgePlatformService::GetFiles(info.name);
+		ForgeResult fr;
+		Vector<SourceForgeReleaseFile> files = SourceForgePlatformService::GetFiles(info.name, &fr);
+		if(!fr.ok)
+			content << RenderUnavailable(fr, "Release files");
 		content
 			<< "<div class=\"wf-card\">\n"
 			<< "  <div class=\"wf-card-header\"><span>Files &amp; Download Packages</span><span class=\"wf-badge wf-badge-neutral\">Stable Releases</span></div>\n"
@@ -107,7 +118,12 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 	}
 	// 3. Tickets Tracker View (List or Conversation View)
 	else if(tab == "tickets" && ticket_num > 0) {
-		SourceForgeTicket t = SourceForgePlatformService::GetTicket(info.name, ticket_num);
+		ForgeResult tr;
+		SourceForgeTicket t = SourceForgePlatformService::GetTicket(info.name, ticket_num, &tr);
+		if(!tr.ok)
+			content << RenderUnavailable(tr, "Ticket #" + AsString(ticket_num))
+			        << "<a href=\"/p/" << info.name << "/tickets/\" class=\"wf-btn wf-btn-secondary\">Back to Tickets</a>\n";
+		else {
 		bool is_open = (t.status == "open" || t.status == "in-progress");
 
 		content
@@ -170,9 +186,11 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 			<< "    </div>\n"
 			<< "  </div>\n"
 			<< "</div>\n";
+		}
 	}
 	else if(tab == "tickets") {
-		Vector<SourceForgeTicket> tickets = SourceForgePlatformService::GetTickets(info.name);
+		ForgeResult tlr;
+		Vector<SourceForgeTicket> tickets = SourceForgePlatformService::GetTickets(info.name, &tlr);
 
 		content
 			<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;\">\n"
@@ -182,7 +200,10 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 			<< "  </div>\n"
 			<< "  <button type=\"button\" class=\"wf-btn wf-btn-primary\" style=\"background:#ee6524; border-color:#ee6524; display:inline-flex; align-items:center; gap:6px; font-weight:600;\" onclick=\"SourceForgeUI.toggleNewTicketCard()\">"
 			<< VividIcon::Get("plus", 14) << " Create Ticket</button>\n"
-			<< "</div>\n";
+			<< "</div>\n"
+			<< "<p style=\"font-size:0.82rem; color:var(--wf-fg-inactive,#7d8590); margin:0 0 1rem 0;\">SourceForge writes need configured API credentials. Without them, create, comment and status actions report unavailable.</p>\n";
+		if(!tlr.ok)
+			content << RenderUnavailable(tlr, "Tickets");
 
 		// New Ticket Creation Card (Collapsible)
 		content
@@ -244,9 +265,12 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 	}
 	// 4. Wiki CMS View (View or Edit Mode)
 	else if(tab == "wiki") {
-		SourceForgeWikiPage page = SourceForgePlatformService::GetWikiPage(info.name, wiki_slug);
-		Vector<SourceForgeWikiPage> pages = SourceForgePlatformService::GetWikiPages(info.name);
+		ForgeResult wr, wlr;
+		SourceForgeWikiPage page = SourceForgePlatformService::GetWikiPage(info.name, wiki_slug, &wr);
+		Vector<SourceForgeWikiPage> pages = SourceForgePlatformService::GetWikiPages(info.name, &wlr);
 		bool edit_mode = (http["edit"] == "1");
+		if(!wr.ok || !wlr.ok)
+			content << RenderUnavailable(wr.ok ? wlr : wr, "Wiki");
 
 		content
 			<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;\">\n"
@@ -294,7 +318,10 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 	}
 	// 5. Discussion Forums View (Topic Thread or Forum List)
 	else if(tab == "discussion" && topic_id > 0) {
-		SourceForgeDiscussionTopic topic = SourceForgePlatformService::GetDiscussionTopic(info.name, topic_id);
+		ForgeResult dr;
+		SourceForgeDiscussionTopic topic = SourceForgePlatformService::GetDiscussionTopic(info.name, topic_id, &dr);
+		if(!dr.ok)
+			content << RenderUnavailable(dr, "Discussion topic");
 
 		content
 			<< "<div style=\"margin-bottom:1.5rem;\">\n"
@@ -338,7 +365,10 @@ void RenderSourceForgeView(Http& http, const String& project, const String& subp
 			<< "</div>\n";
 	}
 	else if(tab == "discussion") {
-		Vector<SourceForgeDiscussionTopic> topics = SourceForgePlatformService::GetDiscussionTopics(info.name, forum_name);
+		ForgeResult dlr;
+		Vector<SourceForgeDiscussionTopic> topics = SourceForgePlatformService::GetDiscussionTopics(info.name, forum_name, &dlr);
+		if(!dlr.ok)
+			content << RenderUnavailable(dlr, "Discussion forums");
 
 		content
 			<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;\">\n"

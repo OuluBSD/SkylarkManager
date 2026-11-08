@@ -63,6 +63,8 @@ public:
 	                         Vector<ForgeComment>& out) override;
 
 	static bool      IsValidTicketId(const String& id);
+	// Path-safe project slug: [a-z0-9._-], not '.' or '..', at most 64 characters.
+	static bool      ValidProject(const String& project);
 	static Time      ParseAlluraTime(const String& iso);
 	static ForgeIssue TicketFromJson(const ValueMap& ticket, const String& project);
 	static void      ThreadPostsFromJson(const Value& thread, Vector<ForgeComment>& out,

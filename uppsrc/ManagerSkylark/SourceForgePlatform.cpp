@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "SourceForgePlatform.h"
+#include <SourceForgeForge/SourceForgeForge.h>
 
 NAMESPACE_UPP
 
@@ -7,13 +8,6 @@ String CapitalizeWord(const String& s)
 {
 	if(s.IsEmpty()) return s;
 	return ToUpper(s.Left(1)) + s.Mid(1);
-}
-
-static String GetSourceForgeDataDir(const String& project)
-{
-	String dir = AppendFileName(GetHomeDirFile(".aria/sites/sourceforge"), project.IsEmpty() ? "topside" : project);
-	RealizeDirectory(dir);
-	return dir;
 }
 
 ValueMap SourceForgePlatformService::LoadScrapedData(const String& project_slug)
@@ -129,6 +123,7 @@ SourceForgeProjectInfo SourceForgePlatformService::GetProject(const String& slug
 
 	// Try loading scraped data if available
 	ValueMap scraped = LoadScrapedData(info.name);
+	info.scraped_snapshot = !scraped.IsEmpty();
 	if(!scraped.IsEmpty()) {
 		if(scraped.Find("code") >= 0) {
 			ValueMap code = scraped["code"];
@@ -191,6 +186,7 @@ String SourceForgePlatformService::RenderProjectHeader(const SourceForgeProjectI
 	  << "      <div class=\"wf-sf-hero-title\">\n"
 	  << "        <h1>" << info.title << "</h1>\n"
 	  << "        <div class=\"wf-sf-by\">Brought to you by: <a href=\"#\">" << info.maintainer << "</a></div>\n"
+	  << (info.scraped_snapshot ? "        <span class=\"wf-badge wf-badge-neutral\">Scraped snapshot (read-only)</span>\n" : String())
 	  << "        <div style=\"display:flex; align-items:center; gap:8px; margin-top:6px; font-size:0.82rem;\">\n"
 	  << "          <span style=\"color:#f59f00;\">&#9733;&#9733;&#9733;&#9733;&#9733;</span>\n"
 	  << "          <span style=\"color:var(--wf-fg-inactive,#8c929a);\">" << info.rating_stars << ".0 (" << info.rating_count << " rating)</span>\n"
@@ -257,458 +253,209 @@ String SourceForgePlatformService::RenderSidebar(const SourceForgeProjectInfo& i
 }
 
 // ---------------------------------------------------------------------------
-// SourceForge Data Store Implementation
+// SourceForge data access. Every surface goes through the forge backend; the
+// local JSON stores are not read or written here (see the legacy migration).
+// Without credentials the backend is read-only, and writes report unavailable.
 // ---------------------------------------------------------------------------
 
-Vector<SourceForgeTicket> SourceForgePlatformService::GetTickets(const String& project)
+static IForgeBackend *backend_override = NULL;
+static VectorMap<String, One<IForgeBackend>> default_backends;
+
+void SourceForgePlatformService::SetBackend(IForgeBackend *backend)
 {
-	String path = AppendFileName(GetSourceForgeDataDir(project), "tickets_store.json");
-	Vector<SourceForgeTicket> tickets;
+	backend_override = backend;
+}
 
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				SourceForgeTicket t;
-				LoadFromJsonValue(t, va[i]);
-				tickets.Add(pick(t));
-			}
-			return tickets;
-		}
+IForgeBackend& SourceForgePlatformService::Backend(const String& project)
+{
+	if(backend_override)
+		return *backend_override;
+	int i = default_backends.Find(project);
+	if(i < 0) {
+		SfConfig cfg;
+		cfg.project = project;
+		One<IForgeBackend> b;
+		b.Create<SourceForgeForgeBackend>(cfg, String("https://sourceforge.net"));
+		i = default_backends.Put(project, pick(b));
 	}
+	return *default_backends[i];
+}
 
-	// Seed default tickets
-	SourceForgeTicket& t1 = tickets.Add();
-	t1.num = 1;
-	t1.summary = "Establish SourceForge platform parity in ManagerSkylark";
-	t1.status = "open";
-	t1.priority = "high";
-	t1.milestone = "Phase 13";
-	t1.author = "sppp";
-	t1.created_at = "2026-10-30";
-	t1.description = "Implement interactive tickets tracker with lifecycle triage, live Wiki Markdown CMS, community discussion forums, and downloadable tarball releases for Topside.";
-	ValueMap c1;
-	c1.Set("author", "sppp");
-	c1.Set("text", "Initial milestone started. Aria verification and interactive REST API endpoints being connected.");
-	c1.Set("created_at", "2026-10-30");
-	t1.comments.Add(c1);
+static String ForgeTimeText(Time t)
+{
+	return IsNull(t) ? String() : Format(t);
+}
 
-	SourceForgeTicket& t2 = tickets.Add();
-	t2.num = 2;
-	t2.summary = "Connect product design workflow to SourceForge releases";
-	t2.status = "open";
-	t2.priority = "normal";
-	t2.milestone = "Phase 14";
-	t2.author = "sppp";
-	t2.created_at = "2026-10-30";
-	t2.description = "Design a unified workflow linking technical tasks in Manager to public product roadmaps and release downloads.";
+static SourceForgeTicket TicketFromIssue(const ForgeIssue& issue)
+{
+	SourceForgeTicket t;
+	t.num = ScanInt(issue.issue_id);
+	t.summary = issue.title;
+	t.description = issue.body;
+	t.author = issue.author;
+	t.status = issue.open ? "open" : "closed";
+	t.priority = "normal";
+	t.milestone = "";
+	t.created_at = ForgeTimeText(issue.created);
+	return t;
+}
 
-	ValueArray va;
-	for(int i = 0; i < tickets.GetCount(); i++)
-		va.Add(StoreAsJsonValue(tickets[i]));
-	SaveFile(path, AsJSON(va, true));
+static ValueMap CommentValue(const ForgeComment& c)
+{
+	ValueMap m;
+	m.Set("author", c.author);
+	m.Set("text", c.body);
+	m.Set("created_at", ForgeTimeText(c.created));
+	return m;
+}
 
+static ForgeResult RejectSurface(const char *op, const String& project, ForgeResult *result)
+{
+	ForgeResult r = IForgeBackend::Unsupported(op, project);
+	if(result)
+		*result = r;
+	return r;
+}
+
+Vector<SourceForgeTicket> SourceForgePlatformService::GetTickets(const String& project, ForgeResult *result)
+{
+	Vector<ForgeIssue> issues;
+	ForgeResult r = Backend(project).ListIssues(project, issues);
+	if(result)
+		*result = r;
+	Vector<SourceForgeTicket> tickets;
+	if(!r.ok)
+		return tickets;
+	for(int i = 0; i < issues.GetCount(); i++)
+		tickets.Add(TicketFromIssue(issues[i]));
 	return tickets;
 }
 
-SourceForgeTicket SourceForgePlatformService::GetTicket(const String& project, int num)
+SourceForgeTicket SourceForgePlatformService::GetTicket(const String& project, int num, ForgeResult *result)
 {
-	Vector<SourceForgeTicket> list = GetTickets(project);
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].num == num)
-			return list[i];
+	SourceForgeTicket t;
+	t.num = num;
+	ForgeIssue issue;
+	ForgeResult r = Backend(project).GetIssue(project, AsString(num), issue);
+	if(result)
+		*result = r;
+	if(!r.ok)
+		return t;
+	t = TicketFromIssue(issue);
+
+	Vector<ForgeComment> comments;
+	ForgeResult cr = Backend(project).ListComments(project, AsString(num), comments);
+	if(!cr.ok) {
+		if(result)
+			*result = cr;
+		return t;
 	}
-	SourceForgeTicket empty;
-	empty.num = num;
-	empty.summary = "Ticket #" + AsString(num) + " Not Found";
-	return empty;
+	for(int i = 0; i < comments.GetCount(); i++)
+		t.comments.Add(CommentValue(comments[i]));
+	return t;
 }
 
-int SourceForgePlatformService::CreateTicket(const String& project, const String& summary, const String& description, const String& priority, const String& milestone, const String& author)
+int SourceForgePlatformService::CreateTicket(const String& project, const String& summary, const String& description, const String& priority, const String& milestone, const String& author, ForgeResult *result)
 {
-	Vector<SourceForgeTicket> list = GetTickets(project);
-	int max_num = 0;
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].num > max_num)
-			max_num = list[i].num;
-	}
-
-	SourceForgeTicket& t = list.Add();
-	t.num = max_num + 1;
-	t.summary = summary;
-	t.description = description;
-	t.priority = priority.IsEmpty() ? "normal" : priority;
-	t.milestone = milestone.IsEmpty() ? "General" : milestone;
-	t.author = author.IsEmpty() ? "sppp" : author;
-	t.status = "open";
-	t.created_at = Format("%`", GetSysDate());
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "tickets_store.json");
-	ValueArray va;
-	for(int i = 0; i < list.GetCount(); i++)
-		va.Add(StoreAsJsonValue(list[i]));
-	SaveFile(path, AsJSON(va, true));
-
-	return t.num;
+	ForgeIssue draft;
+	draft.title = summary;
+	draft.body = description;
+	draft.author = author;
+	ForgeIssue made;
+	ForgeResult r = Backend(project).CreateIssue(project, draft, made);
+	if(result)
+		*result = r;
+	return r.ok ? ScanInt(made.issue_id) : -1;
 }
 
-bool SourceForgePlatformService::AddTicketComment(const String& project, int num, const String& author, const String& comment)
+bool SourceForgePlatformService::AddTicketComment(const String& project, int num, const String& author, const String& comment, ForgeResult *result)
 {
-	Vector<SourceForgeTicket> list = GetTickets(project);
-	bool found = false;
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].num == num) {
-			ValueMap c;
-			c.Set("author", author.IsEmpty() ? "sppp" : author);
-			c.Set("text", comment);
-			c.Set("created_at", Format("%`", GetSysDate()));
-			list[i].comments.Add(c);
-			found = true;
-			break;
+	ForgeComment draft;
+	draft.author = author;
+	draft.body = comment;
+	ForgeComment saved;
+	ForgeResult r = Backend(project).AddComment(project, AsString(num), draft, saved);
+	if(result)
+		*result = r;
+	return r.ok;
+}
+
+bool SourceForgePlatformService::ToggleTicketStatus(const String& project, int num, const String& new_status, ForgeResult *result)
+{
+	bool open = true;
+	if(new_status.IsEmpty()) {
+		ForgeIssue current;
+		ForgeResult g = Backend(project).GetIssue(project, AsString(num), current);
+		if(!g.ok) {
+			if(result)
+				*result = g;
+			return false;
 		}
+		open = !current.open;
 	}
-	if(!found) return false;
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "tickets_store.json");
-	ValueArray va;
-	for(int i = 0; i < list.GetCount(); i++)
-		va.Add(StoreAsJsonValue(list[i]));
-	SaveFile(path, AsJSON(va, true));
-	return true;
+	else if(new_status == "closed")
+		open = false;
+	else if(new_status == "open" || new_status == "in-progress")
+		open = true;
+	else {
+		ForgeResult r = IForgeBackend::Failed("set-issue-state", project, "unknown ticket status '" + new_status + "'");
+		if(result)
+			*result = r;
+		return false;
+	}
+	ForgeIssue out;
+	ForgeResult r = Backend(project).SetIssueState(project, AsString(num), open, out);
+	if(result)
+		*result = r;
+	return r.ok;
 }
 
-bool SourceForgePlatformService::ToggleTicketStatus(const String& project, int num, const String& new_status)
+Vector<SourceForgeWikiPage> SourceForgePlatformService::GetWikiPages(const String& project, ForgeResult *result)
 {
-	Vector<SourceForgeTicket> list = GetTickets(project);
-	bool found = false;
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].num == num) {
-			if(!new_status.IsEmpty())
-				list[i].status = new_status;
-			else if(list[i].status == "open" || list[i].status == "in-progress")
-				list[i].status = "closed";
-			else
-				list[i].status = "open";
-			found = true;
-			break;
-		}
-	}
-	if(!found) return false;
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "tickets_store.json");
-	ValueArray va;
-	for(int i = 0; i < list.GetCount(); i++)
-		va.Add(StoreAsJsonValue(list[i]));
-	SaveFile(path, AsJSON(va, true));
-	return true;
+	RejectSurface("wiki-pages", project, result);
+	return Vector<SourceForgeWikiPage>();
 }
 
-Vector<SourceForgeWikiPage> SourceForgePlatformService::GetWikiPages(const String& project)
+SourceForgeWikiPage SourceForgePlatformService::GetWikiPage(const String& project, const String& slug, ForgeResult *result)
 {
-	String path = AppendFileName(GetSourceForgeDataDir(project), "wiki_store.json");
-	Vector<SourceForgeWikiPage> pages;
-
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				SourceForgeWikiPage p;
-				LoadFromJsonValue(p, va[i]);
-				pages.Add(pick(p));
-			}
-			return pages;
-		}
-	}
-
-	// Seed default wiki pages
-	SourceForgeWikiPage& p1 = pages.Add();
-	p1.title = "Home";
-	p1.slug = "Home";
-	p1.author = "sppp";
-	p1.updated_at = "2026-10-30";
-	p1.content =
-		"## Welcome to the Topside Project Wiki\n\n"
-		"Topside is an agentic software development and desktop framework powered by **Ultimate++** and autonomous AI agents.\n\n"
-		"### Core Pillars\n"
-		"- **Self-Hosted Workstations**: Full native control over workstation hardware, filesystem, and storage.\n"
-		"- **Mesh-Hosted Nodes**: Distributed cluster fleet with equal-parity files, repositories, and SSH git execution.\n"
-		"- **GitHub Hub**: Seamless social repository integration, live gh issues, actions, and projects Kanban.\n"
-		"- **SourceForge Hub**: Product marketing, distribution tarballs, tickets, and community governance.\n"
-		"- **SweAgent AI**: Autonomous pair programming and benchmark execution.\n\n"
-		"### Getting Started\n"
-		"Clone the repository:\n"
-		"```bash\n"
-		"git clone https://git.code.sf.net/p/topside/code topside\n"
-		"cd topside\n"
-		"./bin/build -m CLANG reference/ManagerSkylark\n"
-		"```\n";
-
-	SourceForgeWikiPage& p2 = pages.Add();
-	p2.title = "Architecture Overview";
-	p2.slug = "Architecture";
-	p2.author = "sppp";
-	p2.updated_at = "2026-10-30";
-	p2.content =
-		"## Topside Architecture Overview\n\n"
-		"### Subsystem Layout\n"
-		"- **uppsrc/WebFramework**: Semantic PageBuilder, templates (MegaMenu, GitHub, SourceForge), density engine, and dual tree dock.\n"
-		"- **reference/ManagerSkylark**: High-performance asynchronous web server coordinating local workstation, mesh fleet, and cloud repos.\n"
-		"- **uppsrc/Aria**: Headless browser automation and verification driver using Marionette/WebDriver.\n"
-		"- **uppsrc/Manager**: Local project, phase, and task lifecycle tracking engine.\n";
-
-	SourceForgeWikiPage& p3 = pages.Add();
-	p3.title = "Product Design Workflow";
-	p3.slug = "ProductDesign";
-	p3.author = "sppp";
-	p3.updated_at = "2026-10-30";
-	p3.content =
-		"## Product Design Workflow\n\n"
-		"### From Technical Tasks to Marketable Products\n"
-		"1. **Task Execution**: Tasks in Manager develop features incrementally.\n"
-		"2. **Release Milestone**: Completed phases are bundled into versioned releases.\n"
-		"3. **Distribution Packaging**: Artifacts are packaged into tarballs and checksummed.\n"
-		"4. **Public Exposure**: Announcements are published to SourceForge devlog and mailing lists.\n";
-
-	ValueArray va;
-	for(int i = 0; i < pages.GetCount(); i++)
-		va.Add(StoreAsJsonValue(pages[i]));
-	SaveFile(path, AsJSON(va, true));
-
-	return pages;
+	RejectSurface("wiki-page", project, result);
+	return SourceForgeWikiPage();
 }
 
-SourceForgeWikiPage SourceForgePlatformService::GetWikiPage(const String& project, const String& slug)
+bool SourceForgePlatformService::SaveWikiPage(const String& project, const SourceForgeWikiPage& page, ForgeResult *result)
 {
-	String s = slug.IsEmpty() ? "Home" : slug;
-	Vector<SourceForgeWikiPage> pages = GetWikiPages(project);
-	for(int i = 0; i < pages.GetCount(); i++) {
-		if(ToLower(pages[i].slug) == ToLower(s))
-			return pages[i];
-	}
-	SourceForgeWikiPage p;
-	p.title = s;
-	p.slug = s;
-	p.author = "sppp";
-	p.content = "## " + s + "\n\n*This page does not exist yet. Click Edit to create it.*";
-	return p;
+	RejectSurface("wiki-save", project, result);
+	return false;
 }
 
-bool SourceForgePlatformService::SaveWikiPage(const String& project, const SourceForgeWikiPage& page)
+Vector<SourceForgeDiscussionTopic> SourceForgePlatformService::GetDiscussionTopics(const String& project, const String& forum, ForgeResult *result)
 {
-	Vector<SourceForgeWikiPage> pages = GetWikiPages(project);
-	bool found = false;
-	for(int i = 0; i < pages.GetCount(); i++) {
-		if(ToLower(pages[i].slug) == ToLower(page.slug)) {
-			pages[i].title = page.title;
-			pages[i].content = page.content;
-			pages[i].author = page.author.IsEmpty() ? "sppp" : page.author;
-			pages[i].updated_at = Format("%`", GetSysDate());
-			pages[i].version++;
-			found = true;
-			break;
-		}
-	}
-	if(!found) {
-		SourceForgeWikiPage& np = pages.Add();
-		np = page;
-		np.updated_at = Format("%`", GetSysDate());
-		np.version = 1;
-	}
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "wiki_store.json");
-	ValueArray va;
-	for(int i = 0; i < pages.GetCount(); i++)
-		va.Add(StoreAsJsonValue(pages[i]));
-	SaveFile(path, AsJSON(va, true));
-	return true;
+	RejectSurface("discussion-topics", project, result);
+	return Vector<SourceForgeDiscussionTopic>();
 }
 
-Vector<SourceForgeDiscussionTopic> SourceForgePlatformService::GetDiscussionTopics(const String& project, const String& forum)
+SourceForgeDiscussionTopic SourceForgePlatformService::GetDiscussionTopic(const String& project, int id, ForgeResult *result)
 {
-	String path = AppendFileName(GetSourceForgeDataDir(project), "discussion_store.json");
-	Vector<SourceForgeDiscussionTopic> topics;
-
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				SourceForgeDiscussionTopic t;
-				LoadFromJsonValue(t, va[i]);
-				if(forum.IsEmpty() || ToLower(t.forum) == ToLower(forum))
-					topics.Add(pick(t));
-			}
-			return topics;
-		}
-	}
-
-	// Seed default discussion topics
-	SourceForgeDiscussionTopic& t1 = topics.Add();
-	t1.id = 1;
-	t1.forum = "general";
-	t1.title = "Welcome to Topside Community Discussions";
-	t1.author = "sppp";
-	t1.created_at = "2026-10-30";
-	ValueMap p1;
-	p1.Set("author", "sppp");
-	p1.Set("text", "Welcome everyone! This is the official community forum for Topside. Feel free to share your agent configurations and tool integrations.");
-	p1.Set("created_at", "2026-10-30");
-	t1.posts.Add(p1);
-
-	SourceForgeDiscussionTopic& t2 = topics.Add();
-	t2.id = 2;
-	t2.forum = "development";
-	t2.title = "Architecture RFC: Universal Multi-Host Mesh Engine";
-	t2.author = "sppp";
-	t2.created_at = "2026-10-30";
-	ValueMap p2;
-	p2.Set("author", "sppp");
-	p2.Set("text", "Please review the proposed architecture for low-latency multi-node code execution and synchronization over SSH.");
-	p2.Set("created_at", "2026-10-30");
-	t2.posts.Add(p2);
-
-	ValueArray va;
-	for(int i = 0; i < topics.GetCount(); i++)
-		va.Add(StoreAsJsonValue(topics[i]));
-	SaveFile(path, AsJSON(va, true));
-
-	if(!forum.IsEmpty()) {
-		Vector<SourceForgeDiscussionTopic> filtered;
-		for(int i = 0; i < topics.GetCount(); i++) {
-			if(ToLower(topics[i].forum) == ToLower(forum))
-				filtered.Add(topics[i]);
-		}
-		return filtered;
-	}
-	return topics;
+	RejectSurface("discussion-topic", project, result);
+	return SourceForgeDiscussionTopic();
 }
 
-SourceForgeDiscussionTopic SourceForgePlatformService::GetDiscussionTopic(const String& project, int id)
+int SourceForgePlatformService::CreateDiscussionTopic(const String& project, const String& forum, const String& title, const String& first_post, const String& author, ForgeResult *result)
 {
-	Vector<SourceForgeDiscussionTopic> list = GetDiscussionTopics(project);
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].id == id)
-			return list[i];
-	}
-	SourceForgeDiscussionTopic empty;
-	empty.id = id;
-	empty.title = "Topic #" + AsString(id) + " Not Found";
-	return empty;
+	RejectSurface("discussion-create", project, result);
+	return -1;
 }
 
-int SourceForgePlatformService::CreateDiscussionTopic(const String& project, const String& forum, const String& title, const String& first_post, const String& author)
+bool SourceForgePlatformService::AddDiscussionPost(const String& project, int topic_id, const String& author, const String& text, ForgeResult *result)
 {
-	Vector<SourceForgeDiscussionTopic> list = GetDiscussionTopics(project);
-	int max_id = 0;
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].id > max_id)
-			max_id = list[i].id;
-	}
-
-	SourceForgeDiscussionTopic& t = list.Add();
-	t.id = max_id + 1;
-	t.forum = forum.IsEmpty() ? "general" : forum;
-	t.title = title;
-	t.author = author.IsEmpty() ? "sppp" : author;
-	t.created_at = Format("%`", GetSysDate());
-
-	ValueMap p;
-	p.Set("author", t.author);
-	p.Set("text", first_post);
-	p.Set("created_at", t.created_at);
-	t.posts.Add(p);
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "discussion_store.json");
-	ValueArray va;
-	for(int i = 0; i < list.GetCount(); i++)
-		va.Add(StoreAsJsonValue(list[i]));
-	SaveFile(path, AsJSON(va, true));
-
-	return t.id;
+	RejectSurface("discussion-post", project, result);
+	return false;
 }
 
-bool SourceForgePlatformService::AddDiscussionPost(const String& project, int topic_id, const String& author, const String& text)
+Vector<SourceForgeReleaseFile> SourceForgePlatformService::GetFiles(const String& project, ForgeResult *result)
 {
-	Vector<SourceForgeDiscussionTopic> list = GetDiscussionTopics(project);
-	bool found = false;
-	for(int i = 0; i < list.GetCount(); i++) {
-		if(list[i].id == topic_id) {
-			ValueMap p;
-			p.Set("author", author.IsEmpty() ? "sppp" : author);
-			p.Set("text", text);
-			p.Set("created_at", Format("%`", GetSysDate()));
-			list[i].posts.Add(p);
-			found = true;
-			break;
-		}
-	}
-	if(!found) return false;
-
-	String path = AppendFileName(GetSourceForgeDataDir(project), "discussion_store.json");
-	ValueArray va;
-	for(int i = 0; i < list.GetCount(); i++)
-		va.Add(StoreAsJsonValue(list[i]));
-	SaveFile(path, AsJSON(va, true));
-	return true;
-}
-
-Vector<SourceForgeReleaseFile> SourceForgePlatformService::GetFiles(const String& project)
-{
-	String path = AppendFileName(GetSourceForgeDataDir(project), "files_store.json");
-	Vector<SourceForgeReleaseFile> files;
-
-	if(FileExists(path)) {
-		Value v = ParseJSON(LoadFile(path));
-		if(v.Is<ValueArray>()) {
-			ValueArray va = v;
-			for(int i = 0; i < va.GetCount(); i++) {
-				SourceForgeReleaseFile f;
-				LoadFromJsonValue(f, va[i]);
-				files.Add(pick(f));
-			}
-			return files;
-		}
-	}
-
-	// Seed default release packages
-	SourceForgeReleaseFile& f1 = files.Add();
-	f1.name = "topside-1.0.0-linux-x86_64.tar.gz";
-	f1.version = "1.0.0";
-	f1.date = "2026-10-30";
-	f1.size_bytes = 14889728;
-	f1.size_str = "14.2 MB";
-	f1.downloads = 142;
-	f1.sha256 = "a93b4f881c20e54d33a948e91c28c894e772b184f09a88c3c2921094184c8a2b";
-	f1.url = "/projects/" + project + "/files/" + f1.name;
-
-	SourceForgeReleaseFile& f2 = files.Add();
-	f2.name = "topside-1.0.0-windows-x86_64.zip";
-	f2.version = "1.0.0";
-	f2.date = "2026-10-30";
-	f2.size_bytes = 17616076;
-	f2.size_str = "16.8 MB";
-	f2.downloads = 98;
-	f2.sha256 = "7f1e92d90823c4a22b918a381c8411d95e0c29f8a32a184c82901194382c7a10";
-	f2.url = "/projects/" + project + "/files/" + f2.name;
-
-	SourceForgeReleaseFile& f3 = files.Add();
-	f3.name = "topside-source-master.zip";
-	f3.version = "Snapshot";
-	f3.date = "2026-10-30";
-	f3.size_bytes = 9332326;
-	f3.size_str = "8.9 MB";
-	f3.downloads = 215;
-	f3.sha256 = "18f8e32909418a22b94c3918a829184c9e011948a391c84a82901194382c7a33";
-	f3.url = "/projects/" + project + "/files/" + f3.name;
-
-	ValueArray va;
-	for(int i = 0; i < files.GetCount(); i++)
-		va.Add(StoreAsJsonValue(files[i]));
-	SaveFile(path, AsJSON(va, true));
-
-	return files;
+	RejectSurface("files", project, result);
+	return Vector<SourceForgeReleaseFile>();
 }
 
 END_UPP_NAMESPACE
