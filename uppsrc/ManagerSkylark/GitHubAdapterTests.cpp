@@ -122,6 +122,18 @@ bool GitHubPlatformService::RunGitHubAdapterSyntheticTests(const String& scratch
 		return Fail("repository list did not map the adapter result");
 	Cout() << "ok    GitHub repository list maps the adapter result\n";
 
+	String repo_dir = AppendFileName(scratch_dir, "local-repo");
+	RealizeDirectory(repo_dir);
+	Sys("git", {"-C", repo_dir, "init", "-q"});
+	Sys("git", {"-C", repo_dir, "-c", "user.name=Skylark Test", "-c", "user.email=test@example.invalid",
+	            "commit", "-q", "--allow-empty", "-m", "fixture"});
+	Vector<ValueMap> commits = GitHubPlatformService::GetCommits(repo_dir, 5);
+	if(commits.GetCount() != 1 || (String)commits[0]["msg"] != "fixture")
+		return Fail("local commit log did not come back through argv git");
+	if(GitHubPlatformService::GetBranches(repo_dir).IsEmpty())
+		return Fail("local branch list came back empty");
+	Cout() << "ok    local git log and branches run argv-only and return the fixture repo\n";
+
 	String created_pr = GitHubPlatformService::CreatePullRequest("acme", "tools", "Title", "Body", "feature/x", "");
 	if(!created_pr.StartsWith("https://github.com/acme/tools/pull/12"))
 		return Fail("pull request creation did not return the created pull request URL: " + created_pr);

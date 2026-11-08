@@ -32,6 +32,25 @@ String GitHubPlatformService::FormatFileSize(int64 bytes)
 	return Sprintf("%.1f MB", (double)bytes / (1024.0 * 1024.0));
 }
 
+// Local git runs argv-only; only stdout is kept, stderr is dropped.
+static String GitStdout(const Vector<String>& args)
+{
+	LocalProcess p;
+	if(!p.Start2("git", args))
+		return String();
+	p.CloseWrite();
+	String out;
+	for(;;) {
+		String co, ce;
+		bool more = p.Read2(co, ce);
+		out << co;
+		if(!more)
+			break;
+		Sleep(5);
+	}
+	return out;
+}
+
 String GitHubPlatformService::GetDevDir()
 {
 	String custom = GetEnv("DEV_DIR");
@@ -59,8 +78,8 @@ bool GitHubPlatformService::IsGhCliAvailable()
 	static bool tested = false;
 	static bool available = false;
 	if(!tested) {
-		String out = Sys("gh auth status 2>&1");
-		available = (out.Find("Logged in") >= 0 || out.Find("github.com") >= 0);
+		GitHubForgeBackend backend;
+		available = backend.GhRun({"auth", "status"}).ok;
 		tested = true;
 	}
 	return available;
@@ -436,8 +455,7 @@ LocalRepoInfo GitHubPlatformService::GetRepo(const String& owner, const String& 
 			if(head.StartsWith("ref: refs/heads/"))
 				info.branch = TrimBoth(head.Mid(16));
 
-			String cmd = "git -C \"" + info.path + "\" log -1 --format=\"%h|%an|%cr|%s\" 2>/dev/null";
-			String out = Sys("sh", {"-c", cmd});
+			String out = GitStdout({"-C", info.path, "log", "-1", "--format=%h|%an|%cr|%s"});
 			Vector<String> parts = Split(TrimBoth(out), '|');
 			if(parts.GetCount() >= 4) {
 				info.last_commit_hash = parts[0];
@@ -463,7 +481,7 @@ Vector<String> GitHubPlatformService::GetBranches(const String& repo_path)
 {
 	Vector<String> branches;
 	if(DirectoryExists(repo_path)) {
-		String out = Sys("sh", {"-c", "git -C \"" + repo_path + "\" branch --format=\"%(refname:short)\" 2>/dev/null"});
+		String out = GitStdout({"-C", repo_path, "branch", "--format=%(refname:short)"});
 		Vector<String> lines = Split(TrimBoth(out), '\n');
 		for(const String& l : lines) {
 			String b = TrimBoth(l);
@@ -544,8 +562,7 @@ Vector<ValueMap> GitHubPlatformService::GetCommits(const String& repo_path, int 
 {
 	Vector<ValueMap> commits;
 	if(DirectoryExists(repo_path)) {
-		String cmd = "git -C \"" + repo_path + "\" log -n " + AsString(limit) + " --format=\"%h|%an|%ae|%cr|%s\" 2>/dev/null";
-		String out = Sys("sh", {"-c", cmd});
+		String out = GitStdout({"-C", repo_path, "log", "-n", AsString(limit), "--format=%h|%an|%ae|%cr|%s"});
 		Vector<String> lines = Split(TrimBoth(out), '\n');
 		for(const String& l : lines) {
 			Vector<String> p = Split(TrimBoth(l), '|');
