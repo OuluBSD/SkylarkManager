@@ -301,3 +301,19 @@ SourceForge/PrivateHub wiring, local-store migration, fence additions).
 - Out-of-brief fix (required to build): HostViews.cpp used `VividIcon`, `UserSession`, `SystemAuthService` without including their headers. It built only through earlier units' includes. A clean worktree of HEAD `51031d7` fails the same way (22 errors). Added `ManagerSkylark.h` and `SystemAuth.h`.
 - `HostExec.{h,cpp}` added to `ManagerSkylark.upp` after `HostRoutes.cpp`.
 - Verification: fence `WebEngineTests` 116/116; `ManagerSkylark --test` PASSED; `CompanySkylark --test` ALL TESTS PASSED (CLANG). GCC rc 0 for `ManagerSkylark`, `WebEngineTests`, `CompanySkylark`.
+
+**Step 2 — SourceForge webapp onto SourceForgeForgeBackend (`7c6bab7`).**
+- Tickets go through `SourceForgeForgeBackend`, one default backend per project (each backend is bound to one project). Base URL `https://sourceforge.net`, no credentials = read-only.
+- Writes (create, comment, status) return the backend's gate result. Without credentials they report unavailable; nothing is faked.
+- Wiki, discussion and files have no backend surface, so they report Unsupported and the views show an explicit unavailable state. The seeded demo content in the old local stores is gone, and the webapp no longer reads `~/.aria/sites/sourceforge/**` at all. Step 4 is where that legacy data is imported.
+- Read failures reach the API as `ok=false` with provenance and error. The views render an unavailable banner.
+- Scraped `summary.json` stays read-only and shows a "Scraped snapshot (read-only)" badge.
+- `SourceForgeForgeBackend` now rejects project slugs outside `[a-z0-9._-]` (and `.` / `..`) before they reach an Allura path.
+- New `SourceForgeAdapterTests.cpp`: stub Allura transport, reachable and unreachable, wired into `ManagerSkylark --test`.
+- Verification: fence 116/116; `ManagerSkylark --test` PASSED; `CompanySkylark --test` ALL TESTS PASSED (CLANG); GCC rc 0 for `ManagerSkylark`, `WebEngineTests`, `CompanySkylark`.
+- Limitation: live `sourceforge.net` was not exercised (stub transport only). A manual smoke test still needs to be done with real Allura responses.
+
+**Stopped before step 3. Blocked, needs a planner decision.**
+- Step 3 assumes a PrivateHub webapp with issues that can be moved onto `PrivateHubWorkspaceBackend`. None exists: no PrivateHub routes or views in ManagerSkylark or CompanySkylark, and the WebEngine host is not composed into ManagerSkylark. The only PrivateHub code is `PrivateHubWorkspace` itself, which the fence test exercises. Question for the planner: should step 3 build a minimal PrivateHub issues surface, or should the brief be re-scoped?
+- Step 4 depends on the PrivateHub storage model. Tickets map onto `ForgeIssue`. Wiki pages, discussion topics and release files have no PrivateHub record type, so the converter needs a schema decision for those.
+- Steps 4 and 5 are not started.
