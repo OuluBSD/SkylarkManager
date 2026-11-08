@@ -167,3 +167,35 @@ later); TriggerWorkflowRunAsync converted now (argv + honest local-build
 label); profile-page invented cards removed; is_private tri-state approved;
 LoadScrapedData stays read-only. Next: WORKER-BRIEF-04.md (relayed also via
 CompanySkylark/tmp/task.txt).
+
+## 2026-11-09 — WORKER-BRIEF-04 (Assignment 4, T01 slice 4a) — done
+
+**Commits (on main, nothing pushed):**
+- `5f55e44` Workflow trigger is a labelled local build, argv only. `TriggerWorkflowRunAsync` is now `TriggerLocalBuildAsync()`: `Start2` with an argv vector for the fixed `bin/build` path. The run record is named "Local build: reference/ManagerSkylark" with event `local_build`. The page has one "Start local build" button in place of two duration buttons. The route message says it is not a GitHub Actions run.
+- `8bb3e8d` Profile page drops invented claims. The Projects tab ("Active GitHub Projects", "Active Sprint") and the Overview heatmap ("2,842 contributions", "Active Daily") become neutral "not loaded" notices. I also removed the heatmap, which the brief did not name; it was the same class of claim.
+- `27962b0` `LocalRepoInfo.is_private` is tri-state: -1 unknown (default and local fallback), 0 public, 1 private. JSON key stays `is_private`, now an int. Live repos map `isPrivate`; the scraped snapshot maps its value when present. `VisibilityLabel` renders Unknown/Public/Private in the repo header and both profile badges. A synthetic check covers all three renderings.
+- `55821bc` `DataStore.cpp` (3074 lines) split into eight translation units with shared helpers in `DataStoreInternal.h`. Sizes: `DataStore.cpp` 636, `DataStoreSchema.cpp` 500, `DataStoreJournal.cpp` 419, `DataStorePrepare.cpp` 438, `DataStoreWrite.cpp` 467, `DataStoreLock.cpp` 186, `DataStoreValidate.cpp` 218, `DataStoreQuery.cpp` 123, `DataStoreInternal.h` 228. Largest file is 636 lines, under the ~800 target.
+
+**DataStore split, what changed mechanically:**
+- Shared helpers (16 functions, 4 types, the canonical write mutex, two constants) moved to `DataStoreInternal.h`. Functions lost `static` and got prototypes. POSIX-only types and prototypes keep their `#ifdef PLATFORM_POSIX` guards. The mutex is one `extern` definition in `DataStoreLock.cpp`, as before.
+- Check: comparing the original and the split as line multisets (after stripping `static `) shows zero original lines missing. Additions are only includes, guards, prototypes, and `extern`. The `HasConflictingCreateIdentity` forward declaration in the lock file is now a single shared prototype.
+
+**Verification (after every commit, CLANG):**
+- Fence: `WebEngineTests` 116/116 checks passed.
+- `ManagerSkylark --test`: PASSED. This includes the RestApi self-tests, which exercise the store load, query, and service paths.
+- `CompanySkylark --test`: ALL TESTS PASSED.
+- GCC, final tree: `ManagerSkylark`, `WebEngineTests`, and `CompanySkylark` each rc 0.
+
+**Gaps to know about:**
+- The self-tests do not call `PublishBatch`, `WriteRecord`, `RecoverPendingBatches`, or the journal code directly. The journal and recovery paths have no direct test in this repo. The line-multiset check and the compiler are the only evidence those paths are unchanged.
+- The POSIX guards are preserved, but the non-POSIX (MSVC) branches were not compiled here. CI covers MSVC.
+- `RestApi.cpp` (1241 lines), `ScopedPolicy.cpp`, and `ManagerSkylark.cpp` are unchanged and out of scope (slice 5).
+
+**Left alone and flagged:**
+- `GitHubUserView.cpp` Packages tab: a static description of the U++ packages. It makes no claims about state.
+- Pinned-repo descriptions fall back to "Ultimate++ Agentic repository in ~/Dev/<name>" when GitHub gives no description. This is placeholder text, not a state claim.
+- The `RenderOperatorWarningBar` notice was rewritten for this brief: its cache counts and timings were invented, so the notice now only describes the local build.
+
+Nothing pushed. The demo server on port 8081 was not touched.
+
+Ready for the next brief.
