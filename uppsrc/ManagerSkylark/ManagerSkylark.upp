@@ -47,6 +47,8 @@ file
 	SystemAuth.cpp,
 	HostPlatform.h,
 	HostPlatform.cpp,
+	HostViews.cpp,
+	HostAdminViews.cpp,
 	HostRoutes.cpp,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
