@@ -150,35 +150,12 @@ void RenderRepoProjectsTab(GitHubRepoPage& page)
 	page.content << RenderGitHubTemplate(vars, "github-projects");
 }
 
-// Security tab: static security overview cards.
+// Security tab: static security overview cards. The view reads no GitHub
+// security data, so the template states that nothing was checked.
 void RenderRepoSecurityTab(GitHubRepoPage& page)
 {
-	String& content = page.content;
-
-	content
-		<< "<div class=\"wf-card\">\n"
-		<< "  <div class=\"wf-card-header\"><span>Security Overview</span><span class=\"wf-badge wf-badge-neutral\">Not loaded</span></div>\n"
-		<< "  <div class=\"wf-card-body\">\n"
-		<< "    <p style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin:0 0 16px 0;\">This view does not read GitHub security data, so nothing below has been checked.</p>\n"
-		<< "    <div style=\"display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px;\">\n"
-		<< "      <div style=\"background:var(--wf-surface,#161b22); padding:16px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\">\n"
-		<< "        <h4>Dependabot Alerts</h4>\n"
-		<< "        <div style=\"font-size:1.8rem; font-weight:700; color:var(--wf-fg-inactive,#7d8590);\">Not loaded</div>\n"
-		<< "        <p style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590); margin:0;\">Dependency alerts are not read by this view.</p>\n"
-		<< "      </div>\n"
-		<< "      <div style=\"background:var(--wf-surface,#161b22); padding:16px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\">\n"
-		<< "        <h4>Secret Scanning</h4>\n"
-		<< "        <div style=\"font-size:1.8rem; font-weight:700; color:var(--wf-fg-inactive,#7d8590);\">Not performed</div>\n"
-		<< "        <p style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590); margin:0;\">Secret scan: not performed.</p>\n"
-		<< "      </div>\n"
-		<< "      <div style=\"background:var(--wf-surface,#161b22); padding:16px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d);\">\n"
-		<< "        <h4>Code Scanning</h4>\n"
-		<< "        <div style=\"font-size:1.8rem; font-weight:700; color:var(--wf-fg-inactive,#7d8590);\">Not loaded</div>\n"
-		<< "        <p style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590); margin:0;\">Code scanning results are not read by this view.</p>\n"
-		<< "      </div>\n"
-		<< "    </div>\n"
-		<< "  </div>\n"
-		<< "</div>\n";
+	Renderer vars;
+	page.content << RenderGitHubTemplate(vars, "github-security");
 }
 
 // Settings tab: general repository settings and danger zone.

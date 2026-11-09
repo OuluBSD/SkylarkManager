@@ -12,6 +12,7 @@ GitHub view code (T02 brief 09).
 | `make-fixtures.sh` | Builds deterministic git repos (`demo-repo`, `second-repo`): fixed author, dates and content |
 | `fake-gh.sh` | Stands in for `gh` with canned JSON for the `SeppoPakonen/demo-repo` shapes the views call (issues, pulls, comments, PR diff, runs, repo list). Other argv exits 2, which views report as unavailable. No network |
 | `routes.txt` | The route set (21 routes): tabs, sub-pages, user, raw and an API route |
+| `check-claims.sh` | Asserts the claims the security tab must not make, on a capture directory (replaces the in-process check the adapter test cannot run) |
 | `make-store.sh` | Seeds the Manager local store (`site/mgr`) with the demo-repo project, 9 tasks in open, in-progress, done and blocked states |
 | `normalize.sh` | Normalization applied to every file before comparison |
 | `compare.sh` | Compares two capture directories after normalization |
