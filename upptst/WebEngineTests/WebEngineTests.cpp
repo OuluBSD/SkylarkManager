@@ -975,6 +975,38 @@ CONSOLE_APP_MAIN
 
 	// --- three fenced sites ---
 	SetupSites();
+	// --- T02: identical template and static names resolve per site ---
+	{
+		EngineSite *alpha = TheWebEngine().FindSite("alpha");
+		EngineSite *beta = TheWebEngine().FindSite("beta");
+		Check(alpha && beta, "alpha and beta engine sites are registered");
+		if(alpha && beta) {
+			RealizeDirectory(alpha->StaticRoot());
+			RealizeDirectory(beta->StaticRoot());
+			RealizeDirectory(alpha->TemplateRoot());
+			RealizeDirectory(beta->TemplateRoot());
+			SaveFile(AppendFileName(alpha->StaticRoot(), "shared.css"), "a{}");
+			SaveFile(AppendFileName(beta->StaticRoot(), "shared.css"), "b{}");
+			SaveFile(AppendFileName(alpha->TemplateRoot(), "shared.witz"), "ALPHA-PAGE");
+			SaveFile(AppendFileName(beta->TemplateRoot(), "shared.witz"), "BETA-PAGE");
+			String a_full, b_full, mime;
+			SkylarkSiteRoots::Set(alpha->TemplateRoot(), alpha->StaticRoot());
+			bool a_static = SkylarkSiteRoots::ResolveStatic("shared.css", a_full, mime);
+			String a_tpl = GetPreprocessedTemplate("shared", LNG_ENGLISH);
+			SkylarkSiteRoots::Set(beta->TemplateRoot(), beta->StaticRoot());
+			bool b_static = SkylarkSiteRoots::ResolveStatic("shared.css", b_full, mime);
+			String b_tpl = GetPreprocessedTemplate("shared", LNG_ENGLISH);
+			SkylarkSiteRoots::Clear();
+			Check(a_static && b_static && a_full != b_full,
+			      "same static name resolves to a different file on each site");
+			Check(LoadFile(a_full) == "a{}" && LoadFile(b_full) == "b{}",
+			      "each site serves its own bytes for the same static name");
+			Check(a_tpl.Find("ALPHA-PAGE") >= 0 && a_tpl.Find("BETA-PAGE") < 0 &&
+			      b_tpl.Find("BETA-PAGE") >= 0 && b_tpl.Find("ALPHA-PAGE") < 0,
+			      "same template name compiles from each site's own template root");
+		}
+	}
+
 
 	EngineTestHost host;
 	s_host = &host;
