@@ -141,6 +141,17 @@ static String CookieOf(const HttpReply& r, const String& cookie_name, String& ra
 	return String();
 }
 
+// The full Set-Cookie line for a cookie, with its attributes; empty if absent.
+static String SetCookieLine(const HttpReply& r, const String& cookie_name)
+{
+	for(const String& c : r.set_cookies) {
+		int q = c.Find('=');
+		if(q >= 0 && TrimBoth(c.Mid(0, q)) == cookie_name)
+			return c;
+	}
+	return String();
+}
+
 static String FormEncode(const VectorMap<String, String>& fields)
 {
 	String out;
@@ -1079,6 +1090,10 @@ CONSOLE_APP_MAIN
 	}
 	alpha_pair = "wfs_alpha=" + CookieOf(rl, "wfs_alpha", alpha_pair);
 	Check(alpha_pair.Find("=") > 0 && alpha_pair.Find("was_") > 0, "alpha login sets wfs_alpha session cookie");
+	Check(SetCookieLine(rl, "wfs_alpha").Find("SameSite=Strict") >= 0,
+	      "alpha fresh login sets the session cookie with SameSite=Strict");
+	Check(SetCookieLine(rl, "wfs_alpha").Find("HttpOnly") >= 0,
+	      "alpha fresh login session cookie is HttpOnly");
 
 	// 6. same username on beta needs ITS OWN password
 	VectorMap<String, String> origin_b;
@@ -1100,6 +1115,10 @@ CONSOLE_APP_MAIN
 		beta_uid = m.Get("user_id").IsNull() ? String() : (String)m.Get("user_id");
 	}
 	beta_pair = "wfs_beta=" + CookieOf(rlb, "wfs_beta", beta_pair);
+	Check(SetCookieLine(rlb, "wfs_beta").Find("SameSite=Strict") >= 0,
+	      "beta fresh login sets the session cookie with SameSite=Strict");
+	Check(SetCookieLine(rlb, "wfs_beta").Find("HttpOnly") >= 0,
+	      "beta fresh login session cookie is HttpOnly");
 	Check(alpha_uid != beta_uid && alpha_uid.GetCount() > 0, "same username has distinct user ids per site");
 
 	// 7. whoami with sessions
