@@ -17,6 +17,11 @@ NAMESPACE_UPP
 // the template did not compile, instead of returning witz's error page.
 String RenderGitHubTemplate(Renderer& vars, const char *template_name);
 
+// Escapes text for use inside a single-quoted JavaScript string literal in a
+// template's <script> block, which witz's HTML escaping does not cover. The
+// result is emitted with $raw(...), so it must come only from this function.
+String GitHubJsEscape(const String& s);
+
 END_UPP_NAMESPACE
 
 #endif

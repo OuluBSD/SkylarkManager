@@ -1,0 +1,57 @@
+$if(has_unavailable)<div class="wf-alert wf-alert-warning">Issue #$issue_num is unavailable from GitHub: $raw(unavailable)</div>$else<div style="margin-bottom:1.5rem;">
+  <div style="margin-bottom:0.75rem;">
+    <a href="/repo/$owner/$repo?tab=issues" class="wf-gh-btn" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;">$raw(icon_chevron_left) Back to issues</a>
+  </div>
+  <h1 style="font-size:1.75rem; font-weight:600; margin:0 0 8px 0; color:var(--wf-fg-normal,#e6edf3);">$title <span style="color:var(--wf-fg-inactive,#7d8590); font-weight:400;">#$issue_num</span></h1>
+  <div style="display:flex; align-items:center; gap:10px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); flex-wrap:wrap;">
+    <span class="wf-badge" style="background:$state_bg; color:#ffffff; font-weight:700; padding:4px 10px; border-radius:12px; font-size:0.82rem; display:inline-flex; align-items:center; gap:4px;">$raw(state_icon) $state_label</span>
+    <span><strong>$author</strong> opened this issue on $created</span>
+  </div>
+</div>
+<div class="wf-gh-file-box" style="margin-bottom:1.5rem;">
+  <div class="wf-gh-file-header" style="justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:8px;"><strong>$author</strong> <span style="color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;">commented on $created</span></div>
+    <span class="wf-badge wf-badge-neutral" style="font-size:0.75rem;">Owner</span>
+  </div>
+  <div class="wf-gh-file-body markdown-body" style="padding:16px; font-size:0.92rem; line-height:1.6;">
+$if(has_body)$issue_body
+$else<em>No description provided.</em>
+$endif  </div>
+</div>
+$for(c in comments)<div class="wf-gh-file-box" style="margin-bottom:1.5rem;">
+  <div class="wf-gh-file-header" style="justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:8px;"><strong>$c.author</strong> <span style="color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;">commented on $c.time</span></div>
+    <span class="wf-badge wf-badge-neutral" style="font-size:0.75rem;">Collaborator</span>
+  </div>
+  <div class="wf-gh-file-body markdown-body" style="padding:16px; font-size:0.92rem; line-height:1.6;">
+$c.body
+  </div>
+</div>
+$endfor<div class="wf-card">
+  <div class="wf-card-header"><span>Add a comment</span></div>
+  <div class="wf-card-body">
+    <textarea id="gh-comment-text" rows="4" placeholder="Leave a comment..." style="width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;"></textarea>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button id="btn-toggle-issue" onclick="toggleIssueState()" class="wf-btn" style="background:var(--wf-surface,#161b22); color:$toggle_color; border-color:var(--wf-border-color,#30363d); font-size:0.82rem;">$toggle_label</button>
+      <button id="btn-submit-comment" onclick="submitIssueComment()" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;">Comment</button>
+    </div>
+  </div>
+</div>
+<script>
+function submitIssueComment() {
+  let text = document.getElementById('gh-comment-text').value.trim();
+  if(!text) return;
+  fetch('/api/gh/issues/$raw(js_owner)/comment', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ repo: '$raw(js_repo)', number: $issue_num, body: text })
+  }).then(r => r.json()).then(data => { window.location.reload(); });
+}
+function toggleIssueState() {
+  fetch('/api/gh/issues/$raw(js_owner)/toggle', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ repo: '$raw(js_repo)', number: $issue_num, close: $raw(close_flag) })
+  }).then(r => r.json()).then(data => { window.location.reload(); });
+}
+</script>$endif

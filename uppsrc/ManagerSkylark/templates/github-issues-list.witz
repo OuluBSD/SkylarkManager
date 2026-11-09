@@ -1,0 +1,57 @@
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:12px;">
+  <div style="display:flex; gap:10px; flex:1; max-width:600px;">
+    <input type="search" value="is:issue is:open " style="background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:100%; font-size:0.85rem;">
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button id="btn-open-new-issue" onclick="document.getElementById('new-issue-card').style.display='block';" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-weight:600; font-size:0.85rem;">New issue</button>
+  </div>
+</div>
+<div id="new-issue-card" class="wf-card" style="display:none; margin-bottom:1.5rem; border:1px solid var(--wf-accent-focus,#58a6ff);">
+  <div class="wf-card-header"><span>Create New Issue in $owner/$repo</span></div>
+  <div class="wf-card-body">
+    <input type="text" id="new-issue-title" placeholder="Title" style="width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.95rem; font-weight:600; margin-bottom:12px;">
+    <textarea id="new-issue-body" rows="5" placeholder="Leave a comment / issue description..." style="width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;"></textarea>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button onclick="document.getElementById('new-issue-card').style.display='none';" class="wf-btn wf-btn-secondary" style="font-size:0.82rem;">Cancel</button>
+      <button id="btn-submit-new-issue" onclick="submitNewIssue()" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;">Submit new issue</button>
+    </div>
+  </div>
+</div>
+<script>
+function submitNewIssue() {
+  let title = document.getElementById('new-issue-title').value.trim();
+  let body = document.getElementById('new-issue-body').value.trim();
+  if(!title) { alert('Please enter an issue title'); return; }
+  fetch('/api/gh/issues/$raw(js_owner)/create', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ repo: '$raw(js_repo)', title: title, body: body })
+  }).then(r => r.json()).then(data => {
+    if(data.status === 'ok') window.location.reload();
+    else alert('Error creating issue: ' + (data.error || 'unknown error'));
+  });
+}
+</script>
+$if(has_unavailable)<div class="wf-alert wf-alert-warning">GitHub issues are unavailable: $raw(unavailable)</div>$else<div class="wf-gh-file-box">
+  <div class="wf-gh-file-header" style="justify-content:space-between;">
+    <div style="display:flex; gap:16px; font-size:0.88rem;">
+      <strong>$raw(icon_alert_circle) $open_count Open</strong>
+      <span style="color:var(--wf-fg-inactive,#7d8590);">$raw(icon_check) $closed_count Closed</span>
+    </div>
+    <div style="display:flex; gap:16px; font-size:0.82rem; color:var(--wf-fg-inactive,#7d8590);">
+      <span>Author &#9662;</span><span>Label &#9662;</span><span>Projects &#9662;</span><span>Milestones &#9662;</span><span>Assignee &#9662;</span>
+    </div>
+  </div>
+$for(row in issues)  <div class="wf-gh-file-row" style="justify-content:space-between; padding:12px 16px;">
+    <div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="color:$row.tone;">$raw(row.icon)</span>
+        <a href="$row.href" style="font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;">$row.title</a>
+      </div>
+      <div style="font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px; margin-left:24px;">
+        #$row.num opened on $row.created by <strong>$row.author</strong>
+      </div>
+    </div>
+    <div style="color:var(--wf-fg-inactive,#7d8590); font-size:0.8rem;">$raw(comment_icon) $row.comments</div>
+  </div>
+$endfor</div>$endif

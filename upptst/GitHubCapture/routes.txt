@@ -19,3 +19,5 @@
 /repo/SeppoPakonen?tab=repositories
 /raw/SeppoPakonen/demo-repo/README.md
 /api/gh/repos/SeppoPakonen
+/repo/SeppoPakonen/demo-repo/issues/99
+/repo/SeppoPakonen/second-repo?tab=issues

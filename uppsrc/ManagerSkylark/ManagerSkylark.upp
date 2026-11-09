@@ -67,6 +67,8 @@ file
 
 	Templates readonly separator,
 	templates/github-commits.witz,
+	templates/github-issue-detail.witz,
+	templates/github-issues-list.witz,
 	deploy-templates.sh,
 	GitHubAdapterTests.cpp,
 	SourceForgePlatform.h,
