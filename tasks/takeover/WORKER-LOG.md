@@ -618,3 +618,43 @@ PASSED, Company ALL PASSED. Step-3 decisions: option (a) approved (app
 default template root now; engine site at T04); witz data models per view;
 capture harness FIRST (worker's recommended order approved). Next:
 WORKER-BRIEF-09.md (capture harness + GitHub tab extraction begins).
+
+## Worker entry — Brief 09 (T02 slice 3, takeover agent)
+
+Commits (each with fence 156/156, ManagerSkylark PASSED, CompanySkylark ALL
+PASSED under CLANG, GCC rc 0 for all three targets, GitHub capture compare):
+
+- eda0d4b — step 1: headless GitHub route capture harness
+  (`upptst/GitHubCapture/`: fixtures, fake gh, capture, normalize, compare,
+  21 routes).
+- (step 2 is the documented baseline regeneration command in
+  `upptst/GitHubCapture/README.md`; baseline is regenerated, not committed as
+  blobs. Normalization: Date/Set-Cookie/Content-Length lines dropped; usr_<hex>
+  → usr_X; ms-capture.<random> → ms-capture.X; dd/mm/yyyy hh:mm:ss → TS;
+  "N units ago" → AGO.)
+- 1b0f1e3 — step 3: commits tab (`RenderRepoCommitsTab`) renders
+  `uppsrc/ManagerSkylark/templates/github-commits.witz` through the app default
+  template root. String bridge `GitHubTemplates.cpp`: `\r\n` → `\n`; throws if
+  the template does not compile. `deploy-templates.sh` copies templates beside
+  the binary; gate deploys them. Capture IDENTICAL, 42 files.
+  Documented change: witz escapes msg/author/time/hash by default; the fixtures
+  contain no escapable characters, so output is identical.
+- 88cfa82 — harness update: fake gh now serves canned demo-repo JSON for the
+  issues, pulls, comments, PR diff, runs and repo-list shapes. Before this,
+  those views were only captured in their "unavailable" state. Baseline
+  regenerated and stable across two runs.
+
+Witz findings: loop tags join to content lines (a `$for(...)` on its own line
+emits an extra newline per row); member access `$c.msg` works.
+
+Step 4 status (remaining GitHub tabs, one commit each):
+- commits: done (1b0f1e3), capture identical.
+- issues: NOT STARTED. Blockers in source: owner/repo interpolated into an
+  inline `<script>` (needs a JS-string context, not HTML escaping); SVG icons
+  from `VividIcon::Get` need raw slots; the search bar and new-issue card are
+  emitted before the availability check.
+- pulls, code, user, workflow views, actions, projects, security, settings,
+  agents: NOT STARTED.
+
+Stopped after the commits extraction and the harness update. The remaining
+tabs are not converted, so the brief's definition of done is not yet met.
