@@ -1,0 +1,21 @@
+<div class="wf-gh-file-box">
+  <div class="wf-gh-file-header">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span style="font-weight:600;">$commit_author</span>
+      <span style="color:var(--wf-fg-inactive,#7d8590);">$commit_msg</span>
+    </div>
+    <div style="color:var(--wf-fg-muted,#848d97); font-size:0.78rem;">
+      <code>$commit_hash</code> &middot; $commit_time
+    </div>
+  </div>
+$if(has_parent)  <div class="wf-gh-file-row">
+    <span class="wf-gh-file-name">$raw(icon_corner_left_up) <a href="$parent_url">..</a></span>
+    <span class="wf-gh-file-msg"></span>
+    <span class="wf-gh-file-age"></span>
+  </div>
+$endif$for(e in entries)  <div class="wf-gh-file-row">
+    <span class="wf-gh-file-name">$raw(e.icon) <a href="$e.link">$e.name</a></span>
+    <span class="wf-gh-file-msg">$e.msg</span>
+    <span class="wf-gh-file-age">$e.age</span>
+  </div>
+$endfor</div>

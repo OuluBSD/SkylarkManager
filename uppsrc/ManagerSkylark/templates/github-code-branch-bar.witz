@@ -1,0 +1,13 @@
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:12px;">
+  <div style="display:flex; align-items:center; gap:8px;">
+    <div class="wf-dropdown" style="position:relative; display:inline-block;">
+      <button class="wf-gh-btn" style="font-weight:600; font-size:0.85rem;">$raw(icon_git_branch) $branch &#9662;</button>
+    </div>
+    <nav class="wf-breadcrumb" style="font-size:0.9rem; font-weight:600;">
+      <a href="$base_url">$repo</a>$for(c in crumbs) / <a href="$c.href">$c.name</a>$endfor$if(has_file) / <span style="color:var(--wf-fg-normal,#e6edf3);">$last_name</span>$endif    </nav>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <a href="$base_url?tab=commits" class="wf-gh-btn" style="font-size:0.8rem;">$raw(icon_clock) Commits</a>
+    <button class="wf-gh-btn wf-btn-positive" style="font-size:0.8rem; background:#238636; border-color:#2ea043; color:#fff;">Code &#9662;</button>
+  </div>
+</div>

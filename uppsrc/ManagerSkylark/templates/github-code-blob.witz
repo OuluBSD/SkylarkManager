@@ -1,0 +1,29 @@
+<div class="wf-gh-file-box">
+  <div class="wf-gh-file-header" style="justify-content:space-between;">
+    <div style="font-size:0.85rem; color:var(--wf-fg-muted,#848d97);">
+      <strong>$file_name</strong> &middot;       <span>$line_count lines</span> &middot;       <span>$size_str</span>
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+$if(is_markdown)      <div class="wf-view-toggle" style="margin-right:6px;">
+        <button type="button" id="btn-view-preview" class="active" onclick="toggleFileView('preview')">Preview</button>
+        <button type="button" id="btn-view-code" onclick="toggleFileView('code')">Code</button>
+      </div>
+$endif      <a href="/raw/$owner/$repo/$file_path" class="wf-gh-btn" target="_blank">Raw</a>
+      <button class="wf-gh-btn" onclick="navigator.clipboard.writeText(document.getElementById('wf-blob-raw-md') ? document.getElementById('wf-blob-raw-md').value : document.getElementById('wf-blob-code').innerText); alert('Copied raw contents to clipboard!');">Copy</button>
+    </div>
+  </div>
+$if(is_markdown)  <div id="wf-blob-preview-box" class="markdown-render-box" style="padding:1.5rem; background:var(--wf-bg-view,#0d1117); border-radius:0 0 6px 6px;">
+    <textarea id="wf-blob-raw-md" class="raw-markdown" style="display:none;">$file_text</textarea>
+    <div id="wf-blob-preview" class="markdown-body"></div>
+  </div>
+$endif  <div id="wf-blob-code-box" style="$code_box_style">
+    <table style="width:100%; border-collapse:collapse;">
+      <tbody id="wf-blob-code">
+$for(r in lines)        <tr>
+          <td style="width:48px; text-align:right; padding:0 12px; color:var(--wf-fg-inactive,#7d8590); user-select:none; border-right:1px solid var(--wf-border-color,#30363d); font-size:0.75rem;">$r.num</td>
+          <td style="padding:0 16px; white-space:pre;">$r.text</td>
+        </tr>
+$endfor      </tbody>
+    </table>
+  </div>
+</div>

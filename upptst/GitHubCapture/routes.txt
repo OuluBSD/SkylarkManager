@@ -25,3 +25,5 @@
 /repo/SeppoPakonen/second-repo?tab=pulls
 /repo/SeppoPakonen/demo-repo/issues/2
 /repo/SeppoPakonen/demo-repo/pulls/2
+/repo/SeppoPakonen/demo-repo/tree/master/src
+/repo/SeppoPakonen/demo-repo/blob/master/src/main.cpp

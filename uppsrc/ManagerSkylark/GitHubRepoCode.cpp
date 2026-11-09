@@ -1,12 +1,15 @@
 #include "ManagerSkylark.h"
 #include "GitHubPlatform.h"
 #include "GitHubRepoPage.h"
+#include "GitHubTemplates.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
 
 NAMESPACE_UPP
 
-// Code tab: branch bar, blob viewer, directory tree, and About sidebar.
+// Code tab: branch bar, blob viewer or directory tree, and About sidebar.
+// Each part is its own template: github-code-branch-bar, github-code-blob,
+// github-code-tree and github-code-sidebar.
 void RenderRepoCodeTab(GitHubRepoPage& page)
 {
 	const String& owner = page.owner;
@@ -20,42 +23,37 @@ void RenderRepoCodeTab(GitHubRepoPage& page)
 	String& sidebar = page.sidebar;
 
 	String base_url = "/repo/" + owner + "/" + repo;
-	Vector<String> branches = GitHubPlatformService::GetBranches(info.path);
 
-	// Branch Switcher Bar
-	String branch_bar;
-	branch_bar
-		<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:12px;\">\n"
-		<< "  <div style=\"display:flex; align-items:center; gap:8px;\">\n"
-		<< "    <div class=\"wf-dropdown\" style=\"position:relative; display:inline-block;\">\n"
-		<< "      <button class=\"wf-gh-btn\" style=\"font-weight:600; font-size:0.85rem;\">" << VividIcon::Get("git-branch", 14) << " " << branch << " &#9662;</button>\n"
-		<< "    </div>\n";
-
-	// Path breadcrumb
-	branch_bar << "    <nav class=\"wf-breadcrumb\" style=\"font-size:0.9rem; font-weight:600;\">\n"
-	           << "      <a href=\"" << base_url << "\">" << repo << "</a>";
+	// Path breadcrumb: every segment but the last links to its folder.
+	ValueArray crumbs;
+	String last_name;
 	if(!file_or_folder.IsEmpty()) {
 		Vector<String> segs = Split(file_or_folder, '/');
 		String accum;
 		for(int i = 0; i < segs.GetCount(); i++) {
 			if(!accum.IsEmpty()) accum << "/";
 			accum << segs[i];
-			bool is_last = (i == segs.GetCount() - 1);
-			if(is_last)
-				branch_bar << " / <span style=\"color:var(--wf-fg-normal,#e6edf3);\">" << segs[i] << "</span>";
-			else
-				branch_bar << " / <a href=\"" << base_url << "/tree/" << branch << "/" << accum << "\">" << segs[i] << "</a>";
+			if(i == segs.GetCount() - 1) {
+				last_name = segs[i];
+				break;
+			}
+			ValueMap crumb;
+			crumb.Add("href", base_url + "/tree/" + branch + "/" + accum);
+			crumb.Add("name", segs[i]);
+			crumbs.Add(crumb);
 		}
 	}
-	branch_bar << "    </nav>\n"
-	           << "  </div>\n"
-	           << "  <div style=\"display:flex; gap:8px; align-items:center;\">\n"
-	           << "    <a href=\"" << base_url << "?tab=commits\" class=\"wf-gh-btn\" style=\"font-size:0.8rem;\">" << VividIcon::Get("clock", 14) << " Commits</a>\n"
-	           << "    <button class=\"wf-gh-btn wf-btn-positive\" style=\"font-size:0.8rem; background:#238636; border-color:#2ea043; color:#fff;\">Code &#9662;</button>\n"
-	           << "  </div>\n"
-	           << "</div>\n";
 
-	content << branch_bar;
+	Renderer bar;
+	bar("icon_git_branch", VividIcon::Get("git-branch", 14))
+		("branch", branch)
+		("base_url", base_url)
+		("repo", repo)
+		("crumbs", crumbs)
+		("has_file", !file_or_folder.IsEmpty())
+		("last_name", last_name)
+		("icon_clock", VividIcon::Get("clock", 14));
+	content << RenderGitHubTemplate(bar, "github-code-branch-bar");
 
 	if(mode == "blob" && !file_or_folder.IsEmpty()) {
 		// Blob File Viewer
@@ -65,107 +63,60 @@ void RenderRepoCodeTab(GitHubRepoPage& page)
 		String size_str = blob["size_str"];
 		bool is_markdown = file_or_folder.EndsWith(".md") || file_or_folder.EndsWith(".markdown") || file_or_folder.EndsWith(".MD");
 
-		content
-			<< "<div class=\"wf-gh-file-box\">\n"
-			<< "  <div class=\"wf-gh-file-header\" style=\"justify-content:space-between;\">\n"
-			<< "    <div style=\"font-size:0.85rem; color:var(--wf-fg-muted,#848d97);\">\n"
-			<< "      <strong>" << GetFileName(file_or_folder) << "</strong> &middot; "
-			<< "      <span>" << line_count << " lines</span> &middot; "
-			<< "      <span>" << size_str << "</span>\n"
-			<< "    </div>\n"
-			<< "    <div style=\"display:flex; gap:6px; align-items:center;\">\n";
-
-		if(is_markdown) {
-			content
-				<< "      <div class=\"wf-view-toggle\" style=\"margin-right:6px;\">\n"
-				<< "        <button type=\"button\" id=\"btn-view-preview\" class=\"active\" onclick=\"toggleFileView('preview')\">Preview</button>\n"
-				<< "        <button type=\"button\" id=\"btn-view-code\" onclick=\"toggleFileView('code')\">Code</button>\n"
-				<< "      </div>\n";
-		}
-
-		content
-			<< "      <a href=\"/raw/" << owner << "/" << repo << "/" << file_or_folder << "\" class=\"wf-gh-btn\" target=\"_blank\">Raw</a>\n"
-			<< "      <button class=\"wf-gh-btn\" onclick=\"navigator.clipboard.writeText(document.getElementById('wf-blob-raw-md') ? document.getElementById('wf-blob-raw-md').value : document.getElementById('wf-blob-code').innerText); alert('Copied raw contents to clipboard!');\">Copy</button>\n"
-			<< "    </div>\n"
-			<< "  </div>\n";
-
-		if(is_markdown) {
-			content
-				<< "  <div id=\"wf-blob-preview-box\" class=\"markdown-render-box\" style=\"padding:1.5rem; background:var(--wf-bg-view,#0d1117); border-radius:0 0 6px 6px;\">\n"
-				<< "    <textarea id=\"wf-blob-raw-md\" class=\"raw-markdown\" style=\"display:none;\">" << DeHtml(file_content) << "</textarea>\n"
-				<< "    <div id=\"wf-blob-preview\" class=\"markdown-body\"></div>\n"
-				<< "  </div>\n";
-		}
-
-		content
-			<< "  <div id=\"wf-blob-code-box\" style=\"" << (is_markdown ? "display:none; " : "") << "overflow-x:auto; background:var(--wf-bg-view,#0d1117); font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace; font-size:0.82rem; line-height:1.5;\">\n"
-			<< "    <table style=\"width:100%; border-collapse:collapse;\">\n"
-			<< "      <tbody id=\"wf-blob-code\">\n";
-
+		ValueArray lines;
 		Vector<String> code_lines = Split(file_content, '\n');
 		for(int i = 0; i < code_lines.GetCount(); i++) {
-			content
-				<< "        <tr>\n"
-				<< "          <td style=\"width:48px; text-align:right; padding:0 12px; color:var(--wf-fg-inactive,#7d8590); user-select:none; border-right:1px solid var(--wf-border-color,#30363d); font-size:0.75rem;\">" << (i + 1) << "</td>\n"
-				<< "          <td style=\"padding:0 16px; white-space:pre;\">" << GitHubPlatformService::EscapeHtml(code_lines[i]) << "</td>\n"
-				<< "        </tr>\n";
+			ValueMap row;
+			row.Add("num", i + 1);
+			row.Add("text", code_lines[i]);
+			lines.Add(row);
 		}
 
-		content
-			<< "      </tbody>\n"
-			<< "    </table>\n"
-			<< "  </div>\n"
-			<< "</div>\n";
+		Renderer vars;
+		vars("file_name", GetFileName(file_or_folder))
+			("line_count", line_count)
+			("size_str", size_str)
+			("is_markdown", is_markdown)
+			("owner", owner)
+			("repo", repo)
+			("file_path", file_or_folder)
+			("file_text", file_content)
+			("code_box_style", String(is_markdown ? "display:none; " : "") +
+				"overflow-x:auto; background:var(--wf-bg-view,#0d1117); font-family:SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace; font-size:0.82rem; line-height:1.5;")
+			("lines", lines);
+		content << RenderGitHubTemplate(vars, "github-code-blob");
 	}
 	else {
 		// Directory Tree Browser
-		content
-			<< "<div class=\"wf-gh-file-box\">\n"
-			<< "  <div class=\"wf-gh-file-header\">\n"
-			<< "    <div style=\"display:flex; align-items:center; gap:10px;\">\n"
-			<< "      <span style=\"font-weight:600;\">" << (!info.last_commit_author.IsEmpty() ? info.last_commit_author : "sblo") << "</span>\n"
-			<< "      <span style=\"color:var(--wf-fg-inactive,#7d8590);\">" << (!info.last_commit_msg.IsEmpty() ? info.last_commit_msg : "Update repository files and documentation") << "</span>\n"
-			<< "    </div>\n"
-			<< "    <div style=\"color:var(--wf-fg-muted,#848d97); font-size:0.78rem;\">\n"
-			<< "      <code>" << (!info.last_commit_hash.IsEmpty() ? info.last_commit_hash : "master") << "</code> &middot; "
-			<< (!info.last_commit_time.IsEmpty() ? info.last_commit_time : "recent") << "\n"
-			<< "    </div>\n"
-			<< "  </div>\n";
+		String commit_author = info.last_commit_author.IsEmpty() ? String("sblo") : info.last_commit_author;
+		String commit_msg = info.last_commit_msg.IsEmpty() ? String("Update repository files and documentation") : info.last_commit_msg;
+		String commit_hash = info.last_commit_hash.IsEmpty() ? String("master") : info.last_commit_hash;
+		String commit_time = info.last_commit_time.IsEmpty() ? String("recent") : info.last_commit_time;
 
 		// Up directory link if inside subfolder
-		if(!file_or_folder.IsEmpty()) {
+		bool has_parent = !file_or_folder.IsEmpty();
+		String parent_url = base_url;
+		if(has_parent) {
 			int slash = file_or_folder.ReverseFind('/');
-			String parent_url = base_url;
 			if(slash > 0)
 				parent_url << "/tree/" << branch << "/" << file_or_folder.Left(slash);
-			content
-				<< "  <div class=\"wf-gh-file-row\">\n"
-				<< "    <span class=\"wf-gh-file-name\">" << VividIcon::Get("corner-left-up", 16) << " <a href=\"" << parent_url << "\">..</a></span>\n"
-				<< "    <span class=\"wf-gh-file-msg\"></span>\n"
-				<< "    <span class=\"wf-gh-file-age\"></span>\n"
-				<< "  </div>\n";
 		}
 
-		Vector<ValueMap> entries = GitHubPlatformService::GetTree(info.path, file_or_folder);
-		for(const ValueMap& e : entries) {
-			String name = e["name"];
+		ValueArray entries;
+		Vector<ValueMap> tree = GitHubPlatformService::GetTree(info.path, file_or_folder);
+		for(const ValueMap& e : tree) {
 			String type = e["type"];
 			String rel_path = e["path"];
-			String link_url;
-			if(type == "dir")
-				link_url = base_url + "/tree/" + branch + "/" + rel_path;
-			else
-				link_url = base_url + "/blob/" + branch + "/" + rel_path;
-
-			content
-				<< "  <div class=\"wf-gh-file-row\">\n"
-				<< "    <span class=\"wf-gh-file-name\">" << VividIcon::Get(type == "dir" ? "folder" : "file-text", 16)
-				<< " <a href=\"" << link_url << "\">" << name << "</a></span>\n"
-				<< "    <span class=\"wf-gh-file-msg\">" << (String)e["msg"] << "</span>\n"
-				<< "    <span class=\"wf-gh-file-age\">" << (String)e["age"] << "</span>\n"
-				<< "  </div>\n";
+			String link_url = type == "dir" ? base_url + "/tree/" + branch + "/" + rel_path
+			                                : base_url + "/blob/" + branch + "/" + rel_path;
+			ValueMap row;
+			row.Add("icon", VividIcon::Get(type == "dir" ? "folder" : "file-text", 16));
+			row.Add("link", link_url);
+			row.Add("name", (String)e["name"]);
+			row.Add("msg", (String)e["msg"]);
+			row.Add("age", (String)e["age"]);
+			entries.Add(row);
 		}
-		content << "</div>\n";
 
 		// README rendered box
 		String readme_full = AppendFileName(info.path, file_or_folder.IsEmpty() ? "README.md" : file_or_folder + "/README.md");
@@ -177,29 +128,33 @@ void RenderRepoCodeTab(GitHubRepoPage& page)
 		else if(file_or_folder.IsEmpty())
 			readme_body = "### " + info.name + "\n\nRepository mirrored from `" + info.path + "`.\nAutonomous SweAgent and Aria automation enabled.";
 
+		Renderer vars;
+		vars("commit_author", commit_author)
+			("commit_msg", commit_msg)
+			("commit_hash", commit_hash)
+			("commit_time", commit_time)
+			("has_parent", has_parent)
+			("parent_url", parent_url)
+			("icon_corner_left_up", VividIcon::Get("corner-left-up", 16))
+			("entries", entries);
+		content << RenderGitHubTemplate(vars, "github-code-tree");
 		if(!readme_body.IsEmpty()) {
-			content
-				<< "<div class=\"wf-gh-readme-box markdown-render-box\">\n"
-				<< "  <div class=\"wf-gh-readme-header\">" << VividIcon::Get("book", 16) << " README.md</div>\n"
-				<< "  <textarea class=\"raw-markdown\" style=\"display:none;\">" << DeHtml(readme_body) << "</textarea>\n"
-				<< "  <div class=\"wf-gh-readme-body markdown-body\"></div>\n"
-				<< "</div>\n";
+			Renderer readme;
+			readme("icon_book", VividIcon::Get("book", 16))
+				("readme_text", readme_body);
+			content << RenderGitHubTemplate(readme, "github-code-readme");
 		}
 	}
 
 	// Sidebar About
-	sidebar
-		<< "<div class=\"wf-gh-sidebar-section\">\n"
-		<< "  <span class=\"wf-gh-sidebar-title\">About</span>\n"
-		<< "  <p style=\"color:var(--wf-fg-inactive,#7d8590);\">"
-		<< (!info.description.IsEmpty() ? info.description : "No description provided.") << "</p>\n"
-		<< "  <div>" << VividIcon::Get("star", 14) << " Stars: <strong>" << (info.stars < 0 ? String("not loaded") : AsString(info.stars)) << "</strong></div>\n"
-		<< "  <div>" << VividIcon::Get("git-fork", 14) << " Forks: <strong>" << (info.forks < 0 ? String("not loaded") : AsString(info.forks)) << "</strong></div>\n"
-		<< "</div>\n"
-		<< "<div class=\"wf-gh-sidebar-section\">\n"
-		<< "  <span class=\"wf-gh-sidebar-title\">Languages</span>\n"
-		<< "  <div style=\"font-size:0.85rem;\"><span style=\"display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;\"></span> " << info.language << "</div>\n"
-		<< "</div>\n";
+	Renderer side;
+	side("description", info.description.IsEmpty() ? String("No description provided.") : info.description)
+		("icon_star", VividIcon::Get("star", 14))
+		("stars", info.stars < 0 ? String("not loaded") : AsString(info.stars))
+		("icon_fork", VividIcon::Get("git-fork", 14))
+		("forks", info.forks < 0 ? String("not loaded") : AsString(info.forks))
+		("language", info.language);
+	sidebar << RenderGitHubTemplate(side, "github-code-sidebar");
 }
 
 END_UPP_NAMESPACE

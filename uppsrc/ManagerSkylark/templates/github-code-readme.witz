@@ -1,0 +1,5 @@
+<div class="wf-gh-readme-box markdown-render-box">
+  <div class="wf-gh-readme-header">$raw(icon_book) README.md</div>
+  <textarea class="raw-markdown" style="display:none;">$readme_text</textarea>
+  <div class="wf-gh-readme-body markdown-body"></div>
+</div>

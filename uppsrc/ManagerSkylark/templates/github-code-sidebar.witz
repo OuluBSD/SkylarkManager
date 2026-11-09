@@ -1,0 +1,10 @@
+<div class="wf-gh-sidebar-section">
+  <span class="wf-gh-sidebar-title">About</span>
+  <p style="color:var(--wf-fg-inactive,#7d8590);">$description</p>
+  <div>$raw(icon_star) Stars: <strong>$stars</strong></div>
+  <div>$raw(icon_fork) Forks: <strong>$forks</strong></div>
+</div>
+<div class="wf-gh-sidebar-section">
+  <span class="wf-gh-sidebar-title">Languages</span>
+  <div style="font-size:0.85rem;"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;"></span> $language</div>
+</div>
