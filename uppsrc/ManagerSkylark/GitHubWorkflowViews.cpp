@@ -82,54 +82,12 @@ static String ExtractTppText(const String& file_path, String& title)
 
 String GitHubPlatformService::RenderOperatorWarningBar(const String& owner, const String& repo)
 {
-	String h;
-	h << "<div class=\"wf-card\" style=\"margin-bottom:1.25rem; border-left:4px solid #d29922; background:rgba(210,153,34,0.06);\">\n"
-	  << "  <div style=\"padding:14px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;\">\n"
-	  << "    <div style=\"flex:1; min-width:280px;\">\n"
-	  << "      <div style=\"display:flex; align-items:center; gap:8px; font-weight:700; color:#f0883e; margin-bottom:4px;\">\n"
-	  << "        " << VividIcon::Get("alert-triangle", 18) << " <span>Local build</span>\n"
-	  << "      </div>\n"
-	  << "      <div style=\"font-size:0.86rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4;\">\n"
-	  << "        Starts <code>bin/build reference/ManagerSkylark</code> from the local ai-upp checkout on this machine. It is not a GitHub Actions run. Build cache state is not read by this view.\n"
-	  << "      </div>\n"
-	  << "    </div>\n"
-	  << "    <div style=\"display:flex; gap:10px; align-items:center; flex-wrap:wrap;\">\n"
-	  << "      <button id=\"btn-start-local-build\" onclick=\"runLocalBuild()\" class=\"wf-btn wf-btn-primary\" style=\"padding:6px 14px; font-size:0.82rem; font-weight:600;\">\n"
-	  << "        " << VividIcon::Get("play", 13) << " Start local build\n"
-	  << "      </button>\n"
-	  << "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" id=\"btn-new-workflow\" class=\"wf-btn\" style=\"padding:6px 14px; font-size:0.82rem; background:#238636; color:#ffffff; font-weight:600; text-decoration:none;\">\n"
-	  << "        " << VividIcon::Get("plus", 14) << " New workflow\n"
-	  << "      </a>\n"
-	  << "    </div>\n"
-	  << "  </div>\n"
-	  << "</div>\n"
-	  << "<script>\n"
-	  << "function runLocalBuild() {\n"
-	  << "  let btn = document.getElementById('btn-start-local-build');\n"
-	  << "  if(btn) {\n"
-	  << "    btn.disabled = true;\n"
-	  << "    btn.innerHTML = '<span>&#9203; Starting local build...</span>';\n"
-	  << "  }\n"
-	  << "  fetch('/api/gh/actions/trigger', {\n"
-	  << "    method: 'POST',\n"
-	  << "    headers: { 'Content-Type': 'application/json' },\n"
-	  << "    body: JSON.stringify({\n"
-	  << "      owner: '" << owner << "',\n"
-	  << "      repo: '" << repo << "',\n"
-
-	  << "    })\n"
-	  << "  })\n"
-	  << "  .then(r => r.json())\n"
-	  << "  .then(d => {\n"
-	  << "    setTimeout(() => { window.location.reload(); }, 600);\n"
-	  << "  })\n"
-	  << "  .catch(e => {\n"
-	  << "    alert('Local build error: ' + e);\n"
-	  << "    if(btn) btn.disabled = false;\n"
-	  << "  });\n"
-	  << "}\n"
-	  << "</script>\n";
-	return h;
+	Renderer vars;
+	vars("owner", owner)("repo", repo)
+		("icon_alert_triangle", VividIcon::Get("alert-triangle", 18))
+		("icon_play", VividIcon::Get("play", 13))
+		("icon_plus", VividIcon::Get("plus", 14));
+	return RenderGitHubTemplate(vars, "github-operator-warning-bar");
 }
 
 String GitHubPlatformService::RenderActionsCatalog(const String& owner, const String& repo, const String& category, const String& search_q)

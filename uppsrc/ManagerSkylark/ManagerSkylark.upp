@@ -86,6 +86,7 @@ file
 	templates/github-actions-catalog.witz,
 	templates/github-actions-editor.witz,
 	templates/github-tpp-docsite.witz,
+	templates/github-operator-warning-bar.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
 	templates/github-pull-detail.witz,

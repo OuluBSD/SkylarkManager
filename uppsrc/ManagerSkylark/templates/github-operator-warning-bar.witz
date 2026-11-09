@@ -1,0 +1,45 @@
+<div class="wf-card" style="margin-bottom:1.25rem; border-left:4px solid #d29922; background:rgba(210,153,34,0.06);">
+  <div style="padding:14px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+    <div style="flex:1; min-width:280px;">
+      <div style="display:flex; align-items:center; gap:8px; font-weight:700; color:#f0883e; margin-bottom:4px;">
+        $raw(icon_alert_triangle) <span>Local build</span>
+      </div>
+      <div style="font-size:0.86rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4;">
+        Starts <code>bin/build reference/ManagerSkylark</code> from the local ai-upp checkout on this machine. It is not a GitHub Actions run. Build cache state is not read by this view.
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button id="btn-start-local-build" onclick="runLocalBuild()" class="wf-btn wf-btn-primary" style="padding:6px 14px; font-size:0.82rem; font-weight:600;">
+        $raw(icon_play) Start local build
+      </button>
+      <a href="/repo/$owner/$repo/actions/new" id="btn-new-workflow" class="wf-btn" style="padding:6px 14px; font-size:0.82rem; background:#238636; color:#ffffff; font-weight:600; text-decoration:none;">
+        $raw(icon_plus) New workflow
+      </a>
+    </div>
+  </div>
+</div>
+<script>
+function runLocalBuild() {
+  let btn = document.getElementById('btn-start-local-build');
+  if(btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span>&#9203; Starting local build...</span>';
+  }
+  fetch('/api/gh/actions/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      owner: '$owner',
+      repo: '$repo',
+    })
+  })
+  .then(r => r.json())
+  .then(d => {
+    setTimeout(() => { window.location.reload(); }, 600);
+  })
+  .catch(e => {
+    alert('Local build error: ' + e);
+    if(btn) btn.disabled = false;
+  });
+}
+</script>
