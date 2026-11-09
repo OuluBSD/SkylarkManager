@@ -87,6 +87,7 @@ void RenderUserProfile(Http& http, const String& username)
 	side("uname", uname)
 		("repo_count", repos.GetCount())
 		("icon_users", VividIcon::Get("users", 14))
+		("icon_user", VividIcon::Get("user", 64))
 		("icon_map_pin", VividIcon::Get("map-pin", 14))
 		("icon_folder", VividIcon::Get("folder", 14))
 		("icon_git_repo", VividIcon::Get("git-repo", 14));
