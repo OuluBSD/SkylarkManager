@@ -334,3 +334,50 @@ kinds (wiki-page/discussion-topic/release-file), --migrate-sf-local
 converter (originals untouched), PrivateHub broker service in ManagerSkylark.
 PrivateHub engine-site UI + fence additions + host composition deferred to
 T04 (recorded as deferral).
+
+## Brief 06A (T01 re-scope) — 2026-11-09
+
+**Step 1 done — commit 59b4a60.** PrivateHubWorkspace record kinds: wiki-page, discussion-topic (posts as `<topic>.<post>` children), release-file. Each has a schema card, envelope records with revisions, and data.provenance. Kinds documented in `uppsrc/PrivateHubWorkspace/AGENTS.md`.
+- Fixed in WebStorage: `JsonFileStore::PutOpaque` wrote the typed debug format (`StoreAsJson`), so reads quarantined every record. It now writes plain JSON with `AsJSON`. No other callers.
+- Fixed in the backend: the issue listing returned comment records as issues.
+- Gate: fence 135/135 (19 new checks). Full gate green on that run: ManagerSkylark `--test` PASSED, CompanySkylark ALL TESTS PASSED (CLANG), GCC rc 0 for ManagerSkylark, WebEngineTests, CompanySkylark.
+- Caveat: that ManagerSkylark build was incremental (objects cached). See step 2.
+
+**Step 2 — converter written, NOT committed. Blocked on the build environment.**
+- Added `PrivateHubWorkspace/PrivateHubMigration.{h,cpp}`: one-shot import of `tickets/wiki/discussion/files_store.json` into PrivateHub records. Provenance `migrated-from-legacy`, `provenance_ref` = `<store>#<key>`. Re-runs skip existing ids. Absent and corrupt stores are reported, and malformed entries are rejected, not guessed. Data root inside the legacy dir is refused. Originals are read only.
+- Added `ManagerSkylark/SfLegacyMigrationCli.{h,cpp}` (`--migrate-sf-local` handler, exit 0 clean / 1 not clean / 2 usage or refusal), `SfLegacyMigrationTests.cpp` (fixture shaped like the real stores; byte-compare of originals; idempotence; corrupt/absent; CLI exit codes; read-back through the backend), and the dispatch in `RestApi.cpp` plus the self-test call in `RestApiSelfTests.cpp`.
+- Verified: the converter and its self-test pass (`MIGRATION SELF TESTS PASSED`), run from a temporary verifier package that depended only on Core, ForgeCore, WebStorage and PrivateHubWorkspace. The verifier was deleted afterward. The `--migrate-sf-local` dispatch in `RestApi.cpp` is NOT compiled or run.
+- Blocker: a full (non-incremental) build now fails in code this step did not touch. Errors:
+  - `ManagerSkylark.h:27` — `FilterHandler` marked `override`, but the base has no such virtual.
+  - `SystemAuth.cpp:108` — `Http::GetMethod` missing.
+  - `ManagerSkylarkSetup.cpp:76` — `ManagerStore::SetRootDir` missing.
+  - `WebEngine/Request.cpp:99,118,128` and `WebEngine.cpp:113` — an `Http` call with 8 arguments where the installed API takes 7, plus `GetMethod`.
+  - No copy of these members exists under `~/Dev` (searched). The installed Skylark (`~/Dev/ai-upp/uppsrc/Skylark`, unchanged since 2026-10-17) does not define them.
+  - Consequence: the green gates recorded at 06 and at step 1 relied on cached objects. Nothing was recompiled from scratch. ManagerSkylark, the fence and CompanySkylark cannot currently be rebuilt cleanly, so the per-commit gate cannot pass. Step 2 was therefore not committed.
+- Working tree left uncommitted: the step 2 files above, the `PrivateHubWorkspace` validators made public (`ValidProjectKey`, `SafeRecordId`), `ManagerSkylark.upp` (adds `PrivateHubWorkspace` to uses and the three new files), and `PrivateHubWorkspace.upp` (adds the migration files).
+
+**Not started:** step 3 (`PrivateHubService : IBrokerService`).
+
+**Decision needed:** either restore the Skylark/Manager package versions the ManagerSkylark and WebEngine code was written against, or planner approves updating those untouched call sites to the installed API as a separate, prior commit. Only then can step 2 be gated and committed.
+
+**Deferred as recorded:** PrivateHub engine-site UI and fence additions, and engine-host composition (T04). Live sourceforge.net smoke test (manual follow-up). Git-subcommand allowlist tightening (backlog).
+
+## Planner entry — 2026-11-09 (takeover agent) — FOUNDATION COLLISION, builds paused
+
+Brief 06A step 1 (59b4a60) verified: record kinds correct, fence at 135/135
+claimed and spot-consistent. Step 2 (migration converter + tests) is written
+and looks correct but is NOT committed: a full (non-incremental) rebuild now
+fails in BazaarCore — uncommitted edits by another party in
+/home/sblo/Dev/BazaarCore remove `Http::GetMethod`,
+`SkylarkApp::FilterHandler`, `ManagerStore::SetRootDir` (API surface
+ManagerSkylark/WebEngine build on; present in committed f73fb72 via
+cdff7d6/f73fb72) and the uncommitted patches/Core.patch adds a `SchemaCard`
+to Core, colliding with WebStorage's. A pinned clone at f73fb72 does not
+build SuperIntelligence (needs the uncommitted Core/Ext deltas). The
+foundation is mid-restructure by another party and currently has no
+self-consistent buildable state for our stack.
+
+WORKER ORDERS: PAUSE. Keep the uncommitted step-2 files in the worktree, do
+not commit, do not revert anything in BazaarCore. Planner escalates to the
+user for arbitration. Last fully-verified commits: SkylarkManager 59b4a60
+(+ step-2 files uncommitted), CompanySkylark unchanged.
