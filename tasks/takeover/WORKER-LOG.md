@@ -394,3 +394,16 @@ surface and order the adaptation work: re-home SystemAuth filtering
 ManagerStore root config (SetRootDir removed), SchemaCard naming if Core
 gains one, SameSite re-add if wanted (or fence-only, documented).
 Planner watches BazaarCore on a timer.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Foundation merged (BazaarCore 3b0f04a: all four APIs + Core/Ext helpers,
+pushed to origin). Unblocked and gated: the SchemaCard collision between
+DataStore.h and WebStorage.h (first shared translation unit via 06A step-2
+tests) resolved by renaming the WebStorage types to WebSchemaCard/
+WebSchemaField (DataStore keeps the plain name; its contract is the richer
+one). Full gate green: fence 135/135, Manager PASSED (CLANG+GCC), Company
+ALL PASSED + GCC rc 0. WORKER: RESUME Brief-06A step 2 — your worktree files
+are intact (PrivateHubWorkspace.cpp carries the mechanical rename; it
+commits with your step-2 work). Commit step 2 when its gate passes, then
+step 3 per 06A.
