@@ -10,7 +10,7 @@ GitHub view code (T02 brief 09).
 |---|---|
 | `capture.sh` | Boots the binary on a temp site with fixture repos and the fake gh, logs in, fetches each route in `routes.txt` |
 | `make-fixtures.sh` | Builds deterministic git repos (`demo-repo`, `second-repo`): fixed author, dates and content |
-| `fake-gh.sh` | Stands in for `gh`; always exits 1, so live views take their "unavailable" path. No network |
+| `fake-gh.sh` | Stands in for `gh` with canned JSON for the `SeppoPakonen/demo-repo` shapes the views call (issues, pulls, comments, PR diff, runs, repo list). Other argv exits 2, which views report as unavailable. No network |
 | `routes.txt` | The route set (21 routes): tabs, sub-pages, user, raw and an API route |
 | `normalize.sh` | Normalization applied to every file before comparison |
 | `compare.sh` | Compares two capture directories after normalization |
@@ -48,8 +48,16 @@ Anything else that differs is a real change in the rendered output.
 
 ## Known limits
 
-- Live GitHub data is not exercised. `fake-gh.sh` makes every live view report
-  unavailable, so the issues, pulls, actions and workflow views are captured in
-  their unavailable state, not with live content.
+- Live data is canned. `fake-gh.sh` covers the read shapes for one repo
+  (`SeppoPakonen/demo-repo`). Write routes (create/comment/merge/close) and the
+  views that call other gh shapes (projects, security, settings, workflow
+  editor) report unavailable in the capture.
 - The route set covers the tabs and entry points but not every form submission
   or POST route.
+
+## Baseline history
+
+- Pre-brief-09 baseline, unavailable-only fake gh: `tmp/gh/baseline-unavailable`.
+- Baseline after the fake gh gained canned data (commit of this README): the
+  current `tmp/gh/baseline`. Its commits-tab routes match the pre-change output,
+  shown by the identical capture at commit 1b0f1e3.
