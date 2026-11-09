@@ -6,6 +6,10 @@ uses
 
 file
 	AGENTS.md,
+	deploy-assets.sh,
+	Assets readonly separator,
+	Assets.h,
+	Assets.cpp,
 	WebFramework.h,
 	Navigation.h,
 	Navigation.cpp,
@@ -20,4 +24,23 @@ file
 	Template.h,
 	Template.cpp,
 	PageBuilder.h,
-	PageBuilder.cpp;
+	PageBuilder.cpp,
+
+	Styles readonly separator,
+	assets/base-components.css,
+	assets/density.css,
+	assets/megamenu.css,
+	assets/template-appworkspace.css,
+	assets/template-dashboard.css,
+	assets/template-github.css,
+	assets/template-megamenu.css,
+	assets/template-sidebar.css,
+	assets/template-sourceforge.css,
+	assets/tree.css,
+
+	Scripts readonly separator,
+	assets/audio.js,
+	assets/density.js,
+	assets/megamenu.js,
+	assets/theme.js,
+	assets/tree.js;

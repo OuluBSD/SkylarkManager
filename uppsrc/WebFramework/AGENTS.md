@@ -30,3 +30,13 @@
 | `Icons.h` / `Icons.cpp` | `VividIconRegistry` providing theme-integrated SVG vector icons |
 | `Audio.h` / `Audio.cpp` | `WebAudioSystem` generating procedural UI sound feedback |
 | `PageBuilder.h` / `PageBuilder.cpp` | Unified page assembly pipeline uniting template, theme, navigation, and splash loader |
+| `Assets.h` / `Assets.cpp` | `WebFrameworkAsset(name)`: loads a built-in CSS or JS asset from `static/WebFramework/` next to the executable |
+| `assets/*.css`, `assets/*.js` | Inline CSS and JS for the style and script providers. Listed in `WebFramework.upp` under `Styles` and `Scripts` |
+| `deploy-assets.sh` | Copies `assets/` into `<bin_dir>/static/WebFramework/`. Run it for each binary that renders WebFramework pages, before it renders |
+
+## Assets
+
+- Style and script providers (`GetStyles`, `GetClientScript`) return `WebFrameworkAsset("<file>")`. The HTML emitted by `PageBuilder::Build` is byte-identical to the former inline literals.
+- Assets are read from `GetExeDirFile("static/WebFramework/")`. That is the real directory of the executable, so run `deploy-assets.sh` with the directory that holds the binary, not a `bin/<name>` symlink.
+- A missing asset throws `Exc`. A page without its CSS or JS is a defect, so it is not rendered.
+- Assets are cached after the first read. Edit `assets/` and redeploy; a running process keeps its cache.

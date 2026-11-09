@@ -1,0 +1,4 @@
+  .wf-template-dashboard { min-height: 100vh; display: flex; flex-direction: column; background: var(--wf-bg-normal, #182030); color: var(--wf-fg-normal, #d3dae3); }
+  .wf-dashboard-container { flex: 1; display: flex; overflow: hidden; }
+  .wf-dashboard-sidebar { width: 260px; background: var(--wf-bg-view, #151d2b); border-right: 1px solid var(--wf-border-color, rgba(0,161,197,0.2)); padding: var(--wf-pad-page, 1.25rem); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .wf-dashboard-main { flex: 1; padding: var(--wf-pad-page, 1.5rem 2rem); overflow-y: auto; display: flex; flex-direction: column; gap: var(--wf-gap-grid, 16px); }

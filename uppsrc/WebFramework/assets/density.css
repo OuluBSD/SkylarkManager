@@ -1,0 +1,56 @@
+/* Density Engine CSS Selectors */
+:root, html[data-density="comfortable"] {
+  --wf-container-width: 1440px;
+  --wf-pad-page: 1.25rem 1.75rem;
+  --wf-pad-card: 16px 20px;
+  --wf-gap-grid: 16px;
+  --wf-dock-width: 320px;
+  --wf-dock-width-left: 370px;
+  --wf-dock-width-right: 260px;
+  --wf-cell-pad: 10px 14px;
+  --wf-btn-pad: 7px 14px;
+}
+html[data-density="spacious"] {
+  --wf-container-width: 1560px;
+  --wf-pad-page: 2rem 2.5rem;
+  --wf-pad-card: 22px 28px;
+  --wf-gap-grid: 20px;
+  --wf-dock-width: 340px;
+  --wf-dock-width-left: 390px;
+  --wf-dock-width-right: 280px;
+  --wf-cell-pad: 14px 18px;
+  --wf-btn-pad: 10px 20px;
+}
+html[data-density="compact"] {
+  --wf-container-width: 1600px;
+  --wf-pad-page: 0.75rem 1rem;
+  --wf-pad-card: 10px 14px;
+  --wf-gap-grid: 10px;
+  --wf-dock-width: 300px;
+  --wf-dock-width-left: 350px;
+  --wf-dock-width-right: 240px;
+  --wf-cell-pad: 6px 10px;
+  --wf-btn-pad: 5px 10px;
+}
+html[data-density="dense"] {
+  --wf-container-width: 100%;
+  --wf-pad-page: 0.35rem 0.5rem;
+  --wf-pad-card: 6px 8px;
+  --wf-gap-grid: 6px;
+  --wf-dock-width: 260px;
+  --wf-dock-width-left: 310px;
+  --wf-dock-width-right: 220px;
+  --wf-cell-pad: 4px 6px;
+  --wf-btn-pad: 3px 7px;
+}
+html[data-density="none"] {
+  --wf-container-width: 100%;
+  --wf-pad-page: 0px;
+  --wf-pad-card: 2px 4px;
+  --wf-gap-grid: 2px;
+  --wf-dock-width: 220px;
+  --wf-dock-width-left: 260px;
+  --wf-dock-width-right: 200px;
+  --wf-cell-pad: 2px 4px;
+  --wf-btn-pad: 2px 4px;
+}

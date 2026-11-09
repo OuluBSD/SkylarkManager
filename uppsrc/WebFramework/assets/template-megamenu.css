@@ -1,0 +1,4 @@
+  .wf-template-megamenu { min-height: 100vh; display: flex; flex-direction: column; background: var(--wf-bg-normal, #182030); color: var(--wf-fg-normal, #d3dae3); }
+  .wf-template-megamenu .wf-page-body { flex: 1; width: 100%; max-width: var(--wf-container-width, 1360px); margin: 0 auto; padding: var(--wf-pad-page, 1.5rem 2rem); display: flex; flex-direction: column; gap: var(--wf-gap-grid, 16px); }
+  .wf-template-megamenu .wf-subnav { padding: 8px 0; border-bottom: 1px solid var(--wf-border-color, rgba(0,161,197,0.2)); margin-bottom: 12px; }
+  .wf-template-megamenu .wf-footer { padding: 1.5rem 2rem; border-top: 1px solid var(--wf-border-color, rgba(255,255,255,0.08)); background: var(--wf-bg-alt, #1c202f); font-size: 0.85rem; color: var(--wf-fg-inactive, #8b919d); text-align: center; }

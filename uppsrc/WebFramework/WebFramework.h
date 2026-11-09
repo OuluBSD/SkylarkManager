@@ -6,6 +6,7 @@
 
 NAMESPACE_UPP
 
+#include "Assets.h"
 #include "Icons.h"
 #include "Audio.h"
 #include "Navigation.h"

@@ -1,0 +1,32 @@
+  .wf-template-sf { min-height: 100vh; display: flex; flex-direction: column; background: var(--wf-bg-normal, #1a1d21); color: var(--wf-fg-normal, #e6e8eb); font-family: Helvetica Neue, Helvetica, Arial, sans-serif; }
+  .wf-sf-topbar { background: var(--wf-header-bg, #121417); border-bottom: 1px solid var(--wf-header-border, #2e333a); padding: 10px 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; font-size: 0.86rem; }
+  .wf-sf-topbar a { color: var(--wf-header-fg, #ffffff); text-decoration: none; font-weight: 500; }
+  .wf-sf-topbar a:hover { color: var(--wf-accent-focus, #ee6524); }
+  .wf-sf-masthead { background: var(--wf-bg-alt, #22262b); border-bottom: 1px solid var(--wf-border-color, #393e46); padding: 20px var(--wf-pad-page, 2rem) 0; }
+  .wf-sf-masthead-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px; margin-bottom: 20px; }
+  .wf-sf-hero-left { display: flex; align-items: center; gap: 16px; }
+  .wf-sf-logo-box { width: 64px; height: 64px; border-radius: 6px; background: linear-gradient(135deg, #ee6524, #d85416); display: flex; align-items: center; justify-content: center; color: #ffffff; font-size: 1.8rem; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  .wf-sf-hero-title h1 { margin: 0; font-size: 1.6rem; font-weight: 700; color: var(--wf-fg-normal, #ffffff); }
+  .wf-sf-hero-title .wf-sf-by { font-size: 0.85rem; color: var(--wf-fg-inactive, #8c929a); margin-top: 4px; }
+  .wf-sf-hero-title .wf-sf-by a { color: var(--wf-accent-focus, #ee6524); text-decoration: none; font-weight: 600; }
+  .wf-sf-hero-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .wf-sf-btn-download { background: #ee6524; color: #ffffff; padding: 12px 24px; border-radius: 4px; font-size: 1rem; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 10px; box-shadow: 0 4px 12px rgba(238,101,36,0.35); transition: background 0.15s, transform 0.1s; }
+  .wf-sf-btn-download:hover { background: #d85416; color: #ffffff; transform: translateY(-1px); }
+  .wf-sf-stats-row { font-size: 0.78rem; color: var(--wf-fg-inactive, #8c929a); }
+  .wf-sf-tabs { display: flex; gap: 2px; overflow-x: auto; margin-bottom: -1px; }
+  .wf-sf-tab { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; font-size: 0.88rem; font-weight: 600; color: var(--wf-fg-inactive, #8c929a); text-decoration: none; border-bottom: 3px solid transparent; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .wf-sf-tab:hover { color: var(--wf-fg-normal, #ffffff); border-bottom-color: var(--wf-border-color, #393e46); }
+  .wf-sf-tab.active { color: var(--wf-accent-focus, #ee6524); border-bottom-color: #ee6524; }
+  .wf-sf-container { flex: 1; width: 100%; max-width: var(--wf-container-width, 1360px); margin: 0 auto; padding: var(--wf-pad-page, 1.5rem 2rem); }
+  .wf-sf-grid { display: grid; grid-template-columns: 1fr 310px; gap: 24px; }
+  .wf-sf-full { width: 100%; }
+  .wf-sf-sidebar { display: flex; flex-direction: column; gap: 20px; font-size: 0.88rem; }
+  .wf-sf-sidebar-card { background: var(--wf-surface, #272b30); border: 1px solid var(--wf-border-color, #393e46); border-radius: 4px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .wf-sf-sidebar-title { font-size: 0.95rem; font-weight: 700; color: var(--wf-fg-normal, #ffffff); border-bottom: 1px solid var(--wf-border-color, #393e46); padding-bottom: 8px; }
+  .wf-sf-footer { border-top: 1px solid var(--wf-border-color, #393e46); background: var(--wf-bg-alt, #22262b); padding: 36px 2rem; margin-top: auto; font-size: 0.8rem; color: var(--wf-fg-inactive, #8c929a); display: flex; flex-direction: column; gap: 12px; align-items: center; text-align: center; }
+  .wf-sf-footer-links { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .wf-sf-footer a { color: var(--wf-accent-focus, #ee6524); text-decoration: none; }
+  .wf-sf-footer a:hover { text-decoration: underline; }
+  @media (max-width: 992px) {
+    .wf-sf-grid { grid-template-columns: 1fr; }
+  }
