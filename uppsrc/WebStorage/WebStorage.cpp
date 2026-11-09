@@ -313,7 +313,7 @@ StoreResult JsonFileStore::Put(const String& id, const String& json,
 		env.provenance_ref = provenance_ref;
 
 		if(schema_id.GetCount()) {
-			SchemaCard card;
+			WebSchemaCard card;
 			if(SchemaRegistry::Find(schema_id, card)) {
 				String err;
 				if(!SchemaRegistry::Validate(card, data, err))
@@ -476,15 +476,15 @@ StoreResult MemoryStore::List(Vector<String>& ids)
 // SchemaRegistry
 // ---------------------------------------------------------------------------
 
-Vector<SchemaCard>& SchemaRegistry::Cards()
+Vector<WebSchemaCard>& SchemaRegistry::Cards()
 {
-	static Vector<SchemaCard> x;
+	static Vector<WebSchemaCard> x;
 	return x;
 }
 
-void SchemaRegistry::Register(const SchemaCard& card)
+void SchemaRegistry::Register(const WebSchemaCard& card)
 {
-	Vector<SchemaCard>& cards = Cards();
+	Vector<WebSchemaCard>& cards = Cards();
 	for(int i = 0; i < cards.GetCount(); i++)
 		if(cards[i].schema_id == card.schema_id) {
 			cards[i] = card;
@@ -493,9 +493,9 @@ void SchemaRegistry::Register(const SchemaCard& card)
 	cards.Add(card);
 }
 
-bool SchemaRegistry::Find(const String& schema_id, SchemaCard& out)
+bool SchemaRegistry::Find(const String& schema_id, WebSchemaCard& out)
 {
-	Vector<SchemaCard>& cards = Cards();
+	Vector<WebSchemaCard>& cards = Cards();
 	for(int i = 0; i < cards.GetCount(); i++)
 		if(cards[i].schema_id == schema_id) {
 			out = cards[i];
@@ -504,9 +504,9 @@ bool SchemaRegistry::Find(const String& schema_id, SchemaCard& out)
 	return false;
 }
 
-bool SchemaRegistry::Validate(const SchemaCard& card, const ValueMap& doc, String& error)
+bool SchemaRegistry::Validate(const WebSchemaCard& card, const ValueMap& doc, String& error)
 {
-	for(const SchemaField& f : card.fields) {
+	for(const WebSchemaField& f : card.fields) {
 		int q = doc.Find(f.name);
 		bool present = q >= 0 && !doc.GetValue(q).IsNull();
 		if(f.required && !present) {
@@ -567,7 +567,7 @@ bool SchemaRegistry::Validate(const SchemaCard& card, const ValueMap& doc, Strin
 
 bool SchemaRegistry::Validate(const String& schema_id, const ValueMap& doc, String& error)
 {
-	SchemaCard card;
+	WebSchemaCard card;
 	if(!Find(schema_id, card)) {
 		error = "unknown schema '" + schema_id + "'";
 		return false;

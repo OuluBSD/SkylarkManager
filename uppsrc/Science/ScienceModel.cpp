@@ -14,12 +14,12 @@ void ScienceArticleTree::Jsonize(JsonIO& io)
 	io("paper_id", paper_id)("title", title)("nodes", nodes);
 }
 
-static SchemaCard ArticleTreeSchema()
+static WebSchemaCard ArticleTreeSchema()
 {
-	SchemaCard card;
+	WebSchemaCard card;
 	card.schema_id = "science/article-tree";
 	card.version = "1";
-	SchemaField f;
+	WebSchemaField f;
 	f.name = "paper_id"; f.type = "string"; f.required = true; f.max_len = 200; card.fields.Add(f);
 	f.name = "title"; f.type = "string"; f.required = true; f.max_len = 500; card.fields.Add(f);
 	f.name = "nodes"; f.type = "array"; f.required = true; card.fields.Add(f);

@@ -144,18 +144,18 @@ private:
 // ---------------------------------------------------------------------------
 // SchemaRegistry: optional per-schema validation of record documents.
 // ---------------------------------------------------------------------------
-struct SchemaField : Moveable<SchemaField> {
+struct WebSchemaField : Moveable<WebSchemaField> {
 	String        name;
 	String        type; // "string","int","bool","double","array","object","any"
 	bool          required = false;
 	int           max_len = 0; // 0 = unlimited
 	Vector<String> enum_values;
 
-	SchemaField() {}
-	SchemaField(const SchemaField& o)
+	WebSchemaField() {}
+	WebSchemaField(const WebSchemaField& o)
 		: name(o.name), type(o.type), required(o.required), max_len(o.max_len)
 		, enum_values(clone(o.enum_values)) {}
-	SchemaField& operator=(const SchemaField& o) {
+	WebSchemaField& operator=(const WebSchemaField& o) {
 		if(this != &o) {
 			name = o.name;
 			type = o.type;
@@ -167,15 +167,15 @@ struct SchemaField : Moveable<SchemaField> {
 	}
 };
 
-struct SchemaCard : Moveable<SchemaCard> {
+struct WebSchemaCard : Moveable<WebSchemaCard> {
 	String schema_id;
 	String version;
-	Vector<SchemaField> fields;
+	Vector<WebSchemaField> fields;
 
-	SchemaCard() {}
-	SchemaCard(const SchemaCard& o)
+	WebSchemaCard() {}
+	WebSchemaCard(const WebSchemaCard& o)
 		: schema_id(o.schema_id), version(o.version), fields(clone(o.fields)) {}
-	SchemaCard& operator=(const SchemaCard& o) {
+	WebSchemaCard& operator=(const WebSchemaCard& o) {
 		if(this != &o) {
 			schema_id = o.schema_id;
 			version = o.version;
@@ -187,13 +187,13 @@ struct SchemaCard : Moveable<SchemaCard> {
 
 class SchemaRegistry {
 public:
-	static void  Register(const SchemaCard& card);
-	static bool  Find(const String& schema_id, SchemaCard& out);
-	static bool  Validate(const SchemaCard& card, const ValueMap& doc, String& error);
+	static void  Register(const WebSchemaCard& card);
+	static bool  Find(const String& schema_id, WebSchemaCard& out);
+	static bool  Validate(const WebSchemaCard& card, const ValueMap& doc, String& error);
 	static bool  Validate(const String& schema_id, const ValueMap& doc, String& error);
 
 private:
-	static Vector<SchemaCard>& Cards();
+	static Vector<WebSchemaCard>& Cards();
 };
 
 // Resolves (site, collection) to a store instance; instances are per-site and
