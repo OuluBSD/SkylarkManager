@@ -768,3 +768,13 @@ row works inside $for.
 
 Not covered by this brief: the WebAuth/left-sidebar plan that was in a
 prior-session plan file. It is a separate body of work, not started.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+**T02 COMPLETE.** Brief 09B accepted. Planner re-verified: 12 tab-conversion
+commits + docs/log; 0 inline HTML tags in GitHubRepoTabs/WorkflowViews/
+UserView/Actions; 30 templates; fence 156/156; Manager PASSED (CLANG+GCC);
+Company ALL PASSED (CLANG) + GCC rc 0; tree clean at 555c11a. The three
+recorded T02 gaps (editor owner/repo escaping, marketplace Insert onclick,
+TPP topic-loop fixture coverage) become Brief 10 step 1. Next:
+WORKER-BRIEF-10.md (T02 gap fixes + T03 Science authoring wiring).
