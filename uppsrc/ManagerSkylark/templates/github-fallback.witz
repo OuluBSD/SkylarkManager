@@ -1,0 +1,6 @@
+<div class="wf-card">
+  <div class="wf-card-header"><span>$tab_title &middot; $owner/$repo</span></div>
+  <div class="wf-card-body">
+    <div class="wf-alert wf-alert-info">Displaying $active_tab platform view for $repo_path This tab has no dedicated view yet.</div>
+  </div>
+</div>

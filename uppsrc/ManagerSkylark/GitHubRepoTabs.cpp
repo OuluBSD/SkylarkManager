@@ -183,21 +183,19 @@ void RenderRepoAgentsTab(Http& http, GitHubRepoPage& page)
 	content << AgentPlatformService::RenderRunsDashboard(owner, repo, author_filter, status_filter, agent_run_id);
 }
 
-// Fallback for tabs without a dedicated view.
+// Fallback for tabs without a dedicated view. The tab name comes from the URL,
+// so the template escapes it. The markup is templates/github-fallback.witz.
 void RenderRepoFallbackTab(GitHubRepoPage& page)
 {
-	const String& owner = page.owner;
-	const String& repo = page.repo;
 	const String& active_tab = page.active_tab;
-	String& content = page.content;
 
-	content
-		<< "<div class=\"wf-card\">\n"
-		<< "  <div class=\"wf-card-header\"><span>" << ToUpper(active_tab.Left(1)) << active_tab.Mid(1) << " &middot; " << owner << "/" << repo << "</span></div>\n"
-		<< "  <div class=\"wf-card-body\">\n"
-		<< "    <div class=\"wf-alert wf-alert-info\">Displaying " << active_tab << " platform view for " << owner << "/" << repo << ". This tab has no dedicated view yet.</div>\n"
-		<< "  </div>\n"
-		<< "</div>\n";
+	Renderer vars;
+	vars("tab_title", ToUpper(active_tab.Left(1)) + active_tab.Mid(1))
+		("owner", page.owner)
+		("repo", page.repo)
+		("active_tab", active_tab)
+		("repo_path", page.owner + "/" + page.repo + ".");
+	page.content << RenderGitHubTemplate(vars, "github-fallback");
 }
 
 END_UPP_NAMESPACE

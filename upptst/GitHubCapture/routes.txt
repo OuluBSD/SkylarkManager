@@ -27,3 +27,4 @@
 /repo/SeppoPakonen/demo-repo/pulls/2
 /repo/SeppoPakonen/demo-repo/tree/master/src
 /repo/SeppoPakonen/demo-repo/blob/master/src/main.cpp
+/repo/SeppoPakonen/demo-repo?tab=wiki
