@@ -1,0 +1,6 @@
+<div class="wf-card">
+  <div class="wf-card-header"><span>GitHub Projects &amp; Kanban Boards</span></div>
+  <div class="wf-card-body">
+    <div class="wf-alert wf-alert-info">Projects are not loaded by this view. No project boards are shown.</div>
+  </div>
+</div>

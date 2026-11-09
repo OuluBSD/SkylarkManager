@@ -1,0 +1,14 @@
+<div class="wf-card">
+  <div class="wf-card-header"><span>Ultimate++ Package Ecosystem</span><span class="wf-badge wf-badge-cyan">uppsrc</span></div>
+  <div class="wf-card-body">
+    <p style="color:var(--wf-fg-inactive,#7d8590); margin-bottom:1rem;">Modular U++ assemblies, standard library packages, GUI controls, and network servers.</p>
+    <div class="wf-grid wf-grid-3">
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>Core</strong><br><small style="color:#8b919d;">Foundational runtime, containers, NTL</small></div>
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>Skylark</strong><br><small style="color:#8b919d;">High performance HTTP/REST server</small></div>
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>WebFramework</strong><br><small style="color:#8b919d;">Multi-theme mega-menu &amp; density engine</small></div>
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>SweAgent</strong><br><small style="color:#8b919d;">OpenRouter autonomous coding agent</small></div>
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>WebChat</strong><br><small style="color:#8b919d;">Interactive streaming pair terminal</small></div>
+      <div style="padding:10px; background:var(--wf-bg-view,#0d1117); border-radius:6px; border:1px solid var(--wf-border-color,#30363d);"><strong>Aria</strong><br><small style="color:#8b919d;">Autonomous browser scraping &amp; test harness</small></div>
+    </div>
+  </div>
+</div>

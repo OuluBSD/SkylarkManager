@@ -1,0 +1,19 @@
+<div class="wf-gh-sidebar">
+  <div style="display:flex; flex-direction:column; align-items:center; text-align:center;">
+    <img src="https://avatars.githubusercontent.com/u/9528528?v=4" alt="Seppo Pakonen" style="width:140px; height:140px; border-radius:50%; border:2px solid var(--wf-border-color,#30363d); margin-bottom:16px; object-fit:cover;">
+    <h2 style="font-size:1.3rem; margin:0;">Seppo Pakonen</h2>
+    <span style="color:var(--wf-fg-inactive,#7d8590); font-size:0.95rem;">@$uname</span>
+  </div>
+  <p style="font-size:0.9rem; line-height:1.4;">Software Engineer &amp; AI Architect. Creator of Ultimate++, Agentic frameworks and systems.</p>
+  <div style="display:flex; gap:12px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:14px; justify-content:center;">
+    <span>$raw(icon_users) <strong>12</strong> followers</span>
+    <span>&middot;</span>
+    <span><strong>12</strong> following</span>
+  </div>
+  <div class="wf-gh-sidebar-section">
+    <span class="wf-gh-sidebar-title">Details</span>
+    <div>$raw(icon_map_pin) Oulu, Finland</div>
+    <div>$raw(icon_folder) ~/Dev/ ($repo_count repos)</div>
+    <div>$raw(icon_git_repo) $repo_count GitHub Repos</div>
+  </div>
+</div>

@@ -1,0 +1,11 @@
+<div class="wf-gh-repohead">
+  <div class="wf-gh-main-container" style="padding-bottom:0;">
+    <nav class="wf-gh-nav-tabs">
+      <a href="/repo/$uname?tab=overview" class="wf-gh-tab$overview_active">$raw(icon_book_open) Overview</a>
+      <a href="/repo/$uname?tab=repositories" class="wf-gh-tab$repositories_active">$raw(icon_git_repo) Repositories <span class="wf-gh-counter">$repo_count</span></a>
+      <a href="/repo/$uname?tab=projects" class="wf-gh-tab$projects_active">$raw(icon_layout_dashboard) Projects</a>
+      <a href="/repo/$uname?tab=packages" class="wf-gh-tab$packages_active">$raw(icon_package) Packages</a>
+      <a href="/repo/$uname?tab=agents" class="wf-gh-tab$agents_active" style="color:var(--wf-color-positive, #00aa7f);">$raw(icon_robot) SweAgent Workspace</a>
+    </nav>
+  </div>
+</div>

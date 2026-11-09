@@ -1,0 +1,8 @@
+<h2>SweAgent Pair Programmer Workspace</h2>
+<div class="wf-card">
+  <div class="wf-card-header"><span>SweAgent Integrated Hub</span><span class="wf-badge wf-badge-emerald">Live</span></div>
+  <div class="wf-card-body">
+    <p style="margin-bottom:1rem;">Launch pair-programming agent sessions directly for any repository in <code>~/Dev/</code>.</p>
+    <a href="/chat" class="wf-btn wf-btn-primary">Open Live WebChat</a>
+  </div>
+</div>

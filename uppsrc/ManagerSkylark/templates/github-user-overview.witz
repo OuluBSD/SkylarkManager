@@ -1,0 +1,27 @@
+<div style="margin-bottom:1.5rem;">
+  <h3 style="font-size:1rem; font-weight:600; margin-bottom:12px;">Pinned Repositories</h3>
+  <div class="wf-grid wf-grid-2" style="gap:16px;">
+$for(r in pinned)    <div class="wf-card" style="margin-bottom:0;">
+      <div class="wf-card-header">
+        <a href="/repo/$uname/$r.name" style="font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;">$raw(r.icon) $r.name</a>
+        <span class="wf-gh-badge">$r.visibility</span>
+      </div>
+      <div class="wf-card-body" style="font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590);">
+        <p>$r.description</p>
+      </div>
+      <div class="wf-card-footer" style="font-size:0.78rem;">
+        <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;"></span> $r.language</span>
+        <div style="display:flex; gap:6px;">
+          <a href="/repo/$uname/$r.name" class="wf-btn wf-btn-secondary" style="padding:2px 8px; font-size:0.75rem;">GitHub</a>
+          <a href="/projects/$r.name/" class="wf-btn" style="padding:2px 8px; font-size:0.75rem; background:#ee6524; color:#fff; border-color:#ee6524;">SourceForge</a>
+        </div>
+      </div>
+    </div>
+$endfor  </div>
+</div>
+<div class="wf-card">
+  <div class="wf-card-header"><span>Contribution activity</span></div>
+  <div class="wf-card-body">
+    <div class="wf-alert wf-alert-info">Contribution activity is not loaded by this view.</div>
+  </div>
+</div>

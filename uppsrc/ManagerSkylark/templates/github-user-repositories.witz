@@ -1,0 +1,25 @@
+<div style="margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center;">
+  <input type="search" placeholder="Find a repository..." style="background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.88rem;">
+  <span style="font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590);">$repo_count results</span>
+</div>
+<div class="wf-gh-file-box">
+$for(r in repos)  <div class="wf-gh-file-row" style="justify-content:space-between; padding:14px 16px;">
+    <div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <a href="/repo/$uname/$r.name" style="font-size:1.1rem; font-weight:600; color:var(--wf-accent-focus,#58a6ff); text-decoration:none;">$r.name</a>
+        <span class="wf-gh-badge">$r.visibility</span>
+$if(r.has_stars)        <span style="font-size:0.8rem; color:#e3b341;">★ $r.stars</span>
+$endif$if(r.has_forks)        <span style="font-size:0.8rem; color:#8b949e;">⑂ $r.forks</span>
+$endif      </div>
+      <p style="font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;">$r.description</p>
+      <div style="display:flex; align-items:center; gap:16px; margin-top:8px; font-size:0.78rem; color:var(--wf-fg-muted,#848d97);">
+        <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f34b7d; margin-right:4px;"></span> $r.language</span>
+        <span>Updated: $r.updated</span>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="/repo/$uname/$r.name" class="wf-btn wf-btn-secondary" style="padding:4px 10px; font-size:0.8rem;">GitHub</a>
+      <a href="/projects/$r.name/" class="wf-btn" style="padding:4px 10px; font-size:0.8rem; background:#ee6524; color:#ffffff; border-color:#ee6524; text-decoration:none;">SourceForge</a>
+    </div>
+  </div>
+$endfor</div>
