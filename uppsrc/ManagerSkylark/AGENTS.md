@@ -47,23 +47,40 @@
 
 ## GitHub views and witz templates
 
-The GitHub repo tabs are moving from inline HTML to witz templates in
-`templates/` (T02 brief 09). Interim state:
+The GitHub repo views render from witz templates in `templates/` (T02 brief 09
+and 09B). Interim state:
 
 - Templates render through the app's default template root, which is the
   executable's directory. `deploy-templates.sh <bin_dir>` copies `templates/*.witz`
   there. Run it before a binary renders GitHub pages.
 - `GitHubTemplates.cpp` is the string bridge. `RenderGitHubTemplate` returns the
   rendered text with `\n` line ends (witz produces `\r\n`), and throws if the
-  template does not compile.
-- Witz escapes values by default. A value that the old literal code wrote raw is
-  now escaped. For the captured fixtures the output is the same.
+  template does not compile. `GitHubJsEscape` escapes values for single-quoted
+  JavaScript literals inside `<script>` blocks.
+- Witz escapes values by default. Values the old literal code wrote raw are now
+  escaped, which is identical for the captured fixtures.
+- Documented raw slots (`$raw(...)`). Only these, never user data unescaped:
+  - icons from `VividIcon::Get`, pre-rendered in the data model (static set);
+  - JavaScript literals from `GitHubJsEscape` inside `<script>` blocks;
+  - error text from `GitHubPlatformService::EscapeHtml`, which keeps newlines
+    the way the old code did.
+- Template authoring rules found while converting (witz 1.x in this tree):
+  - a directive that stands alone on its line emits its line terminator. Join
+    `$endif`, `$else`, `$endfor` to the next content line, or end the last
+    content line with `$endif`;
+  - a `$variable` directly before `$else`, `$endif`, `$` or `.` does not
+    evaluate as expected. Put text or a newline after the variable, or use
+    sibling `$for` loops, as the pulls body placeholder does;
+  - a template ending in a bare `$endif` with no newline adds a blank line.
 - The site-scoped template root (engine composition) comes with T04. Until then
   these templates are not served by a WebEngine site.
-- Converted so far: the commits tab (`RenderRepoCommitsTab`). The other tabs
-  still build HTML in their TUs.
+- Converted: the commits tab, issues (list and detail), pulls (list and detail),
+  and code (branch bar, blob, tree, README, sidebar). Not yet converted: user
+  view, workflow views and catalog, actions, projects, security, settings,
+  agents.
 - Capture check: `upptst/GitHubCapture/` (see its README) before and after each
-  change.
+  change. Tests that call a view in process need the app's template root and
+  cannot render templates; route-level checks belong in the capture harness.
 
 ## Verification
 

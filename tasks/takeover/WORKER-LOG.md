@@ -669,3 +669,50 @@ user data); pre-availability elements via $if guards. Remaining tabs ordered
 (issues first, then pulls/code/user/workflow/actions/projects/security/
 settings/agents). Witz findings recorded for UppSkillz. Next:
 WORKER-BRIEF-09B.md (continuation; completes Brief 09).
+
+## Worker entry — Brief 09B (completes Brief 09 step 4, takeover agent)
+
+Decisions applied (from WORKER-BRIEF-09B.md): JS-string values escaped
+server-side by `GitHubJsEscape` and emitted with `$raw(...)`; icons pre-rendered
+and emitted with `$raw(...)`; elements emitted before an availability check are
+`$if` guards in the template. No witz filter added, no engine change.
+
+Commits (each gate: fence 156/156, ManagerSkylark PASSED, CompanySkylark ALL
+PASSED under CLANG, GCC rc 0 for all three targets, GitHub capture compare):
+
+- 7163dd5 — issues (list and detail). Captures IDENTICAL, 46 files. Adds two
+  unavailable-branch routes; baseline captured on the pre-change code.
+- d31e20b — pulls (list and detail). Captures IDENTICAL, 54 files. Adds
+  routes for unavailable, empty-body, merged and no-diff branches; fake gh
+  serves an issue and a merged PR with an empty body and an empty diff.
+  GitHubAdapterTests no longer renders the pulls views in process (templates
+  need the running app's template root; the first gate run aborted at
+  App.cpp ASSERT(app) in that test). The data-level unavailable check stays.
+  Coverage change: the render-level unavailable check moved from `--test` to
+  the capture harness. Flagged for the planner.
+- a097812 — code (branch bar, blob, tree, README, sidebar). Captures IDENTICAL,
+  58 files. Adds subfolder-tree and non-markdown blob routes. Removes an unused
+  GetBranches call. Documented change: code lines, description and language are
+  escaped by witz (old code wrote the description and language raw).
+
+Per-tab capture status:
+- commits: done (1b0f1e3), identical.
+- issues: done (7163dd5), identical.
+- pulls: done (d31e20b), identical.
+- code: done (a097812), identical.
+- user (GitHubUserView.cpp, 192 lines): NOT STARTED. Pinned repos loop, five
+  tab bodies, static packages list, sidebar with a hardcoded avatar URL.
+- workflow views (GitHubWorkflowViews.cpp, 521 lines): NOT STARTED. QTF to HTML,
+  TPP doc extraction, actions catalog, workflow editor, operator warning bar.
+- actions (GitHubActions.cpp, 750 lines; HTML in it not yet counted): NOT STARTED.
+- projects, security, settings, agents: NOT STARTED. Source locations not yet
+  mapped (agents tab body is in GitHubUserView.cpp's dispatch and RepoView).
+
+Definition of done is NOT met: user, workflow views, actions, projects,
+security, settings and agents still build HTML in their TUs. Stopped after the
+code tab with the remaining tabs listed above.
+
+Witz findings added this brief: a directive alone on its line emits its line
+terminator; `$var` directly before `$else`, `$endif`, `$` or `.` does not
+evaluate as expected; a template ending in a bare `$endif` adds a blank line.
+These are recorded in ManagerSkylark AGENTS.md for UppSkillz.
