@@ -818,3 +818,22 @@ Open for the planner:
 - The HTTP authoring page has no template; it uses inline HTML and a fetch
   script. Witz form work is not part of this brief.
 - Writes to the real corpus are not exercised by any test. The smoke is read-only.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+**T03 COMPLETE.** Brief 10 accepted. Planner re-verified: the three T02 gap
+fixes (GitHubJsEscape in the editor data model; marketplace Insert via
+data-snippet + dataset onclick; TPP topic fixtures in make-fixtures.sh);
+authoring endpoint deny-by-default (science-author role or science.author
+grant); ScienceService with scope checks; real-corpus smoke (190 papers,
+checksum-proven read-only); fence 177/177; Manager PASSED (CLANG+GCC);
+Company ALL PASSED (CLANG) + GCC rc 0; tree clean at 3b3c14d.
+
+DECISION (worker's question): bearer-style grant IDs are ACCEPTABLE
+INTERIM for the single-process fence-protected engine, but T04 MUST add
+caller binding (a grant is usable only by its subject's authenticated
+session, or per-caller tokens) before any cross-site consumption.
+Authoring page inline HTML: acceptable interim; witz form folds into T04's
+Science UI work. Real-corpus writes stay untested (fixtures only).
+Next: WORKER-BRIEF-11A.md (engine-host composition into ManagerSkylark +
+PrivateHub UI).
