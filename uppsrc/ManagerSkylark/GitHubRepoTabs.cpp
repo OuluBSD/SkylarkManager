@@ -88,11 +88,12 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 	}
 }
 
-// Projects tab: Kanban view of the matching Manager project tasks.
+// Projects tab: Kanban view of the matching Manager project tasks. Each column
+// shows its first five cards; the header counts are the full column sizes.
+// The markup is templates/github-projects.witz.
 void RenderRepoProjectsTab(GitHubRepoPage& page)
 {
 	const String& repo = page.repo;
-	String& content = page.content;
 
 	ManagerStore& local = ManagerSkylarkApp::Get().GetLocalStore();
 	String proj_slug = local.ResolveProjectSlug(repo);
@@ -125,58 +126,28 @@ void RenderRepoProjectsTab(GitHubRepoPage& page)
 	Sort(in_progress_tasks, [](const ValueMap& a, const ValueMap& b) { return (int)a["seq"] < (int)b["seq"]; });
 	Sort(done_tasks, [](const ValueMap& a, const ValueMap& b) { return (int)a["seq"] > (int)b["seq"]; });
 
-	content
-		<< "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;\">\n"
-		<< "  <h3>Manager Project Board &middot; " << repo << "</h3>\n"
-		<< "  <a href=\"/projects\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem;\">View All in Manager</a>\n"
-		<< "</div>\n"
-		<< "<div style=\"display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;\">\n"
-		// Column 1: Todo
-		<< "  <div class=\"wf-card\" style=\"margin:0;\">\n"
-		<< "    <div class=\"wf-card-header\"><span>Todo</span><span class=\"wf-badge wf-badge-neutral\">" << todo_tasks.GetCount() << "</span></div>\n"
-		<< "    <div class=\"wf-card-body\" style=\"display:flex; flex-direction:column; gap:10px;\">\n";
-	for(int i = 0; i < min(todo_tasks.GetCount(), 5); i++) {
-		const ValueMap& t = todo_tasks[i];
-		content
-			<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-			<< "        <div style=\"font-weight:600;\">" << (String)t["title"] << "</div>\n"
-			<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
-			<< "      </div>\n";
-	}
-	content
-		<< "    </div>\n"
-		<< "  </div>\n"
-		// Column 2: In Progress
-		<< "  <div class=\"wf-card\" style=\"margin:0;\">\n"
-		<< "    <div class=\"wf-card-header\"><span>In Progress</span><span class=\"wf-badge wf-badge-amber\">" << in_progress_tasks.GetCount() << "</span></div>\n"
-		<< "    <div class=\"wf-card-body\" style=\"display:flex; flex-direction:column; gap:10px;\">\n";
-	for(int i = 0; i < min(in_progress_tasks.GetCount(), 5); i++) {
-		const ValueMap& t = in_progress_tasks[i];
-		content
-			<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-			<< "        <div style=\"font-weight:600; color:#58a6ff;\">" << (String)t["title"] << "</div>\n"
-			<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
-			<< "      </div>\n";
-	}
-	content
-		<< "    </div>\n"
-		<< "  </div>\n"
-		// Column 3: Done
-		<< "  <div class=\"wf-card\" style=\"margin:0;\">\n"
-		<< "    <div class=\"wf-card-header\"><span>Done</span><span class=\"wf-badge wf-badge-emerald\">" << done_tasks.GetCount() << "</span></div>\n"
-		<< "    <div class=\"wf-card-body\" style=\"display:flex; flex-direction:column; gap:10px;\">\n";
-	for(int i = 0; i < min(done_tasks.GetCount(), 5); i++) {
-		const ValueMap& t = done_tasks[i];
-		content
-			<< "      <div style=\"background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;\">\n"
-			<< "        <div style=\"font-weight:600;\">" << (String)t["title"] << "</div>\n"
-			<< "        <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">#" << (int)t["seq"] << " &middot; Phase " << (int)t["phase_seq"] << "</div>\n"
-			<< "      </div>\n";
-	}
-	content
-		<< "    </div>\n"
-		<< "  </div>\n"
-		<< "</div>\n";
+	// Card rows for one column, capped at five.
+	auto Cards = [](const Vector<ValueMap>& tasks) {
+		ValueArray cards;
+		for(int i = 0; i < min(tasks.GetCount(), 5); i++) {
+			ValueMap card;
+			card.Add("title", (String)tasks[i]["title"]);
+			card.Add("seq", (int)tasks[i]["seq"]);
+			card.Add("phase", (int)tasks[i]["phase_seq"]);
+			cards.Add(card);
+		}
+		return cards;
+	};
+
+	Renderer vars;
+	vars("repo", repo)
+		("todo_count", todo_tasks.GetCount())
+		("in_progress_count", in_progress_tasks.GetCount())
+		("done_count", done_tasks.GetCount())
+		("todo", Cards(todo_tasks))
+		("in_progress", Cards(in_progress_tasks))
+		("done", Cards(done_tasks));
+	page.content << RenderGitHubTemplate(vars, "github-projects");
 }
 
 // Security tab: static security overview cards.

@@ -21,6 +21,7 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$WORK/site" "$WORK/dev" "$OUT"
 sh "$HERE/make-fixtures.sh" "$WORK/dev"
+sh "$HERE/make-store.sh" "$WORK/site"
 MANAGERSKYLARK_SITE_PASSWORD=capture-pw "$BIN" --site-dir "$WORK/site" --set-site-password capture > "$WORK/setup.log" 2>&1
 DEV_DIR="$WORK/dev" GHFORGE_GH="$HERE/fake-gh.sh" "$BIN" --site-dir "$WORK/site" --port "$PORT" > "$WORK/server.log" 2>&1 &
 SRV=$!

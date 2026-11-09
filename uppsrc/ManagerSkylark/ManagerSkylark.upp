@@ -67,6 +67,7 @@ file
 
 	Templates readonly separator,
 	templates/github-commits.witz,
+	templates/github-projects.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
 	templates/github-pull-detail.witz,

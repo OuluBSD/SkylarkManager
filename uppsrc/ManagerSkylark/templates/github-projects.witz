@@ -1,0 +1,33 @@
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <h3>Manager Project Board &middot; $repo</h3>
+  <a href="/projects" class="wf-btn wf-btn-secondary" style="font-size:0.8rem;">View All in Manager</a>
+</div>
+<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
+  <div class="wf-card" style="margin:0;">
+    <div class="wf-card-header"><span>Todo</span><span class="wf-badge wf-badge-neutral">$todo_count</span></div>
+    <div class="wf-card-body" style="display:flex; flex-direction:column; gap:10px;">
+$for(t in todo)      <div style="background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;">
+        <div style="font-weight:600;">$t.title</div>
+        <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;">#$t.seq &middot; Phase $t.phase</div>
+      </div>
+$endfor    </div>
+  </div>
+  <div class="wf-card" style="margin:0;">
+    <div class="wf-card-header"><span>In Progress</span><span class="wf-badge wf-badge-amber">$in_progress_count</span></div>
+    <div class="wf-card-body" style="display:flex; flex-direction:column; gap:10px;">
+$for(t in in_progress)      <div style="background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;">
+        <div style="font-weight:600; color:#58a6ff;">$t.title</div>
+        <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;">#$t.seq &middot; Phase $t.phase</div>
+      </div>
+$endfor    </div>
+  </div>
+  <div class="wf-card" style="margin:0;">
+    <div class="wf-card-header"><span>Done</span><span class="wf-badge wf-badge-emerald">$done_count</span></div>
+    <div class="wf-card-body" style="display:flex; flex-direction:column; gap:10px;">
+$for(t in done)      <div style="background:var(--wf-surface,#161b22); padding:10px; border-radius:6px; border:1px solid var(--wf-border-color,#30363d); font-size:0.85rem;">
+        <div style="font-weight:600;">$t.title</div>
+        <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;">#$t.seq &middot; Phase $t.phase</div>
+      </div>
+$endfor    </div>
+  </div>
+</div>
