@@ -557,3 +557,54 @@ NOTE for deployment: pages now throw if WebFramework assets are not
 deployed (deploy-assets.sh) — production/demo servers need that step after
 pull. Next: WORKER-BRIEF-08.md (SameSite re-add as BazaarCore patch + GitHub
 renderer witz extraction, behavior-preserving).
+
+## Worker entry — Brief 08 (T02 second slice)
+
+**Commits**
+
+| Step | Repo | Commit | Subject |
+|---|---|---|---|
+| 1 | BazaarCore | none | SameSite already present in main; no patch needed (see below) |
+| 2 | SkylarkManager | e47a999 | WebEngineTests: assert SameSite=Strict on fresh engine logins |
+| 3 | — | none | GitHub renderer extraction not started; blocked on decisions below |
+
+**Step 1: SameSite re-add — not done, premise does not hold.** The brief says
+SameSite was reverted (f73fb72). In this repo it was never reverted:
+- `f73fb72` is in BazaarCore history, and `3b0f04a` (merge) includes it.
+- `main` at 11e9512 and `origin/main` (96f8dd5) both contain the patch:
+  `Http::SetRawCookie` and `Http::SetCookie` take `samesite`, and `SetCookie`
+  forwards `httponly`. That is the f73fb72 shape.
+- Engine session cookies already use it (`WebEngine/Request.cpp` lines 99, 118,
+  128: `SetRawCookie(..., true, "Strict")`).
+I made no BazaarCore commit, to avoid a duplicate patch. If a revert exists in a
+different clone or branch, the planner should point me at it.
+
+**Step 2: fence assertions.** Two checks on the fresh-login Set-Cookie of each
+engine port: `SameSite=Strict` and `HttpOnly`. Fence 156/156 (was 152).
+Gate after the commit: ManagerSkylark PASSED, CompanySkylark ALL PASSED
+(CLANG), GCC rc 0 for all three targets.
+
+**Step 3: GitHub renderer extraction — stopped before editing. Decisions
+needed:**
+- The GitHub webapp is a ManagerSkylark page set (`GitHub*.cpp`, `ManagerSkylark`
+  routes under `/repo/...`). It is not a WebEngine site. The WebEngine has no
+  GitHub site binding, so there is no engine site-scoped template root for it to
+  render through. Options: (a) render through the app's default template root,
+  which is what `SkylarkSiteRoots` falls back to, and move to an engine site
+  after T04; (b) wait for T04 engine composition. I recommend (a).
+- The inline HTML is about 1,500 lines across eight files
+  (`GitHubWorkflowViews` 126 HTML-like lines, `GitHubRepoTabs` 86,
+  `GitHubRepoPulls` 84, `GitHubUserView` 78, `GitHubRepoCode` 54,
+  `GitHubRepoIssues` 51, `GitHubPlatform` 28, plus `GitHubActions` and
+  `GitHubRepoView`). Output is data-driven and interleaved with live `gh` and
+  `git` calls, so each view needs a witz data model, not a literal move.
+- Byte-identical route captures need a headless ManagerSkylark with a temp data
+  root, fixture repos, and stubbed `gh`. No such harness exists yet; building it
+  is a separate step. Witz syntax is confirmed (`$for(x in list)…$endfor`,
+  `$if`, `$raw(...)`, escaped `$value` by default).
+
+**Recommended order once decided:** build the capture harness first (route
+baseline, before any edit), then extract one tab per commit starting with
+`GitHubRepoTabs` (commits tab, git-backed and self-contained), then the rest.
+
+**Stopped after step 2 and waiting for decisions on step 3.**
