@@ -44,47 +44,32 @@ void RenderRepoActionsTab(Http& http, GitHubRepoPage& page)
 		content << GitHubPlatformService::RenderOperatorWarningBar(owner, repo);
 		String actions_error;
 		Vector<ValueMap> live_actions = GitHubPlatformService::GetLiveActions(owner, repo, &actions_error);
-		content
-			<< "<div class=\"wf-card\">\n"
-			<< "  <div class=\"wf-card-header\"><span>Workflow Runs &middot; All Workflows</span>"
-			<< "    <div style=\"display:flex; gap:10px; align-items:center;\">"
-			<< "      <span class=\"wf-badge wf-badge-emerald\">" << (live_actions.IsEmpty() ? "No runs" : "Live Runs") << "</span>"
-			<< "      <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" id=\"btn-new-workflow-table\" class=\"wf-btn\" style=\"background:#238636; color:#ffffff; font-weight:600; font-size:0.8rem; padding:4px 10px; text-decoration:none;\">"
-			<< VividIcon::Get("plus", 13) << " New workflow</a>"
-			<< "    </div>"
-			<< "  </div>\n"
-			<< "  <div class=\"wf-card-body\" style=\"padding:0;\">\n"
-			<< "    <table class=\"wf-table\">\n"
-			<< "      <thead><tr><th>Status</th><th>Run</th><th>Event</th><th>Branch</th><th>Execution</th></tr></thead>\n"
-			<< "      <tbody>\n";
-
-		if(!live_actions.IsEmpty()) {
-			for(const ValueMap& run : live_actions) {
-				String conclusion = (String)run["conclusion"];
-				String status = (String)run["status"];
-				bool success = (conclusion == "success" || conclusion.IsEmpty());
-				bool in_prog = (status == "running" || status == "in_progress");
-				content
-					<< "        <tr>\n"
-					<< "          <td>"
-					<< (in_prog ? "<span style=\"color:#d29922; font-size:1.1rem;\">&#9203;</span> <span class=\"wf-badge wf-badge-amber\">In progress</span>" :
-					    (success ? "<span style=\"color:#238636; font-size:1.1rem;\">&#10004;</span> <span class=\"wf-badge wf-badge-emerald\">Success</span>" :
-					               "<span style=\"color:#f85149; font-size:1.1rem;\">&#10008;</span> <span class=\"wf-badge wf-badge-danger\">Failed</span>"))
-					<< "</td>\n"
-					<< "          <td><strong>" << (String)run["name"] << "</strong><br><span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590);\">Run #" << (int64)run["id"] << "</span></td>\n"
-					<< "          <td>" << (String)run["event"] << "</td>\n"
-					<< "          <td><code>" << (String)run["branch"] << "</code></td>\n"
-					<< "          <td>" << (String)run["created_at"] << "</td>\n"
-					<< "        </tr>\n";
-			}
+		ValueArray runs;
+		for(const ValueMap& run : live_actions) {
+			String conclusion = (String)run["conclusion"];
+			String status = (String)run["status"];
+			bool in_prog = (status == "running" || status == "in_progress");
+			bool success = !in_prog && (conclusion == "success" || conclusion.IsEmpty());
+			ValueMap row;
+			row.Add("name", (String)run["name"]);
+			row.Add("id", AsString((int64)run["id"]));
+			row.Add("event", (String)run["event"]);
+			row.Add("branch", (String)run["branch"]);
+			row.Add("created_at", (String)run["created_at"]);
+			row.Add("progress", in_prog);
+			row.Add("success", success);
+			row.Add("failed", !in_prog && !success);
+			runs.Add(row);
 		}
-		if(!actions_error.IsEmpty())
-			content
-				<< "        <tr><td colspan=\"5\">Workflow runs are unavailable from GitHub: " << GitHubPlatformService::EscapeHtml(actions_error) << "</td></tr>\n";
-		else if(live_actions.IsEmpty())
-			content
-				<< "        <tr><td colspan=\"5\">No workflow runs were returned by GitHub.</td></tr>\n";
-		content << "      </tbody>\n    </table>\n  </div>\n</div>\n";
+		Renderer vars;
+		vars("runs_badge", live_actions.IsEmpty() ? "No runs" : "Live Runs")
+			("new_workflow_url", "/repo/" + owner + "/" + repo + "/actions/new")
+			("icon_plus", VividIcon::Get("plus", 13))
+			("runs", runs)
+			("has_error", !actions_error.IsEmpty())
+			("error_html", GitHubPlatformService::EscapeHtml(actions_error))
+			("no_runs", actions_error.IsEmpty() && live_actions.IsEmpty());
+		content << RenderGitHubTemplate(vars, "github-actions-runs");
 	}
 }
 

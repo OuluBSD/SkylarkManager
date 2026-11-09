@@ -71,6 +71,7 @@ file
 	templates/github-security.witz,
 	templates/github-settings.witz,
 	templates/github-fallback.witz,
+	templates/github-actions-runs.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
 	templates/github-pull-detail.witz,

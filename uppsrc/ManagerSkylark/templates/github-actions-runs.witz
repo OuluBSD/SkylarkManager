@@ -1,0 +1,19 @@
+<div class="wf-card">
+  <div class="wf-card-header"><span>Workflow Runs &middot; All Workflows</span>    <div style="display:flex; gap:10px; align-items:center;">      <span class="wf-badge wf-badge-emerald">$runs_badge</span>      <a href="$new_workflow_url" id="btn-new-workflow-table" class="wf-btn" style="background:#238636; color:#ffffff; font-weight:600; font-size:0.8rem; padding:4px 10px; text-decoration:none;">$raw(icon_plus) New workflow</a>    </div>  </div>
+  <div class="wf-card-body" style="padding:0;">
+    <table class="wf-table">
+      <thead><tr><th>Status</th><th>Run</th><th>Event</th><th>Branch</th><th>Execution</th></tr></thead>
+      <tbody>
+$for(r in runs)        <tr>
+          <td>$if(r.progress)<span style="color:#d29922; font-size:1.1rem;">&#9203;</span> <span class="wf-badge wf-badge-amber">In progress</span>$endif$if(r.success)<span style="color:#238636; font-size:1.1rem;">&#10004;</span> <span class="wf-badge wf-badge-emerald">Success</span>$endif$if(r.failed)<span style="color:#f85149; font-size:1.1rem;">&#10008;</span> <span class="wf-badge wf-badge-danger">Failed</span>$endif</td>
+          <td><strong>$r.name</strong><br><span style="font-size:0.75rem; color:var(--wf-fg-inactive,#7d8590);">Run #$r.id</span></td>
+          <td>$r.event</td>
+          <td><code>$r.branch</code></td>
+          <td>$r.created_at</td>
+        </tr>
+$endfor$if(has_error)        <tr><td colspan="5">Workflow runs are unavailable from GitHub: $raw(error_html)</td></tr>
+$endif$if(no_runs)        <tr><td colspan="5">No workflow runs were returned by GitHub.</td></tr>
+$endif      </tbody>
+    </table>
+  </div>
+</div>

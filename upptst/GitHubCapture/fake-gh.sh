@@ -30,7 +30,7 @@ case "$*" in
 	*"repo list SeppoPakonen --limit 100 --json"*)
 		echo '[{"name":"demo-repo","description":"Fixture repo","isPrivate":false,"pushedAt":"2026-11-03T09:15:00Z","stargazerCount":3,"forkCount":1,"primaryLanguage":{"name":"C++"},"url":"https://github.com/SeppoPakonen/demo-repo"},{"name":"second-repo","description":"","isPrivate":true,"pushedAt":"2026-11-04T08:00:00Z","stargazerCount":0,"forkCount":0,"primaryLanguage":null,"url":"https://github.com/SeppoPakonen/second-repo"}]' ;;
 	*"repos/SeppoPakonen/demo-repo/actions/runs?per_page=15"*)
-		echo '{"total_count":1,"workflow_runs":[{"id":501,"name":"CI","status":"completed","conclusion":"success","head_branch":"master","created_at":"2026-11-03T08:00:00Z","event":"push"}]}' ;;
+		echo '{"total_count":3,"workflow_runs":[{"id":501,"name":"CI","status":"completed","conclusion":"success","head_branch":"master","created_at":"2026-11-03T08:00:00Z","event":"push"},{"id":502,"name":"Docs","status":"in_progress","conclusion":null,"head_branch":"master","created_at":"2026-11-04T08:00:00Z","event":"pull_request"},{"id":503,"name":"Release","status":"completed","conclusion":"failure","head_branch":"master","created_at":"2026-11-05T08:00:00Z","event":"workflow_dispatch"}]}' ;;
 	*)
 		echo "fake gh: unexpected arguments: $*" >&2
 		exit 2 ;;
