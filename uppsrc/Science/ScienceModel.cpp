@@ -104,15 +104,20 @@ bool ScienceCorpus::ListPapers(Vector<SciencePaper>& out) const
 			v = ParseJSON(raw);
 		}
 		catch(...) {
+			LOG("science: skipped unparsable corpus file " << ff.GetPath());
 			continue; // corrupt corpus entries are skipped, never mutated
 		}
-		if(!v.Is<ValueMap>())
+		if(!v.Is<ValueMap>()) {
+			LOG("science: skipped non-object corpus file " << ff.GetPath());
 			continue;
+		}
 		ValueMap m = v;
 		SciencePaper p;
 		p.id = m.Get("id").IsNull() ? String() : (String)m.Get("id");
-		if(p.id.IsEmpty())
+		if(p.id.IsEmpty()) {
+			LOG("science: skipped corpus file without an id " << ff.GetPath());
 			continue;
+		}
 		p.title = m.Get("title").IsNull() ? String() : (String)m.Get("title");
 		p.source = m.Get("source").IsNull() ? String() : (String)m.Get("source");
 		p.status = m.Get("status").IsNull() ? String() : (String)m.Get("status");

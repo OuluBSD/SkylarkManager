@@ -12,6 +12,19 @@ for tests): repository-backed metadata records plus agent-authored
 | `ScienceModel.h/.cpp` | `SciencePaper` (flat corpus record mapping), article-tree node model + `science/article-tree` schema card, `ScienceCorpus` (read-only flat corpus reader; article sidecar read/write with optimistic revisions and atomic writes) |
 | `ScienceSite.h/.cpp` | `InstallScienceSite`: read routes on an `EngineSite` (HTML paper list/detail, JSON API, article tree) |
 
+## Real-corpus smoke
+
+Read-only check against the real corpus, run by hand (not in the fence suite):
+
+```bash
+./bin/CLANG-Blitz-Clang-Debug-Debug_Full-Linux-Posix-Shared/WebEngineTests \
+    --science-corpus ~/Dev/AnthologyPrivate/site/data 150
+```
+
+It lists the corpus only; the article root is the corpus directory and nothing
+is written. Unparsable or id-less files are skipped with a LOG line. The corpus
+has no `.gitignore`, so `*.article.json` sidecars are git-visible by design.
+
 ## Binding rules
 
 1. **Corpus is read-only here**: metadata records keep their flat on-disk

@@ -493,6 +493,25 @@ static void WaitPortsUp()
 CONSOLE_APP_MAIN
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
+	// Headless read smoke against a real corpus. Read-only: only ListPapers runs,
+	// and the article root is the corpus itself, so nothing is written.
+	//   WebEngineTests --science-corpus <dir> [min_records]   (default 150)
+	if(CommandLine().GetCount() >= 2 && CommandLine()[0] == "--science-corpus") {
+		String dir = CommandLine()[1];
+		int min_records = CommandLine().GetCount() >= 3 ? atoi(CommandLine()[2]) : 150;
+		ScienceCorpus reader(dir, dir);
+		Vector<SciencePaper> papers;
+		bool listed = reader.ListPapers(papers);
+		int with_article = 0;
+		for(const SciencePaper& p : papers)
+			if(p.has_article)
+				with_article++;
+		Cout() << "science corpus " << dir << ": " << papers.GetCount() << " papers, "
+		       << with_article << " with structured article\n";
+		bool pass = listed && papers.GetCount() >= min_records;
+		Cout() << (pass ? "SCIENCE CORPUS SMOKE PASSED\n" : "SCIENCE CORPUS SMOKE FAILED\n");
+		_Exit(pass ? 0 : 1);
+	}
 	Cout() << "WebEngineTests: engine fence self-test\n";
 	s_root = GetHomeDirFile(Format("WebEngineTests/run-%d-%d", (int)msecs(), (int)Random(1000000)));
 	RealizeDirectory(s_root);
