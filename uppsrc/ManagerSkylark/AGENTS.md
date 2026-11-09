@@ -71,13 +71,32 @@ and 09B). Interim state:
   - a `$variable` directly before `$else`, `$endif`, `$` or `.` does not
     evaluate as expected. Put text or a newline after the variable, or use
     sibling `$for` loops, as the pulls body placeholder does;
-  - a template ending in a bare `$endif` with no newline adds a blank line.
+  - a template ending in a bare `$endif` with no newline adds a blank line;
+  - a value containing a newline is escaped as `&#10;`, which changes a
+    `<textarea>` or `<pre>` body. Pass `EscapeHtml(value)` through `$raw`, as the
+    workflow editor's YAML body and the actions error row do;
+  - `&` in literal template text stays `&`; `&` inside a value becomes `&amp;`.
+    Put a link's `&run=` separator in the template text, not in a value;
+  - `$endfor$if(...)` on one line chains correctly, and a loop body can hold a
+    `$if` for a per-row flag (`has_preview`, `has_stars`).
 - The site-scoped template root (engine composition) comes with T04. Until then
   these templates are not served by a WebEngine site.
-- Converted: the commits tab, issues (list and detail), pulls (list and detail),
-  and code (branch bar, blob, tree, README, sidebar). Not yet converted: user
-  view, workflow views and catalog, actions, projects, security, settings,
-  agents.
+- Converted (T02 complete): commits, issues, pulls, code, projects, security,
+  settings, fallback, actions (dispatch and runs), agents (dashboard, run
+  inspector, diff), user profile (sub-nav, overview, repositories, tabs,
+  sidebar), actions catalog, workflow editor, TPP doc site and the operator
+  warning bar. `GitHubActions.cpp` has no HTML and needed no change.
+- Stays server-side on purpose: QTF-to-HTML and TPP text extraction. The
+  renderers pass their output in as one raw value.
+- Known gaps, not fixed in T02:
+  - the workflow editor's `<script>` writes `owner` and `repo` with witz's HTML
+    escaping, not `GitHubJsEscape`. It matches the fixtures; a name with a quote
+    would break the script. Route it through `GitHubJsEscape` with `$raw`;
+  - the editor's marketplace Insert button puts `AsCString` output inside a
+    double-quoted `onclick` attribute. The old code did the same, so it is not
+    valid HTML when a snippet contains a quote;
+  - the TPP doc site's topic loops render zero items in the harness, because the
+    topic directory is absent there. A fixture directory would cover them.
 - Capture check: `upptst/GitHubCapture/` (see its README) before and after each
   change. Tests that call a view in process need the app's template root and
   cannot render templates; route-level checks belong in the capture harness.
