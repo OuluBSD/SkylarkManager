@@ -29,5 +29,12 @@ for tests): repository-backed metadata records plus agent-authored
    silent rewrites.
 4. **Defensive corpus reading**: corrupt corpus files are skipped with LOG,
    never quarantined or deleted (the corpus is git-backed elsewhere).
-5. **Read routes first**: authoring endpoints arrive with the accounts
-   wiring; this increment is read-only.
+5. **Authoring is deny by default**: `POST api/papers/<id>/article` and the
+   `papers/<id>/author` form require either a session user with the
+   `science-author` role, or an active meta-account grant carrying
+   `science.author` presented in the `x-science-grant` header. The grant path is
+   bearer-style: a grant id acts for its subject, so only the consent flow may
+   issue one. Writes go through `ScienceCorpus::SaveArticleTree` (schema,
+   optimistic `expected_paper_revision` -> 409 on drift, atomic sidecar write).
+   Status codes: 403 unauthorized, 404 unknown paper, 400 invalid body or tree,
+   409 drift, 500 write failure.

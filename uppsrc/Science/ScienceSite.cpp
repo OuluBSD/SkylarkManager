@@ -3,11 +3,59 @@
 NAMESPACE_UPP
 
 static ScienceCorpus *s_corpus = NULL;
+static WebGrants     *s_grants = NULL;
 
 static ScienceCorpus& Corpus()
 {
 	ASSERT_(s_corpus, "science site not installed");
 	return *s_corpus;
+}
+
+static String Esc(const String& s)
+{
+	StringBuffer out;
+	for(int i = 0; i < s.GetCount(); i++) {
+		char c = s[i];
+		switch(c) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(c);
+		}
+	}
+	return String(out);
+}
+
+// Deny by default. Authoring needs either a session user holding the Science
+// author role, or an active grant that carries science.author. The grant path
+// is bearer-style: whoever presents the grant id acts for its subject, so
+// grants must only be handed to callers the consent flow approved.
+static bool MayAuthor(WebRequest& r)
+{
+	if(r.HasUser())
+		for(const String& role : r.User().roles)
+			if(role == SCIENCE_AUTHOR_ROLE)
+				return true;
+	String grant_id = r.Header(SCIENCE_GRANT_HEADER);
+	if(grant_id.IsEmpty() || !s_grants)
+		return false;
+	WebAccountGrant g;
+	if(!s_grants->GetGrant(grant_id, g) || !g.IsActive())
+		return false;
+	return g.HasScopes(Vector<String>() << String(SCIENCE_AUTHOR_SCOPE));
+}
+
+static int WriteStatus(const String& error)
+{
+	if(error.Find("revision drift") >= 0)
+		return 409;
+	if(error.Find("paper not found") >= 0)
+		return 404;
+	if(error.Find("atomic write failed") >= 0)
+		return 500;
+	return 400;
 }
 
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
@@ -111,6 +159,8 @@ static void SciencePaperPage(WebRequest& r)
 		body << "<p><i>Full structured text unavailable (" << ar.error << ")."
 		     << " Metadata-only record.</i></p>";
 	}
+	if(MayAuthor(r))
+		body << "<p><a href=\"" << r.Site().Url("papers/*/author", {paper.id}) << "\">Author structured article</a></p>";
 	HtmlPage(r, "Paper", String(body));
 }
 
@@ -177,9 +227,83 @@ static void ScienceApiArticle(WebRequest& r)
 	r.Json(m);
 }
 
-void InstallScienceSite(EngineSite& site, ScienceCorpus& corpus)
+static void SciencePaperAuthorPage(WebRequest& r)
+{
+	String id = r.PathArg(0);
+	SciencePaper paper;
+	if(!Corpus().GetPaper(id, paper)) {
+		r.Status(404, "paper not found");
+		return;
+	}
+	if(!MayAuthor(r)) {
+		r.Status(403, "authoring needs the science-author role or a science.author grant");
+		return;
+	}
+	ScienceArticleTree tree;
+	String json = "{\"title\":\"\",\"nodes\":[{\"id\":\"s1\",\"type\":\"section\",\"heading\":\"Introduction\"}]}";
+	if(Corpus().GetArticleTree(id, tree).ok)
+		json = StoreAsJson(tree);
+	String url = r.Site().Url("api/papers/*/article", {paper.id});
+	StringBuffer body;
+	body << "<p>Paper revision <input id=\"rev\" value=\"" << Esc(paper.revision) << "\" readonly></p>"
+	     << "<input type=\"hidden\" id=\"csrf\" value=\"" << Esc(r.CsrfToken()) << "\">"
+	     << "<textarea id=\"tree\" rows=\"30\" cols=\"100\">" << Esc(json) << "</textarea>"
+	     << "<p><button type=\"button\" onclick=\"saveArticle()\">Save article</button> <span id=\"result\"></span></p>"
+	     << "<script>\n"
+	     << "function saveArticle() {\n"
+	     << "  var article;\n"
+	     << "  try { article = JSON.parse(document.getElementById('tree').value); }\n"
+	     << "  catch(e) { document.getElementById('result').innerText = 'Invalid JSON: ' + e; return; }\n"
+	     << "  fetch('" << url << "', {method: 'POST', credentials: 'same-origin',\n"
+	     << "    headers: {'Content-Type': 'application/json', 'x-wf-csrf': document.getElementById('csrf').value},\n"
+	     << "    body: JSON.stringify({expected_paper_revision: document.getElementById('rev').value, article: article})})\n"
+	     << "  .then(function(res) { return res.text().then(function(t) {\n"
+	     << "    document.getElementById('result').innerText = res.status + ' ' + t; }); });\n"
+	     << "}\n"
+	     << "</script>";
+	HtmlPage(r, "Author " + (paper.title.IsEmpty() ? paper.id : paper.title), String(body));
+}
+
+// POST api/papers/<id>/article with {"expected_paper_revision": "...", "article": {tree}}.
+static void ScienceApiArticleWrite(WebRequest& r)
+{
+	String id = r.PathArg(0);
+	if(!MayAuthor(r)) {
+		r.Json(JsonOk(false, "authoring needs the science-author role or a science.author grant"), 403);
+		return;
+	}
+	Value body = ParseJSON(r.Body());
+	if(!body.Is<ValueMap>()) {
+		r.Json(JsonOk(false, "body must be a JSON object"), 400);
+		return;
+	}
+	ValueMap m = body;
+	String expected = m["expected_paper_revision"];
+	if(expected.IsEmpty()) {
+		r.Json(JsonOk(false, "expected_paper_revision is required"), 400);
+		return;
+	}
+	ScienceArticleTree tree;
+	if(!LoadFromJson(tree, AsJSON(m["article"]))) {
+		r.Json(JsonOk(false, "article is not a valid article tree"), 400);
+		return;
+	}
+	String author = r.HasUser() ? r.User().username : String("grant:") + r.Header(SCIENCE_GRANT_HEADER);
+	ForgeResult res = Corpus().SaveArticleTree(id, tree, expected, author);
+	if(!res.ok) {
+		r.Json(JsonOk(false, res.error), WriteStatus(res.error));
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("paper_id", id);
+	r.Json(out);
+}
+
+void InstallScienceSite(EngineSite& site, ScienceCorpus& corpus, WebGrants *grants)
 {
 	s_corpus = &corpus;
+	s_grants = grants;
 	SiteRouter& rt = site.Router();
 	rt.Add("", ScienceHome);
 	rt.Add("papers", SciencePaperList);
@@ -187,6 +311,8 @@ void InstallScienceSite(EngineSite& site, ScienceCorpus& corpus)
 	rt.Add("api/papers", ScienceApiPapers);
 	rt.Add("api/papers/*", ScienceApiPaper);
 	rt.Add("api/papers/*/article", ScienceApiArticle);
+	rt.Add("api/papers/*/article:POST", ScienceApiArticleWrite);
+	rt.Add("papers/*/author", SciencePaperAuthorPage);
 }
 
 END_UPP_NAMESPACE

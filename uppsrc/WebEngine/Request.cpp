@@ -25,6 +25,11 @@ String WebRequest::Header(const char *name) const
 	return http.GetHeader(name);
 }
 
+String WebRequest::Body() const
+{
+	return http.GetRequestContent();
+}
+
 String WebRequest::Cookie(const char *name) const
 {
 	String key = String("@") + name;

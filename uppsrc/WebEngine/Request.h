@@ -22,6 +22,7 @@ public:
 	String Param(const char *name) const;                 // query/form field
 	int    IntParam(const char *name) const;
 	String Header(const char *name) const;
+	String Body() const;                                 // raw request content (JSON bodies)
 	String Cookie(const char *name) const;
 	String ClientIp() const;
 	bool   IsMutation() const;                            // POST/PUT/PATCH/DELETE

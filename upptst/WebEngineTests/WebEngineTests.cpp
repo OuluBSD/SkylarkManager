@@ -29,6 +29,7 @@ static const int MAIN_PORT  = 18200;
 static const int ALPHA_PORT = 18201;
 static const int BETA_PORT  = 18202;
 static const int META_PORT  = 18203;
+static const int SCIENCE_PORT = 18204;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -374,6 +375,7 @@ struct AlphaService : IBrokerService {
 
 static String s_root;
 static WebGrants *s_meta_grants = NULL;
+static ScienceCorpus *s_sci_corpus = NULL;
 
 static void SetupSites()
 {
@@ -405,6 +407,32 @@ static void SetupSites()
 	Vector<String> mroles;
 	mroles.Add("owner");
 	meta.Accounts().CreateUser("mallory", "pw-meta", "Mallory", mroles, muid, mexisted);
+
+	// Science site over a FIXTURE corpus under s_root. Tests never touch the
+	// real AnthologyPrivate directory.
+	EngineSite& science = TheWebEngine().AddSite("science", "Science",
+		Format("http://127.0.0.1:%d", SCIENCE_PORT), AppendFileName(s_root, "science"));
+	String sci_corpus = AppendFileName(s_root, "science-site-corpus");
+	RealizeDirectory(sci_corpus);
+	SaveFile(AppendFileName(sci_corpus, "2612.00001.json"),
+		"{\"id\":\"2612.00001\",\"kind\":\"paper\",\"title\":\"Metadata only\",\"status\":\"draft\","
+		"\"abstract\":\"No full text.\",\"envelope\":{\"schema_id\":\"skylark/paper\",\"schema_version\":\"1\","
+		"\"workspace_id\":\"science\",\"stable_id\":\"2612.00001\",\"record_kind\":\"paper\",\"revision\":\"1\","
+		"\"visibility\":\"public\",\"provenance_ref\":\"\"}}");
+	SaveFile(AppendFileName(sci_corpus, "2612.00002.json"),
+		"{\"id\":\"2612.00002\",\"kind\":\"paper\",\"title\":\"Authorable\",\"status\":\"draft\","
+		"\"abstract\":\"Gets an article.\",\"envelope\":{\"schema_id\":\"skylark/paper\",\"schema_version\":\"1\","
+		"\"workspace_id\":\"science\",\"stable_id\":\"2612.00002\",\"record_kind\":\"paper\",\"revision\":\"1\","
+		"\"visibility\":\"public\",\"provenance_ref\":\"\"}}");
+	s_sci_corpus = new ScienceCorpus(sci_corpus, AppendFileName(s_root, "science-site-articles"));
+	InstallScienceSite(science, *s_sci_corpus, s_meta_grants);
+	science.Router().Add("login:POST", RouteLogin);
+	Vector<String> author_roles;
+	author_roles.Add(SCIENCE_AUTHOR_ROLE);
+	Vector<String> reader_roles;
+	reader_roles.Add("member");
+	science.Accounts().CreateUser("author", "pw-author", "Author", author_roles, uid, existed);
+	science.Accounts().CreateUser("reader", "pw-reader", "Reader", reader_roles, uid, existed);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -456,7 +484,7 @@ static bool ProbePort(int port)
 static void WaitPortsUp()
 {
 	for(int i = 0; i < 200; i++)
-		if(ProbePort(ALPHA_PORT) && ProbePort(BETA_PORT))
+		if(ProbePort(ALPHA_PORT) && ProbePort(BETA_PORT) && ProbePort(SCIENCE_PORT))
 			return;
 	Check(false, "engine listeners never came up");
 }
@@ -1025,6 +1053,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(ALPHA_PORT, "alpha");
 	host.BindSite(BETA_PORT, "beta");
 	host.BindSite(META_PORT, "meta");
+	host.BindSite(SCIENCE_PORT, "science");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 
@@ -1033,6 +1062,105 @@ CONSOLE_APP_MAIN
 	WaitPortsUp();
 
 	VectorMap<String, String> no_headers;
+
+	// --- Science authoring (brief 10 step 2) ---
+	{
+		VectorMap<String, String> sci_origin;
+		sci_origin.Add("Origin", Format("http://127.0.0.1:%d", SCIENCE_PORT));
+		auto SciHeaders = [&](VectorMap<String, String>& h, const String& cookie, const String& csrf) {
+			h.Add("Origin", Format("http://127.0.0.1:%d", SCIENCE_PORT));
+			if(cookie.GetCount()) h.Add("Cookie", cookie);
+			if(csrf.GetCount()) h.Add("x-wf-csrf", csrf);
+		};
+		VectorMap<String, String> rd_f;
+		rd_f.Add("username", "reader");
+		rd_f.Add("password", "pw-reader");
+		HttpReply rrd = HttpCall("POST", SCIENCE_PORT, "/login", sci_origin, FormEncode(rd_f));
+		String rd_csrf = (String)ParseJSON(rrd.body)["csrf"];
+		String rd_pair;
+		String rd_val = CookieOf(rrd, "wfs_science", rd_pair);
+		String rd_cookie = "wfs_science=" + rd_val;
+
+		VectorMap<String, String> au_f;
+		au_f.Add("username", "author");
+		au_f.Add("password", "pw-author");
+		HttpReply rau = HttpCall("POST", SCIENCE_PORT, "/login", sci_origin, FormEncode(au_f));
+		String au_csrf = (String)ParseJSON(rau.body)["csrf"];
+		String au_pair;
+		String au_val = CookieOf(rau, "wfs_science", au_pair);
+		String au_cookie = "wfs_science=" + au_val;
+		Check(rrd.status == 200 && rau.status == 200 && au_csrf.GetCount() > 0 && rd_csrf.GetCount() > 0,
+		      "science reader and author log in");
+
+		String article_path = "/api/papers/2612.00002/article";
+		String good = "{\"expected_paper_revision\":\"1\",\"article\":{\"title\":\"Authored\",\"nodes\":["
+		              "{\"id\":\"s1\",\"type\":\"section\",\"heading\":\"Intro\"},"
+		              "{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"Authored text.\"}]}}";
+		String stale = good;
+		stale.Replace("\"expected_paper_revision\":\"1\"", "\"expected_paper_revision\":\"99\"");
+
+		// Anonymous: denied before any handler runs (no session or CSRF token).
+		VectorMap<String, String> anon;
+		SciHeaders(anon, "", "");
+		HttpReply ran = HttpCall("POST", SCIENCE_PORT, article_path, anon, good, "application/json");
+		Check(ran.status == 403, "science article write without a session is refused");
+
+		// Member without the author role: handler refuses with 403.
+		VectorMap<String, String> rd_h;
+		SciHeaders(rd_h, rd_cookie, rd_csrf);
+		HttpReply rrw = HttpCall("POST", SCIENCE_PORT, article_path, rd_h, good, "application/json");
+		Check(rrw.status == 403, "science article write without the author role is refused");
+		HttpReply rrg = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002/author", rd_h, "");
+		Check(rrg.status == 403, "science authoring page refused without the author role");
+
+		// Author: GET the page, then a valid save.
+		VectorMap<String, String> au_h;
+		SciHeaders(au_h, au_cookie, au_csrf);
+		HttpReply rpage = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002/author", au_h, "");
+		Check(rpage.status == 200 && rpage.body.Find("Save article") >= 0, "science authoring page renders for the author");
+		HttpReply rsave = HttpCall("POST", SCIENCE_PORT, article_path, au_h, good, "application/json");
+		Check(rsave.status == 200 && (bool)ParseJSON(rsave.body)["ok"], "science author saves an article tree");
+		Check(s_sci_corpus->HasArticleTree("2612.00002"), "science article sidecar written by the endpoint");
+
+		// Drift: the client's revision no longer matches the paper.
+		HttpReply rdrift = HttpCall("POST", SCIENCE_PORT, article_path, au_h, stale, "application/json");
+		Check(rdrift.status == 409, "science save with a stale paper revision gets 409");
+
+		// Malformed JSON body and schema-invalid tree are client errors.
+		HttpReply rbad = HttpCall("POST", SCIENCE_PORT, article_path, au_h, "not json", "application/json");
+		Check(rbad.status == 400, "science save with a malformed body gets 400");
+		String empty_tree = "{\"expected_paper_revision\":\"1\",\"article\":{\"nodes\":[]}}";
+		HttpReply rempty = HttpCall("POST", SCIENCE_PORT, article_path, au_h, empty_tree, "application/json");
+		Check(rempty.status == 400, "science save with an empty tree gets 400");
+
+		// Paper page: author sees the authored tree and the author link.
+		HttpReply rview = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002", au_h, "");
+		Check(rview.body.Find("Structured article") >= 0 && rview.body.Find("Author structured article") >= 0,
+		      "science paper page shows the authored article and the author link");
+
+		// Metadata-only paper stays metadata-only and renders.
+		HttpReply rmeta = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00001", no_headers, "");
+		Check(rmeta.status == 200 && rmeta.body.Find("Metadata-only record") >= 0,
+		      "science metadata-only paper still renders as metadata-only");
+
+		// Grant path: an active science.author grant authorizes a session member.
+		Vector<String> scopes;
+		scopes.Add(SCIENCE_AUTHOR_SCOPE);
+		String gid;
+		bool gexisted = false;
+		s_meta_grants->RequestGrant("subject-1", "science", "taskfoundry", scopes, gid, gexisted);
+		s_meta_grants->Decide(gid, true);
+		VectorMap<String, String> gr_h;
+		SciHeaders(gr_h, rd_cookie, rd_csrf);
+		gr_h.Add(SCIENCE_GRANT_HEADER, gid);
+		HttpReply rgrant = HttpCall("POST", SCIENCE_PORT, article_path, gr_h, good, "application/json");
+		Check(rgrant.status == 200, "science article write with an active science.author grant is allowed");
+		VectorMap<String, String> bad_h;
+		SciHeaders(bad_h, rd_cookie, rd_csrf);
+		bad_h.Add(SCIENCE_GRANT_HEADER, "wag_unknown");
+		HttpReply rbadg = HttpCall("POST", SCIENCE_PORT, article_path, bad_h, good, "application/json");
+		Check(rbadg.status == 403, "science article write with an unknown grant is refused");
+	}
 
 	// 1. identical paths, different sites
 	HttpReply ra = HttpCall("GET", ALPHA_PORT, "/", no_headers, "");
