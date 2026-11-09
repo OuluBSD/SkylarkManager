@@ -728,3 +728,43 @@ Fallback 258; GitHubWorkflowViews.cpp: ActionsCatalog 134, WorkflowEditor
 258; GitHubUserView.cpp profile; GitHubActions.cpp verify-only). Same 09B
 decisions and per-tab gates apply. TaskFoundry note: QTF-to-HTML and TPP
 extraction stay server-side; wrappers only become witz.
+
+## Worker entry — T02 (brief 09B continuation), 2026-11-09
+
+Status: T02 complete. Every GitHub tab body is witz-rendered. Stopped and
+waiting for the T03 brief.
+
+Commits (SkylarkManager, pathspecs only, each with the full gate):
+- 86df346 agents tab: dashboard, run inspector, diff (AgentPlatform.cpp; 4 templates)
+- 803c218 user profile: sub-nav, overview, repositories, tabs, sidebar (7 templates)
+- 95580f6 actions catalog (+5 workflow routes in the harness)
+- 48e247f workflow editor (marketplace loop; YAML body via EscapeHtml + $raw)
+- 6a5cee5 TPP doc preview: shell and topic loops (QTF stays server-side)
+- 34bcc77 avatar: neutral placeholder replaces the hardcoded GitHub image
+  (the only intended capture change; two baseline files regenerated and declared)
+- 3aec6c4 operator warning bar (template; honest wording unchanged)
+- 61a60b2 ManagerSkylark AGENTS.md: T02 template state, witz findings, known gaps
+
+No change: GitHubActions.cpp (no HTML found).
+
+Per-commit gate: fence 156/156; ManagerSkylark --test PASSED; CompanySkylark
+--test ALL TESTS PASSED (CLANG); GCC rc 0 for the three targets; capture
+IDENTICAL after normalization, 76 files (38 routes), claims PASSED. The one
+exception is 34bcc77, which regenerated two baselines and says so in its message.
+
+Harness: routes.txt grew from 28 to 38 routes (catalog category and search,
+editor upp-build and auto-labeler, TPP preview). Their baseline came from the
+HEAD build before the catalog change. The baseline lives under CompanySkylark
+tmp/gh/baseline_wf (not committed).
+
+Known gaps (recorded in ManagerSkylark AGENTS.md, not fixed):
+- editor script writes owner/repo without GitHubJsEscape;
+- marketplace Insert onclick is invalid HTML when a snippet contains a quote;
+- TPP topic loops are not covered (no fixture topic directory).
+
+Witz findings added: newline in a value escapes to &#10; (use $raw with
+EscapeHtml); & in literal text is kept, & in a value becomes &amp;; $if per
+row works inside $for.
+
+Not covered by this brief: the WebAuth/left-sidebar plan that was in a
+prior-session plan file. It is a separate body of work, not started.
