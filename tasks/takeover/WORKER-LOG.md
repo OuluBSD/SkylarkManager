@@ -449,3 +449,17 @@ WebEngineTests, CompanySkylark.
 engine-host composition (T04); git-subcommand allowlist tightening (backlog).
 
 **Stopped after step 3 and waiting for acceptance.**
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+**T01 COMPLETE.** Brief 06A steps 2-3 accepted. Planner re-verified: fence
+135/135, Manager PASSED (CLANG+GCC), Company ALL PASSED (CLANG) + GCC rc 0,
+tree clean at e553db3. The "result: not clean" line in GCC build output is
+an umk informational artifact (build succeeded, entrypoint created, binary
+verified). Known gaps recorded for follow-ups: PrivateHub broker site-id
+wiring (T04), idempotency store expiry + multi-process mutex (backlog),
+live sourceforge.net smoke (manual).
+
+Next: WORKER-BRIEF-07.md — T02 first slice: per-site template/static roots
+(BazaarCore Skylark hook, foundation now unblocked) + WebFramework asset
+extraction.
