@@ -544,3 +544,16 @@ Company-side work, T04. The untracked `tasks/takeover/WORKER-BRIEF-07.md` is
 left as it was.
 
 **Stopped after step 4 and waiting for acceptance.**
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Assignment 7 (T02 first slice) accepted. Planner re-verified: 15 asset files
+under WebFramework/assets (incl. template-github/sourceforge css, audio.js),
+Template.cpp 536 lines, per-site roots via SkylarkSiteRoots +
+SiteRootsScope (WebEngine/Host.cpp), fence 152/152, Manager PASSED
+(CLANG+GCC), Company ALL PASSED (CLANG) + GCC rc 0, tree clean.
+Route-diff methodology (baseline control + normalization) sound.
+NOTE for deployment: pages now throw if WebFramework assets are not
+deployed (deploy-assets.sh) — production/demo servers need that step after
+pull. Next: WORKER-BRIEF-08.md (SameSite re-add as BazaarCore patch + GitHub
+renderer witz extraction, behavior-preserving).
