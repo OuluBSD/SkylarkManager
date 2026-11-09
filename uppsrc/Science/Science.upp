@@ -4,6 +4,7 @@ uses
 	Core,
 	WebStorage,
 	ForgeCore,
+	WebBroker,
 	WebEngine;
 
 file
@@ -13,4 +14,6 @@ file
 	ScienceModel.cpp,
 	Site readonly separator,
 	ScienceSite.h,
-	ScienceSite.cpp;
+	ScienceSite.cpp,
+	ScienceService.h,
+	ScienceService.cpp;

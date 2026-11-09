@@ -47,17 +47,6 @@ static bool MayAuthor(WebRequest& r)
 	return g.HasScopes(Vector<String>() << String(SCIENCE_AUTHOR_SCOPE));
 }
 
-static int WriteStatus(const String& error)
-{
-	if(error.Find("revision drift") >= 0)
-		return 409;
-	if(error.Find("paper not found") >= 0)
-		return 404;
-	if(error.Find("atomic write failed") >= 0)
-		return 500;
-	return 400;
-}
-
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
 {
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -291,7 +280,7 @@ static void ScienceApiArticleWrite(WebRequest& r)
 	String author = r.HasUser() ? r.User().username : String("grant:") + r.Header(SCIENCE_GRANT_HEADER);
 	ForgeResult res = Corpus().SaveArticleTree(id, tree, expected, author);
 	if(!res.ok) {
-		r.Json(JsonOk(false, res.error), WriteStatus(res.error));
+		r.Json(JsonOk(false, res.error), ScienceErrorStatus(res.error));
 		return;
 	}
 	ValueMap out;

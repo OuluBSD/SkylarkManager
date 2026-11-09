@@ -12,6 +12,7 @@
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
+#include <Science/ScienceService.h>
 
 using namespace Upp;
 
@@ -1056,6 +1057,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(SCIENCE_PORT, "science");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
+	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
 
 	Thread host_thread;
 	host_thread.Run(HostMain);
@@ -1160,6 +1162,60 @@ CONSOLE_APP_MAIN
 		bad_h.Add(SCIENCE_GRANT_HEADER, "wag_unknown");
 		HttpReply rbadg = HttpCall("POST", SCIENCE_PORT, article_path, bad_h, good, "application/json");
 		Check(rbadg.status == 403, "science article write with an unknown grant is refused");
+	}
+
+	// --- Science broker surface (brief 10 step 3) ---
+	{
+		BrokerCallContext reader_ctx;
+		reader_ctx.from_site = "taskfoundry";
+		reader_ctx.to_site = "science";
+		reader_ctx.caller_id = "tf-agent";
+		reader_ctx.scopes.Add("science.read");
+
+		BrokerCallContext author_ctx = reader_ctx;
+		author_ctx.scopes.Add("science.author");
+
+		BrokerCallContext none_ctx;
+		none_ctx.from_site = "stranger";
+		none_ctx.to_site = "science";
+
+		BrokerCall get;
+		get.op = "get-paper";
+		get.payload.Add("id", "2612.00002");
+
+		BrokerResult g_ok = TheWebEngine().Broker().Call(reader_ctx, get);
+		Check(g_ok.ok && g_ok.status == 200 && (String)g_ok.payload["title"] == "Authorable",
+		      "science broker get-paper with science.read");
+		BrokerResult g_none = TheWebEngine().Broker().Call(none_ctx, get);
+		Check(!g_none.ok && g_none.status == 403, "science broker refuses reads without scope");
+
+		BrokerCall list;
+		list.op = "list-papers";
+		BrokerResult l_ok = TheWebEngine().Broker().Call(reader_ctx, list);
+		Check(l_ok.ok && ((ValueArray)l_ok.payload["papers"]).GetCount() >= 2, "science broker list-papers");
+
+		BrokerCall put;
+		put.op = "put-article";
+		put.payload.Add("id", "2612.00001");
+		put.payload.Add("expected_paper_revision", "1");
+		put.payload.Add("article", ParseJSON("{\"title\":\"Broker\",\"nodes\":[{\"id\":\"p1\",\"type\":\"paragraph\",\"text\":\"Via broker.\"}]}"));
+
+		BrokerResult p_reader = TheWebEngine().Broker().Call(reader_ctx, put);
+		Check(!p_reader.ok && p_reader.status == 403, "science broker put-article needs science.author, not science.read");
+
+		BrokerResult p_ok = TheWebEngine().Broker().Call(author_ctx, put);
+		Check(p_ok.ok && s_sci_corpus->HasArticleTree("2612.00001"), "science broker put-article with science.author writes the sidecar");
+
+		BrokerCall put_stale = put;
+		put_stale.payload.Remove(put_stale.payload.Find("expected_paper_revision"));
+		put_stale.payload.Add("expected_paper_revision", "99");
+		BrokerResult p_drift = TheWebEngine().Broker().Call(author_ctx, put_stale);
+		Check(!p_drift.ok && p_drift.status == 409, "science broker put-article reports drift as 409");
+
+		BrokerCall nope;
+		nope.op = "delete-everything";
+		BrokerResult n = TheWebEngine().Broker().Call(author_ctx, nope);
+		Check(!n.ok && n.status == 400, "science broker refuses an unknown op");
 	}
 
 	// 1. identical paths, different sites

@@ -90,6 +90,9 @@ struct ScienceArticleTree : Moveable<ScienceArticleTree> {
 	void Jsonize(JsonIO& io);
 };
 
+// HTTP-style status for a SaveArticleTree / corpus error string.
+int ScienceErrorStatus(const String& error);
+
 // Read-only corpus reader + validated article sidecar store.
 class ScienceCorpus {
 public:

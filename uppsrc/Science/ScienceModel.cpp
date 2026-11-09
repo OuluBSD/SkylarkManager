@@ -256,4 +256,15 @@ ForgeResult ScienceCorpus::SaveArticleTree(const String& id, const ScienceArticl
 	return IForgeBackend::Ok("save-article", id, ForgeProvenance::LocalPersistent);
 }
 
+int ScienceErrorStatus(const String& error)
+{
+	if(error.Find("revision drift") >= 0)
+		return 409;
+	if(error.Find("paper not found") >= 0 || error.Find("no structured article") >= 0)
+		return 404;
+	if(error.Find("atomic write failed") >= 0)
+		return 500;
+	return 400;
+}
+
 END_UPP_NAMESPACE
