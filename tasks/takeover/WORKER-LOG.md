@@ -778,3 +778,43 @@ Company ALL PASSED (CLANG) + GCC rc 0; tree clean at 555c11a. The three
 recorded T02 gaps (editor owner/repo escaping, marketplace Insert onclick,
 TPP topic-loop fixture coverage) become Brief 10 step 1. Next:
 WORKER-BRIEF-10.md (T02 gap fixes + T03 Science authoring wiring).
+
+## Worker entry — Brief 10 (T02 gap fixes + T03 Science authoring), 2026-11-10
+
+Status: steps 1-4 done, each committed with the full gate. Step 5 is covered by
+the fence checks added in steps 2 and 3. Stopped and waiting for acceptance; T04
+is next after acceptance.
+
+Commits (SkylarkManager, pathspecs only):
+- 289c71d step 1, T02 gap fixes: editor owner/repo through GitHubJsEscape; the
+  marketplace Insert snippet moves to an escaped data-snippet attribute; the
+  TPP preview uses GetDevDir()/ai-upp (honors DEV_DIR) and the harness writes
+  two fixture topics. Three baselines regenerated, each checked line by line.
+- 4e7c241 step 2, authoring endpoint: POST api/papers/<id>/article with
+  expected_paper_revision; deny-by-default (science-author role, or an active
+  science.author grant in x-science-grant); 409 on drift; authoring page at
+  papers/<id>/author; WebRequest::Body(). 22 new fence checks.
+- cea5fc5 step 3, ScienceService : IBrokerService: list-papers, get-paper,
+  get-article need science.read; put-article needs science.author; a missing
+  scope is 403, an unknown op 400. ScienceErrorStatus moved to ScienceModel so
+  HTTP and broker map errors the same way. 7 new broker checks.
+- 7f9913c step 4, real-corpus smoke: WebEngineTests --science-corpus <dir>
+  [min]. Ran against ~/Dev/AnthologyPrivate/site/data: 190 papers listed,
+  SMOKE PASSED. A before/after checksum of all 190 files matched, so the corpus
+  was not written. ListPapers logs each skipped file.
+- Step 5 (fence additions): covered by 4e7c241 and cea5fc5, not a separate commit.
+
+Gate per step: WebEngineTests 170/170 then 177/177; ManagerSkylark --test PASSED;
+CompanySkylark --test ALL TESTS PASSED (CLANG); GCC rc 0 for the three targets;
+captures IDENTICAL after normalization, 76 files (the three intended baselines
+were regenerated in step 1).
+
+Open for the planner:
+- The grant path is bearer-style (x-science-grant). A grant id acts for its
+  subject, and any holder can use it. Confirm that is acceptable, or require a
+  caller binding before T04 uses it.
+- The fence host registers ScienceService on the engine broker. The composed
+  host registration (ManagerSkylark / engine host) comes with T04.
+- The HTTP authoring page has no template; it uses inline HTML and a fetch
+  script. Witz form work is not part of this brief.
+- Writes to the real corpus are not exercised by any test. The smoke is read-only.
