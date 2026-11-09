@@ -463,3 +463,84 @@ live sourceforge.net smoke (manual).
 Next: WORKER-BRIEF-07.md — T02 first slice: per-site template/static roots
 (BazaarCore Skylark hook, foundation now unblocked) + WebFramework asset
 extraction.
+
+## Worker entry — Brief 07 (T02 first slice)
+
+**Commits**
+
+| Step | Repo | Commit | Subject |
+|---|---|---|---|
+| 1 | BazaarCore | 9f22dfc | per-request site roots for template and static lookup |
+| 2 | BazaarCore | 4b14dd7 | site-scoped static serving with containment |
+| 2 | SkylarkManager | 9a5315b | per-site static and template roots for engine listeners |
+| 3 | SkylarkManager | d75e7ed | WebFramework: move inline CSS and JS into asset files |
+| 4 | SkylarkManager | 7508be2 | two-site static and template resolution (fence) |
+| log | SkylarkManager | (this commit) | Brief 07 worker entry |
+
+**Step 1: BazaarCore hooks.** `SkylarkSiteRoots` (thread-local Set, Clear,
+IsOverridden, TemplateRoot, StaticRoot) defaults to `SkylarkApp::Config().path`,
+so an unset root is today's behavior. `Renderer::GetTemplate` puts the template
+root in its cache signature. `GetTemplateDefs` and the stock static handler
+read the root at render time.
+
+**Step 2: engine static serving.** While a site root is set, `static/**` is
+served from that site's static root. Only GET and HEAD are accepted (other
+methods get 405 with `Allow`). `SkylarkSiteRoots::ResolveStatic` accepts plain
+relative paths only: no leading `/`, backslash, NUL, empty, `.` or `..` segment.
+It accepts only an allowlist of static extensions. It resolves symlinks with
+`realpath` and requires the target to lie inside the root. Responses carry
+`X-Content-Type-Options: nosniff`, and ETag and 304 behave as before. Without a
+site root the stock handler is unchanged. `EngineSite::TemplateRoot()` and
+`StaticRoot()` point under the site's data root. `SiteRootsScope` sets them
+around one dispatch in `WebEngineHost::ListenerLoop` and clears them after it.
+
+**Step 3: WebFramework assets.** The 15 style and script providers that
+returned pure string literals now return `WebFrameworkAsset("<file>")`. The
+files are `assets/*.css` and `assets/*.js`, listed in `WebFramework.upp` under
+`Styles` and `Scripts` separators. Each file was written from its provider's
+literal text, byte for byte. The providers that build from theme or density
+data (`ThemeRegistry::GetGlobalStyles`, `WebTheme::GetCssVariables`) are unchanged.
+The loader reads `GetExeDirFile("static/WebFramework/")`, caches the text, and
+throws on a missing file. `deploy-assets.sh <bin_dir>` copies the assets into
+the real directory of a binary. Pass the `CLANG-…` directory, not the
+`bin/examples/` symlink. The full gate runs the deploy step before each test
+binary.
+
+**Step 4: fence additions.** Four checks run after `SetupSites()`: the same
+static name resolves to different files and bytes on alpha and beta, and the
+same template name compiles from each site's own root. Containment checks
+(traversal, absolute and backslash paths, allowlist, missing file, symlink
+escape, cleared state) were added in step 2, 13 checks in all.
+
+**Verification after each commit:** fence 148/148 (step 2 and step 3) and
+152/152 (step 4); ManagerSkylark `--test` PASSED; CompanySkylark `--test`
+ALL TESTS PASSED (CLANG); GCC rc 0 for ManagerSkylark, WebEngineTests and
+CompanySkylark.
+
+**Route diff (WebShowcase, 9 routes, before vs after step 3):** IDENTICAL after
+normalization. Normalization drops `Date` and `Set-Cookie` lines and replaces
+`usr_*` ids and dd/mm/yyyy timestamps. Before normalization, `diff -rq` lists 10
+differing files. All of them are the normalized fields. The baseline is the
+pre-step-1 capture; the post-step-2 capture was also identical.
+
+**Examples.** WebShowcase: rebuilt and recaptured after each step. The
+captured routes include the landing page, showcase, dashboard, workspace and
+telemetry. SkylarkGuiExample is a CtrlLib GUI app with no WebFramework
+dependency, so step 3 cannot change its output and no capture was taken.
+
+**Coverage limits, recorded:**
+- The route captures exercise MegaMenu, Dashboard and AppWorkspace styles and
+  the density, theme, tree and audio scripts. They do not render the GitHub,
+  SourceForge or Sidebar templates. Those three extracted files are checked by
+  construction only (the same literal-to-file extraction as the rest).
+- The cache check in step 4 covers the template root that the cache key uses.
+  It does not read the cache directly.
+- Deployment is explicit. A binary that renders WebFramework pages without
+  `deploy-assets.sh` run for its directory now throws instead of rendering
+  unstyled HTML. Production deployment needs the same step.
+
+**Out of scope, not touched:** Brief 08 (app-renderer witz extraction),
+Company-side work, T04. The untracked `tasks/takeover/WORKER-BRIEF-07.md` is
+left as it was.
+
+**Stopped after step 4 and waiting for acceptance.**
