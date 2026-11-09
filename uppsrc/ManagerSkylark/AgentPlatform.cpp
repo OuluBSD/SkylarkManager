@@ -1,6 +1,7 @@
 #include "ManagerSkylark.h"
 #include "AgentPlatform.h"
 #include "GitHubPlatform.h"
+#include "GitHubTemplates.h"
 
 NAMESPACE_UPP
 
@@ -340,14 +341,13 @@ bool AgentPlatformService::ApplyPatch(const String& owner, const String& repo,
 // UI Component Renderers
 // ---------------------------------------------------------------------------
 
+// Diff viewer: one row per line of a unified diff, coloured by its prefix. The
+// markup is templates/github-agents-diff.witz.
 String AgentPlatformService::RenderDiffViewer(const String& diff_text)
 {
-	String s;
-	s << "<div class=\"wf-code-box\" style=\"background:var(--wf-bg-view,#0d1117); border-radius:6px; font-family:monospace; font-size:0.83rem; line-height:1.45; overflow-x:auto;\">\n";
-
-	Vector<String> lines = Split(diff_text, '\n');
-	for(int i = 0; i < lines.GetCount(); i++) {
-		String line = lines[i];
+	ValueArray lines;
+	Vector<String> diff_lines = Split(diff_text, '\n');
+	for(const String& line : diff_lines) {
 		String line_bg = "transparent";
 		String line_fg = "var(--wf-fg-normal,#e6e8eb)";
 
@@ -364,98 +364,79 @@ String AgentPlatformService::RenderDiffViewer(const String& diff_text)
 			line_fg = "#79c0ff";
 		}
 
-		s << "  <div style=\"padding:1px 12px; background:" << line_bg << "; color:" << line_fg << "; white-space:pre;\">"
-		  << DeHtml(line) << "</div>\n";
+		ValueMap row;
+		row.Add("bg", line_bg);
+		row.Add("fg", line_fg);
+		row.Add("text", line);
+		lines.Add(row);
 	}
-	s << "</div>\n";
-	return s;
+
+	Renderer vars;
+	vars("lines", lines);
+	return RenderGitHubTemplate(vars, "github-agents-diff");
 }
 
+// Run inspector: overview, task, step-by-step trajectory and the patch card.
+// The markup is templates/github-agents-trajectory.witz; the patch card is
+// templates/github-agents-patch.witz, appended only when the run has a patch.
 String AgentPlatformService::RenderTrajectoryInspector(const String& owner, const String& repo,
                                                        const AgentRun& run)
 {
-	String s;
+	String base = "/repo/" + owner + "/" + repo;
 
-	s << "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;\">\n"
-	  << "  <div>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "?tab=agents\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; display:inline-flex; align-items:center; gap:6px;\">"
-	  << VividIcon::Get("arrow-left", 14) << " Back to Agent Runs</a>\n"
-	  << "  </div>\n"
-	  << "  <div style=\"display:flex; gap:8px;\">\n"
-	  << "    <button type=\"button\" id=\"btn-agent-apply-patch\" class=\"wf-btn wf-btn-primary\" style=\"background:var(--wf-color-positive,#00aa7f); border-color:var(--wf-color-positive,#00aa7f); display:inline-flex; align-items:center; gap:6px; font-weight:600;\" onclick=\"AgentPlatformUI.applyPatch('" << owner << "', '" << repo << "', '" << run.id << "')\">"
-	  << VividIcon::Get("check", 14) << " Apply to Branch</button>\n"
-	  << "    <button type=\"button\" id=\"btn-agent-create-pr\" class=\"wf-btn wf-btn-primary\" style=\"background:#8957e5; border-color:#8957e5; display:inline-flex; align-items:center; gap:6px; font-weight:600;\" onclick=\"AgentPlatformUI.createPr('" << owner << "', '" << repo << "', '" << run.id << "')\">"
-	  << VividIcon::Get("git-pull-request", 14) << " Create Pull Request</button>\n"
-	  << "  </div>\n"
-	  << "</div>\n";
-
-	// Run Overview Card
-	s << "<div class=\"wf-card\" style=\"margin-bottom:1.5rem;\">\n"
-	  << "  <div class=\"wf-card-header\">\n"
-	  << "    <div style=\"display:flex; align-items:center; gap:10px;\">\n"
-	  << "      <span style=\"font-size:1.15rem; font-weight:700;\">" << run.id << "</span>\n"
-	  << "      <span class=\"wf-badge wf-badge-" << (run.status == "completed" ? "emerald" : (run.status == "running" ? "amber" : "neutral")) << "\">" << AgentCapitalizeWord(run.status) << "</span>\n"
-	  << "      <span style=\"color:var(--wf-fg-inactive,#8b919d); font-size:0.85rem;\">&middot; Model: <strong>" << run.model << "</strong></span>\n"
-	  << "      <span style=\"color:var(--wf-fg-inactive,#8b919d); font-size:0.85rem;\">&middot; Branch: <code>" << run.branch << "</code></span>\n";
-	if(run.linked_issue > 0)
-		s << "      <span style=\"color:var(--wf-fg-inactive,#8b919d); font-size:0.85rem;\">&middot; Linked: <a href=\"/repo/" << owner << "/" << repo << "/issues/" << run.linked_issue << "\" style=\"color:var(--wf-accent-link,#00acd3); font-weight:600;\">#" << run.linked_issue << "</a></span>\n";
-	s << "    </div>\n"
-	  << "    <span style=\"color:var(--wf-fg-inactive,#8b919d); font-size:0.85rem;\">Duration: " << run.duration << "</span>\n"
-	  << "  </div>\n"
-	  << "  <div class=\"wf-card-body\">\n"
-	  << "    <div style=\"font-weight:600; font-size:1rem; margin-bottom:6px;\">Task Prompt</div>\n"
-	  << "    <div style=\"background:var(--wf-surface,#161b22); border-left:3px solid var(--wf-color-positive,#00aa7f); padding:10px 14px; border-radius:0 6px 6px 0; font-size:0.9rem;\">" << DeHtml(run.task_prompt) << "</div>\n"
-	  << "  </div>\n"
-	  << "</div>\n";
-
-	// Step-by-Step Trajectory
-	s << "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;\">\n"
-	  << "  <h3 style=\"margin:0;\">Autonomous Execution Trajectory (" << run.steps.GetCount() << " Steps)</h3>\n"
-	  << "  <span class=\"wf-badge wf-badge-neutral\">ReAct Loop</span>\n"
-	  << "</div>\n";
-
+	ValueArray steps;
 	for(int i = 0; i < run.steps.GetCount(); i++) {
 		const AgentStep& step = run.steps[i];
-		s << "<div class=\"wf-card\" style=\"margin-bottom:1rem;\">\n"
-		  << "  <div class=\"wf-card-header\" style=\"background:rgba(255,255,255,0.02);\">\n"
-		  << "    <div style=\"display:flex; align-items:center; gap:8px;\">\n"
-		  << "      <span class=\"wf-badge wf-badge-neutral\" style=\"font-weight:700;\">Step " << step.step_index << "</span>\n"
-		  << "      <span style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#8b919d);\">" << step.timestamp << "</span>\n"
-		  << "    </div>\n"
-		  << "    <span class=\"wf-badge wf-badge-cyan\">" << step.tool_name << "</span>\n"
-		  << "  </div>\n"
-		  << "  <div class=\"wf-card-body\" style=\"display:flex; flex-direction:column; gap:10px;\">\n"
-		  << "    <div id=\"agent-step-thought\" style=\"background:rgba(0,161,197,0.08); border-left:3px solid #00a1c5; padding:8px 12px; border-radius:0 4px 4px 0; font-size:0.88rem;\">\n"
-		  << "      <strong style=\"color:#7dd3fc;\">Thought:</strong> " << DeHtml(step.thought) << "\n"
-		  << "    </div>\n"
-		  << "    <div id=\"agent-step-tool\">\n"
-		  << "      <div style=\"font-size:0.75rem; font-weight:600; color:var(--wf-fg-inactive,#8b919d); margin-bottom:2px;\">ACTION &bull; " << ToUpper(step.tool_name) << "</div>\n"
-		  << "      <div style=\"background:var(--wf-bg-view,#0d1117); padding:8px 12px; border-radius:4px; font-family:monospace; font-size:0.82rem; border:1px solid var(--wf-border-color,#30363d); color:#7ee787;\">" << DeHtml(step.tool_args) << "</div>\n"
-		  << "    </div>\n"
-		  << "    <div id=\"agent-step-obs\">\n"
-		  << "      <div style=\"font-size:0.75rem; font-weight:600; color:var(--wf-fg-inactive,#8b919d); margin-bottom:2px;\">OBSERVATION</div>\n"
-		  << "      <pre style=\"background:var(--wf-bg-view,#0d1117); padding:8px 12px; border-radius:4px; font-family:monospace; font-size:0.82rem; border:1px solid var(--wf-border-color,#30363d); margin:0; white-space:pre-wrap; color:var(--wf-fg-normal,#e6e8eb);\">" << DeHtml(step.observation) << "</pre>\n"
-		  << "    </div>\n"
-		  << "  </div>\n"
-		  << "</div>\n";
+		ValueMap row;
+		row.Add("index", step.step_index);
+		row.Add("timestamp", step.timestamp);
+		row.Add("tool_name", step.tool_name);
+		row.Add("tool_upper", ToUpper(step.tool_name));
+		row.Add("thought", step.thought);
+		row.Add("tool_args", step.tool_args);
+		row.Add("observation", step.observation);
+		steps.Add(row);
 	}
 
-	// Generated Patch Diff Card
+	Renderer vars;
+	vars("base", base)
+		("js_owner", GitHubJsEscape(owner))
+		("js_repo", GitHubJsEscape(repo))
+		("js_run_id", GitHubJsEscape(run.id))
+		("icon_arrow_left", VividIcon::Get("arrow-left", 14))
+		("icon_check", VividIcon::Get("check", 14))
+		("icon_pr", VividIcon::Get("git-pull-request", 14))
+		("run_id", run.id)
+		("status_class", run.status == "completed" ? "emerald" : (run.status == "running" ? "amber" : "neutral"))
+		("status_label", AgentCapitalizeWord(run.status))
+		("model", run.model)
+		("branch", run.branch)
+		("has_issue", run.linked_issue > 0)
+		("issue_url", base + "/issues/" + AsString(run.linked_issue))
+		("linked_issue", run.linked_issue)
+		("duration", run.duration)
+		("task_prompt", run.task_prompt)
+		("step_count", run.steps.GetCount())
+		("steps", steps);
+	String patch_html;
 	if(!run.patch_diff.IsEmpty()) {
-		s << "<div id=\"agent-patch-card\" class=\"wf-card\" style=\"margin-top:1.5rem;\">\n"
-		  << "  <div class=\"wf-card-header\">\n"
-		  << "    <span>" << VividIcon::Get("git-commit", 16) << " Generated Code Patch Diff</span>\n"
-		  << "    <span class=\"wf-badge wf-badge-emerald\">Ready to Apply</span>\n"
-		  << "  </div>\n"
-		  << "  <div class=\"wf-card-body\" style=\"padding:0;\">\n"
-		  << RenderDiffViewer(run.patch_diff)
-		  << "  </div>\n"
-		  << "</div>\n";
+		Renderer patch;
+		patch("icon_commit", VividIcon::Get("git-commit", 16))
+			("diff_html", RenderDiffViewer(run.patch_diff));
+		patch_html = RenderGitHubTemplate(patch, "github-agents-patch");
 	}
-
+	vars("patch_html", patch_html);
+	// The trajectory template ends on its loop, with no line end, and witz adds
+	// one when it renders. The patch card already ends its own line, so drop it.
+	String s = RenderGitHubTemplate(vars, "github-agents-trajectory");
+	if(s.EndsWith("\n\n"))
+		s.Trim(s.GetCount() - 1);
 	return s;
 }
 
+// Agents tab: filter bar, dispatch card, run table and the dispatch script. A
+// run id switches to the run inspector. The markup is
+// templates/github-agents-dashboard.witz.
 String AgentPlatformService::RenderRunsDashboard(const String& owner, const String& repo,
                                                 const String& active_author,
                                                 const String& active_status,
@@ -467,133 +448,40 @@ String AgentPlatformService::RenderRunsDashboard(const String& owner, const Stri
 	}
 
 	Vector<AgentRun> runs = GetRuns(owner, repo, active_author, active_status);
-	String s;
+	String base = "/repo/" + owner + "/" + repo;
 
-	// Top Filter & Action Bar
-	s << "<div style=\"display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:10px;\">\n"
-	  << "  <div style=\"display:flex; align-items:center; gap:10px; flex-wrap:wrap;\">\n"
-	  << "    <input type=\"text\" id=\"agent-search\" placeholder=\"Filter agent runs...\" value=\"" << (active_author.IsEmpty() ? "" : "author:" + active_author) << "\" style=\"background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; font-size:0.85rem; width:220px;\">\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "?tab=agents\" class=\"wf-btn " << (active_author.IsEmpty() && active_status.IsEmpty() ? "wf-btn-primary" : "wf-btn-secondary") << "\" style=\"font-size:0.8rem;\">All Runs</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "?tab=agents&author=SeppoPakonen\" class=\"wf-btn " << (active_author == "SeppoPakonen" ? "wf-btn-primary" : "wf-btn-secondary") << "\" style=\"font-size:0.8rem;\">@SeppoPakonen</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "?tab=agents&status=completed\" class=\"wf-btn " << (active_status == "completed" ? "wf-btn-primary" : "wf-btn-secondary") << "\" style=\"font-size:0.8rem;\">Completed</a>\n"
-	  << "  </div>\n"
-	  << "  <button type=\"button\" id=\"btn-toggle-dispatch\" class=\"wf-btn wf-btn-primary\" style=\"background:var(--wf-color-positive,#00aa7f); border-color:var(--wf-color-positive,#00aa7f); display:inline-flex; align-items:center; gap:6px; font-weight:600;\" onclick=\"AgentPlatformUI.toggleDispatchModal()\">"
-	  << VividIcon::Get("plus", 14) << " New Agent Run</button>\n"
-	  << "</div>\n";
-
-	// Interactive Dispatch Modal Card (Hidden by default)
-	s << "<div id=\"agent-dispatch-card\" class=\"wf-card\" style=\"display:none; margin-bottom:1.5rem; border:1px solid var(--wf-color-positive,#00aa7f);\">\n"
-	  << "  <div class=\"wf-card-header\">\n"
-	  << "    <span>" << VividIcon::Get("robot", 16) << " Dispatch SweAgent Autonomous Task</span>\n"
-	  << "    <span class=\"wf-badge wf-badge-emerald\">OpenRouter &bull; ReAct Loop</span>\n"
-	  << "  </div>\n"
-	  << "  <div class=\"wf-card-body\" style=\"display:flex; flex-direction:column; gap:12px;\">\n"
-	  << "    <div>\n"
-	  << "      <label style=\"font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;\">Task Prompt / Instructions</label>\n"
-	  << "      <textarea id=\"agent-prompt\" placeholder=\"Describe the issue to resolve, bug to fix, or feature to implement in " << owner << "/" << repo << "...\" style=\"width:100%; height:85px; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; font-family:inherit;\"></textarea>\n"
-	  << "    </div>\n"
-	  << "    <div style=\"display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;\">\n"
-	  << "      <div>\n"
-	  << "        <label style=\"font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;\">AI Model</label>\n"
-	  << "        <select id=\"agent-model\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;\">\n"
-	  << "          <option value=\"nvidia/nemotron-3.5-super-vl\">nvidia/nemotron-3.5-super-vl</option>\n"
-	  << "          <option value=\"qwen/qwen-2.5-coder-32b-instruct\">qwen/qwen-2.5-coder-32b-instruct</option>\n"
-	  << "          <option value=\"anthropic/claude-3.5-sonnet\">anthropic/claude-3.5-sonnet</option>\n"
-	  << "          <option value=\"deepseek/deepseek-chat\">deepseek/deepseek-chat</option>\n"
-	  << "        </select>\n"
-	  << "      </div>\n"
-	  << "      <div>\n"
-	  << "        <label style=\"font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;\">Link with GitHub Issue</label>\n"
-	  << "        <select id=\"agent-issue\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;\">\n"
-	  << "          <option value=\"0\">None (Standalone Task)</option>\n"
-	  << "          <option value=\"1\">#1 &middot; ManagerSkylark GitHub Parity Integration</option>\n"
-	  << "        </select>\n"
-	  << "      </div>\n"
-	  << "      <div>\n"
-	  << "        <label style=\"font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;\">Target Branch</label>\n"
-	  << "        <input type=\"text\" id=\"agent-branch\" value=\"master\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;\">\n"
-	  << "      </div>\n"
-	  << "    </div>\n"
-	  << "    <div style=\"display:flex; justify-content:flex-end; gap:10px; margin-top:6px;\">\n"
-	  << "      <button type=\"button\" class=\"wf-btn wf-btn-secondary\" onclick=\"AgentPlatformUI.toggleDispatchModal()\">Cancel</button>\n"
-	  << "      <button type=\"button\" id=\"btn-dispatch-agent\" class=\"wf-btn wf-btn-primary\" style=\"background:var(--wf-color-positive,#00aa7f); border-color:var(--wf-color-positive,#00aa7f); font-weight:600;\" onclick=\"AgentPlatformUI.dispatchAgent('" << owner << "', '" << repo << "')\">Start Agent Run</button>\n"
-	  << "    </div>\n"
-	  << "  </div>\n"
-	  << "</div>\n";
-
-	// Runs Table
-	s << "<div class=\"wf-card\">\n"
-	  << "  <div class=\"wf-card-header\">\n"
-	  << "    <span>SweAgent Execution Runs</span>\n"
-	  << "    <span class=\"wf-badge wf-badge-neutral\">" << runs.GetCount() << " Runs</span>\n"
-	  << "  </div>\n"
-	  << "  <div class=\"wf-card-body\" style=\"padding:0;\">\n"
-	  << "    <table class=\"wf-table\">\n"
-	  << "      <thead><tr><th>Run ID &amp; Task</th><th>Model</th><th>Author</th><th>Linked Issue</th><th>Steps</th><th>Duration</th><th>Status</th><th>Action</th></tr></thead>\n"
-	  << "      <tbody>\n";
-
-	for(int i = 0; i < runs.GetCount(); i++) {
-		const AgentRun& r = runs[i];
-		s << "        <tr class=\"agent-run-row\" id=\"row-" << r.id << "\">\n"
-		  << "          <td>\n"
-		  << "            <a href=\"/repo/" << owner << "/" << repo << "?tab=agents&run=" << r.id << "\" style=\"font-weight:600; color:var(--wf-accent-link,#00acd3); text-decoration:none;\">" << r.id << "</a><br>\n"
-		  << "            <span style=\"font-size:0.82rem; color:var(--wf-fg-inactive,#8b919d);\">" << DeHtml(r.task_prompt.Left(60)) << (r.task_prompt.GetLength() > 60 ? "..." : "") << "</span>\n"
-		  << "          </td>\n"
-		  << "          <td><code style=\"font-size:0.75rem;\">" << r.model << "</code></td>\n"
-		  << "          <td><strong>" << r.author << "</strong></td>\n"
-		  << "          <td>" << (r.linked_issue > 0 ? Format("<a href=\"/repo/%s/%s/issues/%d\" style=\"color:var(--wf-accent-link,#00acd3); font-weight:600;\">#%d</a>", owner, repo, r.linked_issue, r.linked_issue) : "<span style=\"color:#8b919d;\">-</span>") << "</td>\n"
-		  << "          <td><strong>" << r.steps.GetCount() << "</strong></td>\n"
-		  << "          <td>" << r.duration << "</td>\n"
-		  << "          <td><span class=\"wf-badge wf-badge-" << (r.status == "completed" ? "emerald" : (r.status == "running" ? "amber" : "neutral")) << "\">" << AgentCapitalizeWord(r.status) << "</span></td>\n"
-		  << "          <td><a href=\"/repo/" << owner << "/" << repo << "?tab=agents&run=" << r.id << "\" class=\"wf-btn wf-btn-secondary\" style=\"padding:3px 10px; font-size:0.75rem;\">Inspect Trajectory</a></td>\n"
-		  << "        </tr>\n";
+	ValueArray rows;
+	for(const AgentRun& r : runs) {
+		ValueMap row;
+		row.Add("id", r.id);
+		row.Add("prompt_excerpt", r.task_prompt.Left(60) + (r.task_prompt.GetLength() > 60 ? "..." : ""));
+		row.Add("model", r.model);
+		row.Add("author", r.author);
+		row.Add("has_issue", r.linked_issue > 0);
+		row.Add("no_issue", r.linked_issue <= 0);
+		row.Add("linked_issue", r.linked_issue);
+		row.Add("issue_url", base + "/issues/" + AsString(r.linked_issue));
+		row.Add("steps", r.steps.GetCount());
+		row.Add("duration", r.duration);
+		row.Add("status_class", r.status == "completed" ? "emerald" : (r.status == "running" ? "amber" : "neutral"));
+		row.Add("status_label", AgentCapitalizeWord(r.status));
+		rows.Add(row);
 	}
 
-	s << "      </tbody>\n"
-	  << "    </table>\n"
-	  << "  </div>\n"
-	  << "</div>\n";
-
-	// JavaScript for Agent Platform Actions
-	s << "<script>\n"
-	  << "window.AgentPlatformUI = {\n"
-	  << "  toggleDispatchModal: function() {\n"
-	  << "    let el = document.getElementById('agent-dispatch-card');\n"
-	  << "    if(el) el.style.display = (el.style.display === 'none' ? 'block' : 'none');\n"
-	  << "  },\n"
-	  << "  dispatchAgent: function(owner, repo) {\n"
-	  << "    let prompt = document.getElementById('agent-prompt').value;\n"
-	  << "    let model = document.getElementById('agent-model').value;\n"
-	  << "    let issue = parseInt(document.getElementById('agent-issue').value || '0');\n"
-	  << "    let branch = document.getElementById('agent-branch').value || 'master';\n"
-	  << "    if(!prompt) { alert('Task prompt is required'); return; }\n"
-	  << "    fetch('/api/agent/dispatch/' + owner + '/' + repo, {\n"
-	  << "      method: 'POST',\n"
-	  << "      headers: {'Content-Type': 'application/json'},\n"
-	  << "      body: JSON.stringify({prompt: prompt, model: model, issue: issue, branch: branch})\n"
-	  << "    }).then(r => r.json()).then(res => {\n"
-	  << "      if(res.ok && res.run) {\n"
-	  << "        window.location.href = '/repo/' + owner + '/' + repo + '?tab=agents&run=' + res.run.id;\n"
-	  << "      } else {\n"
-	  << "        alert(res.error || 'Failed to dispatch agent task');\n"
-	  << "      }\n"
-	  << "    });\n"
-	  << "  },\n"
-	  << "  applyPatch: function(owner, repo, run_id) {\n"
-	  << "    fetch('/api/agent/apply/' + owner + '/' + repo + '/' + run_id, {\n"
-	  << "      method: 'POST'\n"
-	  << "    }).then(r => r.json()).then(res => {\n"
-	  << "      alert(res.message || (res.ok ? 'Patch applied successfully' : 'Failed to apply patch'));\n"
-	  << "    });\n"
-	  << "  },\n"
-	  << "  createPr: function(owner, repo, run_id) {\n"
-	  << "    alert('Pull request created from agent patch for run ' + run_id + '!');\n"
-	  << "    window.location.href = '/repo/' + owner + '/' + repo + '?tab=pulls';\n"
-	  << "  }\n"
-	  << "};\n"
-	  << "</script>\n";
-
-	return s;
+	Renderer vars;
+	vars("base", base)
+		("filter_value", active_author.IsEmpty() ? String() : "author:" + active_author)
+		("all_class", active_author.IsEmpty() && active_status.IsEmpty() ? "wf-btn-primary" : "wf-btn-secondary")
+		("author_class", active_author == "SeppoPakonen" ? "wf-btn-primary" : "wf-btn-secondary")
+		("completed_class", active_status == "completed" ? "wf-btn-primary" : "wf-btn-secondary")
+		("icon_plus", VividIcon::Get("plus", 14))
+		("icon_robot", VividIcon::Get("robot", 16))
+		("repo_path_dots", owner + "/" + repo + "...")
+		("js_owner", GitHubJsEscape(owner))
+		("js_repo", GitHubJsEscape(repo))
+		("run_count", runs.GetCount())
+		("runs", rows);
+	return RenderGitHubTemplate(vars, "github-agents-dashboard");
 }
 
 // ---------------------------------------------------------------------------

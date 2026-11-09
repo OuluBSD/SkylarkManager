@@ -29,3 +29,5 @@
 /repo/SeppoPakonen/demo-repo/blob/master/src/main.cpp
 /repo/SeppoPakonen/demo-repo?tab=wiki
 /repo/SeppoPakonen/second-repo?tab=actions
+/repo/SeppoPakonen/demo-repo?tab=agents&run=run-101
+/repo/SeppoPakonen/demo-repo?tab=agents&run=run-102

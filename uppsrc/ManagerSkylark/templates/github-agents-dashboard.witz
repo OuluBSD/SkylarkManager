@@ -1,0 +1,110 @@
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:10px;">
+  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <input type="text" id="agent-search" placeholder="Filter agent runs..." value="$filter_value" style="background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; font-size:0.85rem; width:220px;">
+    <a href="$base?tab=agents" class="wf-btn $all_class" style="font-size:0.8rem;">All Runs</a>
+    <a href="$base?tab=agents&author=SeppoPakonen" class="wf-btn $author_class" style="font-size:0.8rem;">@SeppoPakonen</a>
+    <a href="$base?tab=agents&status=completed" class="wf-btn $completed_class" style="font-size:0.8rem;">Completed</a>
+  </div>
+  <button type="button" id="btn-toggle-dispatch" class="wf-btn wf-btn-primary" style="background:var(--wf-color-positive,#00aa7f); border-color:var(--wf-color-positive,#00aa7f); display:inline-flex; align-items:center; gap:6px; font-weight:600;" onclick="AgentPlatformUI.toggleDispatchModal()">$raw(icon_plus) New Agent Run</button>
+</div>
+<div id="agent-dispatch-card" class="wf-card" style="display:none; margin-bottom:1.5rem; border:1px solid var(--wf-color-positive,#00aa7f);">
+  <div class="wf-card-header">
+    <span>$raw(icon_robot) Dispatch SweAgent Autonomous Task</span>
+    <span class="wf-badge wf-badge-emerald">OpenRouter &bull; ReAct Loop</span>
+  </div>
+  <div class="wf-card-body" style="display:flex; flex-direction:column; gap:12px;">
+    <div>
+      <label style="font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;">Task Prompt / Instructions</label>
+      <textarea id="agent-prompt" placeholder="Describe the issue to resolve, bug to fix, or feature to implement in $repo_path_dots" style="width:100%; height:85px; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; font-family:inherit;"></textarea>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+      <div>
+        <label style="font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;">AI Model</label>
+        <select id="agent-model" style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;">
+          <option value="nvidia/nemotron-3.5-super-vl">nvidia/nemotron-3.5-super-vl</option>
+          <option value="qwen/qwen-2.5-coder-32b-instruct">qwen/qwen-2.5-coder-32b-instruct</option>
+          <option value="anthropic/claude-3.5-sonnet">anthropic/claude-3.5-sonnet</option>
+          <option value="deepseek/deepseek-chat">deepseek/deepseek-chat</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;">Link with GitHub Issue</label>
+        <select id="agent-issue" style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;">
+          <option value="0">None (Standalone Task)</option>
+          <option value="1">#1 &middot; ManagerSkylark GitHub Parity Integration</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.82rem; font-weight:600; display:block; margin-bottom:4px;">Target Branch</label>
+        <input type="text" id="agent-branch" value="master" style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6e8eb); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px;">
+      </div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:6px;">
+      <button type="button" class="wf-btn wf-btn-secondary" onclick="AgentPlatformUI.toggleDispatchModal()">Cancel</button>
+      <button type="button" id="btn-dispatch-agent" class="wf-btn wf-btn-primary" style="background:var(--wf-color-positive,#00aa7f); border-color:var(--wf-color-positive,#00aa7f); font-weight:600;" onclick="AgentPlatformUI.dispatchAgent('$raw(js_owner)', '$raw(js_repo)')">Start Agent Run</button>
+    </div>
+  </div>
+</div>
+<div class="wf-card">
+  <div class="wf-card-header">
+    <span>SweAgent Execution Runs</span>
+    <span class="wf-badge wf-badge-neutral">$run_count Runs</span>
+  </div>
+  <div class="wf-card-body" style="padding:0;">
+    <table class="wf-table">
+      <thead><tr><th>Run ID &amp; Task</th><th>Model</th><th>Author</th><th>Linked Issue</th><th>Steps</th><th>Duration</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+$for(r in runs)        <tr class="agent-run-row" id="row-$r.id">
+          <td>
+            <a href="$base?tab=agents&run=$r.id" style="font-weight:600; color:var(--wf-accent-link,#00acd3); text-decoration:none;">$r.id</a><br>
+            <span style="font-size:0.82rem; color:var(--wf-fg-inactive,#8b919d);">$r.prompt_excerpt</span>
+          </td>
+          <td><code style="font-size:0.75rem;">$r.model</code></td>
+          <td><strong>$r.author</strong></td>
+          <td>$if(r.has_issue)<a href="$r.issue_url" style="color:var(--wf-accent-link,#00acd3); font-weight:600;">#$r.linked_issue</a>$endif$if(r.no_issue)<span style="color:#8b919d;">-</span>$endif</td>
+          <td><strong>$r.steps</strong></td>
+          <td>$r.duration</td>
+          <td><span class="wf-badge wf-badge-$r.status_class">$r.status_label</span></td>
+          <td><a href="$base?tab=agents&run=$r.id" class="wf-btn wf-btn-secondary" style="padding:3px 10px; font-size:0.75rem;">Inspect Trajectory</a></td>
+        </tr>
+$endfor      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+window.AgentPlatformUI = {
+  toggleDispatchModal: function() {
+    let el = document.getElementById('agent-dispatch-card');
+    if(el) el.style.display = (el.style.display === 'none' ? 'block' : 'none');
+  },
+  dispatchAgent: function(owner, repo) {
+    let prompt = document.getElementById('agent-prompt').value;
+    let model = document.getElementById('agent-model').value;
+    let issue = parseInt(document.getElementById('agent-issue').value || '0');
+    let branch = document.getElementById('agent-branch').value || 'master';
+    if(!prompt) { alert('Task prompt is required'); return; }
+    fetch('/api/agent/dispatch/' + owner + '/' + repo, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt: prompt, model: model, issue: issue, branch: branch})
+    }).then(r => r.json()).then(res => {
+      if(res.ok && res.run) {
+        window.location.href = '/repo/' + owner + '/' + repo + '?tab=agents&run=' + res.run.id;
+      } else {
+        alert(res.error || 'Failed to dispatch agent task');
+      }
+    });
+  },
+  applyPatch: function(owner, repo, run_id) {
+    fetch('/api/agent/apply/' + owner + '/' + repo + '/' + run_id, {
+      method: 'POST'
+    }).then(r => r.json()).then(res => {
+      alert(res.message || (res.ok ? 'Patch applied successfully' : 'Failed to apply patch'));
+    });
+  },
+  createPr: function(owner, repo, run_id) {
+    alert('Pull request created from agent patch for run ' + run_id + '!');
+    window.location.href = '/repo/' + owner + '/' + repo + '?tab=pulls';
+  }
+};
+</script>

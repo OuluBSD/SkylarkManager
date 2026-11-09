@@ -1,0 +1,3 @@
+<div class="wf-code-box" style="background:var(--wf-bg-view,#0d1117); border-radius:6px; font-family:monospace; font-size:0.83rem; line-height:1.45; overflow-x:auto;">
+$for(l in lines)  <div style="padding:1px 12px; background:$l.bg; color:$l.fg; white-space:pre;">$l.text</div>
+$endfor</div>
