@@ -45,6 +45,26 @@
 | `GET /api/releases` | JSON list of v2 releases |
 | `POST /api/sweagent/run` | Execute SweAgent task and return trajectory |
 
+## GitHub views and witz templates
+
+The GitHub repo tabs are moving from inline HTML to witz templates in
+`templates/` (T02 brief 09). Interim state:
+
+- Templates render through the app's default template root, which is the
+  executable's directory. `deploy-templates.sh <bin_dir>` copies `templates/*.witz`
+  there. Run it before a binary renders GitHub pages.
+- `GitHubTemplates.cpp` is the string bridge. `RenderGitHubTemplate` returns the
+  rendered text with `\n` line ends (witz produces `\r\n`), and throws if the
+  template does not compile.
+- Witz escapes values by default. A value that the old literal code wrote raw is
+  now escaped. For the captured fixtures the output is the same.
+- The site-scoped template root (engine composition) comes with T04. Until then
+  these templates are not served by a WebEngine site.
+- Converted so far: the commits tab (`RenderRepoCommitsTab`). The other tabs
+  still build HTML in their TUs.
+- Capture check: `upptst/GitHubCapture/` (see its README) before and after each
+  change.
+
 ## Verification
 
 Build with `bin/build -m CLANG reference/ManagerSkylark` and run `./bin/CLANG/ManagerSkylark --test`.

@@ -1,39 +1,24 @@
 #include "ManagerSkylark.h"
 #include "GitHubPlatform.h"
 #include "GitHubRepoPage.h"
+#include "GitHubTemplates.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
 
 NAMESPACE_UPP
 
-// Commits tab: recent commit history for the active branch.
+// Commits tab: recent commit history for the active branch. The markup is
+// templates/github-commits.witz; this builds its data model.
 void RenderRepoCommitsTab(GitHubRepoPage& page)
 {
-	const String& branch = page.branch;
-	const LocalRepoInfo& info = page.info;
-	String& content = page.content;
+	Vector<ValueMap> commits = GitHubPlatformService::GetCommits(page.info.path, 30);
+	ValueArray rows;
+	for(const ValueMap& c : commits)
+		rows.Add(c);
 
-	Vector<ValueMap> commits = GitHubPlatformService::GetCommits(info.path, 30);
-	content
-		<< "<div class=\"wf-card\">\n"
-		<< "  <div class=\"wf-card-header\"><span>Commit History &middot; " << branch << "</span><span class=\"wf-badge wf-badge-neutral\">" << commits.GetCount() << " commits</span></div>\n"
-		<< "  <div class=\"wf-card-body\" style=\"padding:0;\">\n"
-		<< "    <div class=\"wf-gh-file-box\" style=\"border:none; margin:0;\">\n";
-	for(const ValueMap& c : commits) {
-		content
-			<< "      <div class=\"wf-gh-file-row\" style=\"justify-content:space-between; padding:12px 16px;\">\n"
-			<< "        <div>\n"
-			<< "          <div style=\"font-weight:600; color:var(--wf-fg-normal,#ffffff); font-size:0.92rem;\">" << (String)c["msg"] << "</div>\n"
-			<< "          <div style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px;\">"
-			<< "            <strong>" << (String)c["author"] << "</strong> committed " << (String)c["time"] << "\n"
-			<< "          </div>\n"
-			<< "        </div>\n"
-			<< "        <div>\n"
-			<< "          <code style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); padding:3px 8px; border-radius:4px;\">" << (String)c["hash"] << "</code>\n"
-			<< "        </div>\n"
-			<< "      </div>\n";
-	}
-	content << "    </div>\n  </div>\n</div>\n";
+	Renderer vars;
+	vars("branch", page.branch)("count", Value(commits.GetCount()))("commits", rows);
+	page.content << RenderGitHubTemplate(vars, "github-commits");
 }
 
 // Actions tab: workflow catalog/editor or the workflow run table.

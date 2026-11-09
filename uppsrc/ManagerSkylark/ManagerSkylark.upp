@@ -62,6 +62,12 @@ file
 	GitHubRepoPulls.cpp,
 	GitHubRepoTabs.cpp,
 	GitHubRepoPage.h,
+	GitHubTemplates.h,
+	GitHubTemplates.cpp,
+
+	Templates readonly separator,
+	templates/github-commits.witz,
+	deploy-templates.sh,
 	GitHubAdapterTests.cpp,
 	SourceForgePlatform.h,
 	SourceForgePlatform.cpp,
