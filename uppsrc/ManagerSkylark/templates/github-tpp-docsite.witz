@@ -1,0 +1,42 @@
+<div style="background:#ffffff; color:#24292f; border-radius:8px; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <!-- Top U++ Banner -->
+  <div style="background:#003366; color:#ffffff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-size:1.3rem; font-weight:800; letter-spacing:0.5px;">Ultimate++</span>
+      <span style="font-size:0.95rem; color:#8ab4f8;">Documentation &middot; $rel_dir</span>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <a href="/repo/SeppoPakonen/ai-upp-priv/actions/new?template=pages-upp-tpp" class="wf-btn" style="background:#ffffff; color:#003366; font-weight:600; padding:4px 12px; font-size:0.8rem; text-decoration:none;">$raw(icon_arrow_left) Back to Workflow Editor</a>
+    </div>
+  </div>
+  <!-- Two-Column Layout matching ultimatepp.org -->
+  <div style="display:flex; min-height:600px;">
+    <!-- Sidebar Navigation -->
+    <div style="width:280px; background:#f6f8fa; border-right:1px solid #d0d7de; padding:14px; flex-shrink:0;">
+      <div style="font-weight:700; font-size:0.88rem; color:#57606a; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.5px;">Topics ($topic_count)</div>
+      <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px;">
+$for(n in nav)        <li><a href="#topic-$n.index" onclick="showTppDoc($n.index)" id="tpp-nav-$n.index" style="display:block; padding:5px 8px; border-radius:4px; font-size:0.86rem; color:$n.style text-decoration:none;">$n.title</a></li>
+$endfor      </ul>
+    </div>
+    <!-- Main Content Reader -->
+    <div id="tpp-doc-content" style="flex:1; padding:24px 32px; background:#ffffff; overflow-y:auto; max-height:800px;">
+$for(p in panes)      <div class="tpp-topic-pane" id="tpp-pane-$p.index" style="display:$p.display;">
+        <div style="font-size:0.82rem; color:#57606a; margin-bottom:6px;">$rel_dir / $p.file</div>
+        <h1 style="font-size:1.6rem; font-weight:700; border-bottom:1px solid #d0d7de; padding-bottom:8px; margin-bottom:16px; color:#1f2328;">$p.title</h1>
+        <div class="tpp-rendered-body" style="font-size:0.95rem; color:#1f2328; line-height:1.6;">
+$raw(p.body)
+        </div>
+      </div>
+$endfor    </div>
+  </div>
+</div>
+<script>
+function showTppDoc(idx) {
+  document.querySelectorAll('.tpp-topic-pane').forEach((p, i) => { p.style.display = (i === idx ? 'block' : 'none'); });
+  document.querySelectorAll('[id^="tpp-nav-"]').forEach((a, i) => {
+    a.style.color = (i === idx ? '#0969da' : '#24292f');
+    a.style.fontWeight = (i === idx ? '600' : 'normal');
+    a.style.background = (i === idx ? '#ddf4ff' : 'transparent');
+  });
+}
+</script>

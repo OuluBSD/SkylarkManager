@@ -85,6 +85,7 @@ file
 	templates/github-user-sidebar.witz,
 	templates/github-actions-catalog.witz,
 	templates/github-actions-editor.witz,
+	templates/github-tpp-docsite.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
 	templates/github-pull-detail.witz,

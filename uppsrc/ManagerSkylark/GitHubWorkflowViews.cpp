@@ -227,66 +227,36 @@ String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 		ff.Next();
 	}
 
-	String h;
-	h << "<div style=\"background:#ffffff; color:#24292f; border-radius:8px; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;\">\n"
-	  << "  <!-- Top U++ Banner -->\n"
-	  << "  <div style=\"background:#003366; color:#ffffff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;\">\n"
-	  << "    <div style=\"display:flex; align-items:center; gap:12px;\">\n"
-	  << "      <span style=\"font-size:1.3rem; font-weight:800; letter-spacing:0.5px;\">Ultimate++</span>\n"
-	  << "      <span style=\"font-size:0.95rem; color:#8ab4f8;\">Documentation &middot; " << tpp_rel_dir << "</span>\n"
-	  << "    </div>\n"
-	  << "    <div style=\"display:flex; gap:10px;\">\n"
-	  << "      <a href=\"/repo/SeppoPakonen/ai-upp-priv/actions/new?template=pages-upp-tpp\" class=\"wf-btn\" style=\"background:#ffffff; color:#003366; font-weight:600; padding:4px 12px; font-size:0.8rem; text-decoration:none;\">"
-	  << VividIcon::Get("arrow-left", 14) << " Back to Workflow Editor</a>\n"
-	  << "    </div>\n"
-	  << "  </div>\n"
-	  << "  <!-- Two-Column Layout matching ultimatepp.org -->\n"
-	  << "  <div style=\"display:flex; min-height:600px;\">\n"
-	  << "    <!-- Sidebar Navigation -->\n"
-	  << "    <div style=\"width:280px; background:#f6f8fa; border-right:1px solid #d0d7de; padding:14px; flex-shrink:0;\">\n"
-	  << "      <div style=\"font-weight:700; font-size:0.88rem; color:#57606a; margin-bottom:10px; text-transform:uppercase; letter-spacing:0.5px;\">Topics (" << files.GetCount() << ")</div>\n"
-	  << "      <ul style=\"list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:4px;\">\n";
-
+	ValueArray nav;
 	for(int i = 0; i < files.GetCount(); i++) {
-		String ftitle = titles[i];
 		bool active = (i == 0);
-		h << "        <li><a href=\"#topic-" << i << "\" onclick=\"showTppDoc(" << i << ")\" id=\"tpp-nav-" << i << "\" style=\"display:block; padding:5px 8px; border-radius:4px; font-size:0.86rem; color:" << (active ? "#0969da; font-weight:600; background:#ddf4ff;" : "#24292f;") << " text-decoration:none;\">"
-		  << EscapeHtml(ftitle) << "</a></li>\n";
+		ValueMap n;
+		n.Add("index", i);
+		n.Add("style", String(active ? "#0969da; font-weight:600; background:#ddf4ff;" : "#24292f;"));
+		n.Add("title", titles[i]);
+		nav.Add(n);
 	}
 
-	h << "      </ul>\n"
-	  << "    </div>\n"
-	  << "    <!-- Main Content Reader -->\n"
-	  << "    <div id=\"tpp-doc-content\" style=\"flex:1; padding:24px 32px; background:#ffffff; overflow-y:auto; max-height:800px;\">\n";
-
+	ValueArray panes;
 	for(int i = 0; i < files.GetCount(); i++) {
 		String tit = titles[i];
 		String qtf = ExtractTppText(files[i], tit);
-		String body_html = QtfToReadableHtml(qtf);
-		h << "      <div class=\"tpp-topic-pane\" id=\"tpp-pane-" << i << "\" style=\"display:" << (i == 0 ? "block" : "none") << ";\">\n"
-		  << "        <div style=\"font-size:0.82rem; color:#57606a; margin-bottom:6px;\">" << tpp_rel_dir << " / " << GetFileName(files[i]) << "</div>\n"
-		  << "        <h1 style=\"font-size:1.6rem; font-weight:700; border-bottom:1px solid #d0d7de; padding-bottom:8px; margin-bottom:16px; color:#1f2328;\">" << EscapeHtml(tit) << "</h1>\n"
-		  << "        <div class=\"tpp-rendered-body\" style=\"font-size:0.95rem; color:#1f2328; line-height:1.6;\">\n"
-		  << body_html << "\n"
-		  << "        </div>\n"
-		  << "      </div>\n";
+		ValueMap p;
+		p.Add("index", i);
+		p.Add("display", String(i == 0 ? "block" : "none"));
+		p.Add("file", GetFileName(files[i]));
+		p.Add("title", tit);
+		p.Add("body", QtfToReadableHtml(qtf));
+		panes.Add(p);
 	}
 
-	h << "    </div>\n"
-	  << "  </div>\n"
-	  << "</div>\n"
-	  << "<script>\n"
-	  << "function showTppDoc(idx) {\n"
-	  << "  document.querySelectorAll('.tpp-topic-pane').forEach((p, i) => { p.style.display = (i === idx ? 'block' : 'none'); });\n"
-	  << "  document.querySelectorAll('[id^=\"tpp-nav-\"]').forEach((a, i) => {\n"
-	  << "    a.style.color = (i === idx ? '#0969da' : '#24292f');\n"
-	  << "    a.style.fontWeight = (i === idx ? '600' : 'normal');\n"
-	  << "    a.style.background = (i === idx ? '#ddf4ff' : 'transparent');\n"
-	  << "  });\n"
-	  << "}\n"
-	  << "</script>\n";
-
-	return h;
+	Renderer vars;
+	vars("rel_dir", tpp_rel_dir)
+		("topic_count", files.GetCount())
+		("icon_arrow_left", VividIcon::Get("arrow-left", 14))
+		("nav", nav)
+		("panes", panes);
+	return RenderGitHubTemplate(vars, "github-tpp-docsite");
 }
 
 END_UPP_NAMESPACE
