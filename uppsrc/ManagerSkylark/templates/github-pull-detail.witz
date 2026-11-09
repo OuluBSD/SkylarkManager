@@ -1,0 +1,97 @@
+$if(has_unavailable)<div class="wf-alert wf-alert-warning">Pull request #$pr_num is unavailable from GitHub: $raw(unavailable)</div>$else<div style="margin-bottom:1.5rem;">
+  <div style="margin-bottom:0.75rem;">
+    <a href="/repo/$owner/$repo/pulls" class="wf-gh-btn" style="font-size:0.82rem; display:inline-flex; align-items:center; gap:6px;">$raw(icon_chevron_left) Back to pull requests</a>
+  </div>
+  <h1 style="font-size:1.75rem; font-weight:600; margin:0 0 8px 0; color:var(--wf-fg-normal,#e6edf3);">$title <span style="color:var(--wf-fg-inactive,#7d8590); font-weight:400;">#$pr_num</span></h1>
+  <div style="display:flex; align-items:center; gap:10px; font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); flex-wrap:wrap;">
+    <span class="wf-badge" style="background:$state_bg; color:#ffffff; font-weight:700; padding:4px 10px; border-radius:12px; font-size:0.82rem; display:inline-flex; align-items:center; gap:4px;">$raw(state_icon) $state_label</span>
+    <span><strong>$author</strong> wants to merge into <code>$base</code> from <code>$head</code> &middot; opened on $created</span>
+  </div>
+</div>
+<div class="wf-view-toggle" style="margin-bottom:1.5rem;">
+  <button type="button" id="btn-pr-convo" class="active" onclick="switchPrTab('convo')">$raw(icon_message_square) Conversation</button>
+  <button type="button" id="btn-pr-diff" onclick="switchPrTab('diff')">$raw(icon_code) Files changed</button>
+</div>
+<div id="pr-convo-section">
+  <div class="wf-gh-file-box markdown-render-box" style="margin-bottom:1.5rem;">
+    <div class="wf-gh-file-header" style="justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:8px;"><strong>$author</strong> <span style="color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;">commented on $created</span></div>
+      <span class="wf-badge wf-badge-neutral" style="font-size:0.75rem;">Author</span>
+    </div>
+    <textarea class="raw-markdown" style="display:none;">$markdown_text</textarea>
+    <div class="wf-gh-file-body markdown-body" style="padding:16px; font-size:0.92rem; line-height:1.6;">$for(b in body_items)$b.body_text</div>$endfor$for(e in empty_items)<em>No description provided.</em></div>$endfor
+  </div>
+$for(c in comments)  <div class="wf-gh-file-box markdown-render-box" style="margin-bottom:1.5rem;">
+    <div class="wf-gh-file-header" style="justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:8px;"><strong>$c.author</strong> <span style="color:var(--wf-fg-inactive,#7d8590); font-size:0.82rem;">commented on $c.time</span></div>
+      <span class="wf-badge wf-badge-neutral" style="font-size:0.75rem;">Reviewer</span>
+    </div>
+    <textarea class="raw-markdown" style="display:none;">$c.body</textarea>
+    <div class="wf-gh-file-body markdown-body" style="padding:16px; font-size:0.92rem; line-height:1.6;">$c.body</div>
+  </div>
+$endfor  <div class="wf-alert wf-alert-info" style="margin-bottom:1.5rem;">CI checks are not loaded for this pull request.</div>
+$if(is_open)  <div id="pr-merge-box" class="wf-card" style="margin-bottom:1.5rem; border:1px solid #238636;">
+    <div class="wf-card-header" style="background:rgba(35,134,54,0.1);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="color:#238636;">$raw(icon_git_pr_18)</span>
+        <strong>Merge pull request</strong>
+      </div>
+      <span class="wf-badge wf-badge-emerald">Clean branch</span>
+    </div>
+    <div class="wf-card-body">
+      <p style="margin-bottom:12px; font-size:0.88rem;">This branch has no conflicts with the base branch (<code>$base</code>). Merging can be performed automatically.</p>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button id="btn-merge-pr" onclick="GitHubPlatformUI.mergePR('$raw(js_owner)', '$raw(js_repo)', $pr_num)" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-weight:600; padding:7px 16px;">$raw(icon_git_pr_15) Merge pull request</button>
+        <button id="btn-close-pr" onclick="GitHubPlatformUI.closePR('$raw(js_owner)', '$raw(js_repo)', $pr_num)" class="wf-btn" style="background:var(--wf-surface,#161b22); color:#f85149; border-color:var(--wf-border-color,#30363d); font-size:0.82rem;">Close pull request</button>
+      </div>
+    </div>
+  </div>
+$endif$if(is_merged)  <div class="wf-card" style="margin-bottom:1.5rem; border:1px solid #8957e5;">
+    <div class="wf-card-header" style="background:rgba(137,87,229,0.1); color:#a371f7;">
+      <span>$raw(icon_check_18) Pull request successfully merged and closed</span>
+    </div>
+  </div>
+$endif  <div class="wf-card">
+    <div class="wf-card-header"><span>Add a comment</span></div>
+    <div class="wf-card-body">
+      <textarea id="pr-comment-text" rows="4" placeholder="Leave a review comment on this pull request..." style="width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:10px; color:var(--wf-fg-normal,#e6edf3); font-size:0.88rem; font-family:inherit; margin-bottom:12px;"></textarea>
+      <div style="display:flex; justify-content:flex-end;">
+        <button id="btn-submit-pr-comment" onclick="GitHubPlatformUI.commentPR('$raw(js_owner)', '$raw(js_repo)', $pr_num)" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600;">Comment</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="pr-diff-section" style="display:none;">
+  <div class="wf-card" style="margin-bottom:1.5rem;">
+    <div class="wf-card-header" style="justify-content:space-between;">
+      <span>Showing unified diff for pull request #$pr_num</span>
+      <span class="wf-badge wf-badge-neutral">git diff $diff_range</span>
+    </div>
+    <div class="wf-card-body" style="padding:0;">
+      <div style="font-family:monospace; font-size:0.8rem; background:var(--wf-bg-view,#0d1117); overflow-x:auto;">
+$if(has_diff_error)        <div class="wf-alert wf-alert-warning">Diff is unavailable from GitHub: $raw(diff_error)</div>
+$endif$if(show_no_diff)        <div class="wf-alert wf-alert-warning">No diff is available from GitHub for this pull request.</div>
+$endif$for(d in diff_rows)        <div style="padding:2px 12px; background:$d.bg; color:$d.fg; white-space:pre;">$d.text</div>
+$endfor      </div>
+    </div>
+  </div>
+</div>
+<script>
+function switchPrTab(tab) {
+  let cSec = document.getElementById('pr-convo-section');
+  let dSec = document.getElementById('pr-diff-section');
+  let bC = document.getElementById('btn-pr-convo');
+  let bD = document.getElementById('btn-pr-diff');
+  if(tab === 'diff') {
+    if(cSec) cSec.style.display = 'none';
+    if(dSec) dSec.style.display = 'block';
+    if(bC) bC.classList.remove('active');
+    if(bD) bD.classList.add('active');
+  } else {
+    if(cSec) cSec.style.display = 'block';
+    if(dSec) dSec.style.display = 'none';
+    if(bC) bC.classList.add('active');
+    if(bD) bD.classList.remove('active');
+  }
+}
+</script>$endif

@@ -69,6 +69,8 @@ file
 	templates/github-commits.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
+	templates/github-pull-detail.witz,
+	templates/github-pulls-list.witz,
 	deploy-templates.sh,
 	GitHubAdapterTests.cpp,
 	SourceForgePlatform.h,

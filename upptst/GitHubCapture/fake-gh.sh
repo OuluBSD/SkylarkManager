@@ -10,6 +10,14 @@ case "$*" in
 		echo '[{"id":11,"user":{"login":"carol"},"body":"Repro attached","created_at":"2026-11-02T11:00:00Z"}]' ;;
 	*"repos/SeppoPakonen/demo-repo/issues/1"*)
 		echo '{"number":1,"title":"Crash on start","body":"Start it and it crashes.","state":"open","user":{"login":"alice"},"created_at":"2026-11-02T10:00:00Z","comments":1}' ;;
+	*"repos/SeppoPakonen/demo-repo/issues/2/comments"*)
+		echo '[]' ;;
+	*"repos/SeppoPakonen/demo-repo/issues/2"*)
+		echo '{"number":2,"title":"Docs gap","body":"","state":"closed","user":{"login":"bob"},"created_at":"2026-11-03T12:00:00Z","comments":0}' ;;
+	*"repos/SeppoPakonen/demo-repo/pulls/2"*)
+		echo '{"number":2,"title":"Merged change","body":"","state":"closed","user":{"login":"alice"},"created_at":"2026-11-02T09:00:00Z","merged_at":"2026-11-03T10:00:00Z","head":{"ref":"feature/done"},"base":{"ref":"master"},"html_url":"https://github.com/SeppoPakonen/demo-repo/pull/2"}' ;;
+	*"pr diff 2 -R SeppoPakonen/demo-repo"*)
+		: ;;
 	*"repos/SeppoPakonen/demo-repo/pulls?state=all"*)
 		echo '[{"number":1,"title":"Add parity","state":"open","user":{"login":"alice"},"created_at":"2026-11-02T09:00:00Z","merged_at":null,"head":{"ref":"feature/parity"},"base":{"ref":"master"},"html_url":"https://github.com/SeppoPakonen/demo-repo/pull/1"}]' ;;
 	*"repos/SeppoPakonen/demo-repo/pulls/1/comments"*)

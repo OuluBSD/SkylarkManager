@@ -21,3 +21,7 @@
 /api/gh/repos/SeppoPakonen
 /repo/SeppoPakonen/demo-repo/issues/99
 /repo/SeppoPakonen/second-repo?tab=issues
+/repo/SeppoPakonen/demo-repo/pulls/99
+/repo/SeppoPakonen/second-repo?tab=pulls
+/repo/SeppoPakonen/demo-repo/issues/2
+/repo/SeppoPakonen/demo-repo/pulls/2

@@ -172,19 +172,6 @@ bool GitHubPlatformService::RunGitHubAdapterSyntheticTests(const String& scratch
 		return Fail("a missing gh executable must report pull requests unavailable, not fabricate them");
 	Cout() << "ok    GitHub pull request list reports unavailable when gh cannot run\n";
 
-	GitHubRepoPage page;
-	page.owner = "acme";
-	page.repo = "tools";
-	page.pr_num = 7;
-	RenderRepoPullsList(page);
-	if(page.content.Find("unavailable from GitHub") < 0)
-		return Fail("the pull request tab must show the unavailable state, not an empty list");
-	page.content.Clear();
-	RenderRepoPullDetail(page);
-	if(page.content.Find("Pull request #7 is unavailable from GitHub") < 0)
-		return Fail("the pull request detail must show the unavailable state, not sample data");
-	Cout() << "ok    pull request tab and detail render the unavailable state\n";
-
 	unavailable.Clear();
 	GitHubPlatformService::GetLiveActions("acme", "tools", &unavailable);
 	if(unavailable.IsEmpty())

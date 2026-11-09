@@ -1,0 +1,57 @@
+$if(has_unavailable)<div class="wf-alert wf-alert-warning">Pull requests are unavailable from GitHub: $raw(unavailable)</div>$else<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <div style="font-size:1.1rem; font-weight:700;">Pull Requests</div>
+  <button type="button" id="btn-new-pr" onclick="GitHubPlatformUI.toggleNewPRCard()" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-size:0.82rem; font-weight:600; display:inline-flex; align-items:center; gap:6px;">$raw(icon_plus) New pull request</button>
+</div>
+<div id="gh-new-pr-card" class="wf-card" style="display:none; margin-bottom:1.5rem; border:1px solid #238636;">
+  <div class="wf-card-header"><span>Open a new Pull Request</span></div>
+  <div class="wf-card-body" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; gap:12px; align-items:center;">
+      <div style="flex:1;">
+        <label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:4px;">Base branch</label>
+        <select id="gh-new-pr-base" style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6edf3); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px; font-size:0.85rem;">
+          <option value="master" selected>base: master</option>
+        </select>
+      </div>
+      <span style="font-size:1.2rem; margin-top:18px;">&larr;</span>
+      <div style="flex:1;">
+        <label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:4px;">Compare branch</label>
+        <select id="gh-new-pr-head" style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6edf3); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 10px; font-size:0.85rem;">
+          <option value="feature/platform-parity" selected>compare: feature/platform-parity</option>
+          <option value="feature/packet-router">compare: feature/packet-router</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:4px;">Title</label>
+      <input type="text" id="gh-new-pr-title" placeholder="Title of your pull request..." style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6edf3); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 10px; font-size:0.88rem;">
+    </div>
+    <div>
+      <label style="font-size:0.8rem; font-weight:600; display:block; margin-bottom:4px;">Description</label>
+      <textarea id="gh-new-pr-body" rows="4" placeholder="Describe your changes and link issues..." style="width:100%; background:var(--wf-bg-view,#0d1117); color:var(--wf-fg-normal,#e6edf3); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 10px; font-size:0.88rem; font-family:inherit;"></textarea>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button type="button" onclick="GitHubPlatformUI.toggleNewPRCard()" class="wf-btn wf-btn-secondary">Cancel</button>
+      <button type="button" id="btn-submit-new-pr" onclick="GitHubPlatformUI.createPR('$raw(js_owner)', '$raw(js_repo)')" class="wf-btn wf-btn-positive" style="background:#238636; border-color:#2ea043; color:#fff; font-weight:600;">Create pull request</button>
+    </div>
+  </div>
+</div>
+<div class="wf-gh-file-box">
+  <div class="wf-gh-file-header" style="justify-content:space-between;">
+    <div style="display:flex; gap:16px; font-size:0.88rem;">
+      <strong>$raw(icon_pr) $pr_open Open</strong>
+      <span style="color:var(--wf-fg-inactive,#7d8590);">$raw(icon_check) $pr_closed Merged / Closed</span>
+    </div>
+  </div>
+$for(row in prs)  <div class="wf-gh-file-row" style="justify-content:space-between; padding:12px 16px;">
+    <div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="color:$row.tone;">$raw(row.icon)</span>
+        <a href="$row.href" style="font-weight:600; font-size:0.95rem; color:var(--wf-fg-normal,#e6edf3); text-decoration:none;">PR #$row.num: $row.title</a>
+      </div>
+      <div style="font-size:0.78rem; color:var(--wf-fg-inactive,#7d8590); margin-top:4px; margin-left:24px;">
+        #$row.num opened on $row.created by <strong>$row.author</strong> &middot; <code>$row.head</code> into <code>$row.base</code>
+      </div>
+    </div>
+    <span class="wf-badge wf-badge-$row.badge">$row.label</span>
+  </div>
+$endfor</div>$endif
