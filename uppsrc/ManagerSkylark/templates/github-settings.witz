@@ -1,0 +1,20 @@
+<div class="wf-card">
+  <div class="wf-card-header"><span>General Settings &middot; $owner/$repo</span></div>
+  <div class="wf-card-body">
+    <div style="margin-bottom:16px;">
+      <label style="font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;">Repository Name</label>
+      <input type="text" value="$repo" style="background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.85rem;">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;">Default Branch</label>
+      <input type="text" value="$branch" readonly style="background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:200px; font-size:0.85rem;">
+    </div>
+    <h4>Features</h4>
+    <p style="font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:20px;">Feature settings are not read from GitHub by this view.</p>
+    <h4 style="color:#f85149;">Danger Zone</h4>
+    <div style="border:1px solid rgba(248,81,73,0.4); border-radius:6px; padding:12px;">
+      <div style="font-weight:600;">Change repository visibility</div>
+      <div style="font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590);">Visibility changes are not available from this view.</div>
+    </div>
+  </div>
+</div>

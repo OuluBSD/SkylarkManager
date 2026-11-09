@@ -158,35 +158,16 @@ void RenderRepoSecurityTab(GitHubRepoPage& page)
 	page.content << RenderGitHubTemplate(vars, "github-security");
 }
 
-// Settings tab: general repository settings and danger zone.
+// Settings tab: general repository settings and danger zone. The view reads no
+// visibility or feature state from GitHub, so the template says so. The markup
+// is templates/github-settings.witz.
 void RenderRepoSettingsTab(GitHubRepoPage& page)
 {
-	const String& owner = page.owner;
-	const String& repo = page.repo;
-	const String& branch = page.branch;
-	String& content = page.content;
-
-	content
-		<< "<div class=\"wf-card\">\n"
-		<< "  <div class=\"wf-card-header\"><span>General Settings &middot; " << owner << "/" << repo << "</span></div>\n"
-		<< "  <div class=\"wf-card-body\">\n"
-		<< "    <div style=\"margin-bottom:16px;\">\n"
-		<< "      <label style=\"font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;\">Repository Name</label>\n"
-		<< "      <input type=\"text\" value=\"" << repo << "\" style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:320px; font-size:0.85rem;\">\n"
-		<< "    </div>\n"
-		<< "    <div style=\"margin-bottom:16px;\">\n"
-		<< "      <label style=\"font-weight:600; font-size:0.85rem; display:block; margin-bottom:4px;\">Default Branch</label>\n"
-		<< "      <input type=\"text\" value=\"" << branch << "\" readonly style=\"background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:6px 12px; color:var(--wf-fg-normal,#e6edf3); width:200px; font-size:0.85rem;\">\n"
-		<< "    </div>\n"
-		<< "    <h4>Features</h4>\n"
-		<< "    <p style=\"font-size:0.85rem; color:var(--wf-fg-inactive,#7d8590); margin-bottom:20px;\">Feature settings are not read from GitHub by this view.</p>\n"
-		<< "    <h4 style=\"color:#f85149;\">Danger Zone</h4>\n"
-		<< "    <div style=\"border:1px solid rgba(248,81,73,0.4); border-radius:6px; padding:12px;\">\n"
-		<< "      <div style=\"font-weight:600;\">Change repository visibility</div>\n"
-		<< "      <div style=\"font-size:0.8rem; color:var(--wf-fg-inactive,#7d8590);\">Visibility changes are not available from this view.</div>\n"
-		<< "    </div>\n"
-		<< "  </div>\n"
-		<< "</div>\n";
+	Renderer vars;
+	vars("owner", page.owner)
+		("repo", page.repo)
+		("branch", page.branch);
+	page.content << RenderGitHubTemplate(vars, "github-settings");
 }
 
 // SweAgent tab: pair and autonomous workspace runs.

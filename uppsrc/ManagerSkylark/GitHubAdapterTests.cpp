@@ -195,15 +195,8 @@ bool GitHubPlatformService::RunGitHubAdapterSyntheticTests(const String& scratch
 	}
 	Cout() << "ok    repo header renders unknown, public and private visibility\n";
 
-	// The security tab's claims are checked on its captured body by
-	// upptst/GitHubCapture/check-claims.sh: its template needs the app's root.
-	GitHubRepoPage claims;
-	claims.owner = "acme";
-	claims.repo = "tools";
-	RenderRepoSettingsTab(claims);
-	if(claims.content.Find("currently private") >= 0 || claims.content.Find("Make Public") >= 0)
-		return Fail("the settings tab must not state visibility or offer an unbacked visibility change");
-	Cout() << "ok    settings tab reports unknown state instead of fixed claims\n";
+	// The security and settings tabs' claims are checked on their captured bodies
+	// by upptst/GitHubCapture/check-claims.sh: their templates need the app's root.
 
 	SetEnv("GHFORGE_GH", "");
 	return true;

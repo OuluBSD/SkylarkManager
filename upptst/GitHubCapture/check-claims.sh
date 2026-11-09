@@ -16,5 +16,8 @@ mustnot() {
 SEC=_repo_SeppoPakonen_demo_repo_security.body
 must $SEC "Secret scan: not performed" "security tab must say the secret scan was not performed"
 mustnot $SEC "Zero leaked" "security tab must not claim a clean secret scan"
+SET=_repo_SeppoPakonen_demo_repo_settings.body
+mustnot $SET "currently private" "settings tab must not state visibility"
+mustnot $SET "Make Public" "settings tab must not offer an unbacked visibility change"
 if [ "$fail" = 0 ]; then echo "claims: PASSED"; fi
 exit $fail
