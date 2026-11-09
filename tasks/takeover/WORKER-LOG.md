@@ -716,3 +716,15 @@ Witz findings added this brief: a directive alone on its line emits its line
 terminator; `$var` directly before `$else`, `$endif`, `$` or `.` does not
 evaluate as expected; a template ending in a bare `$endif` adds a blank line.
 These are recorded in ManagerSkylark AGENTS.md for UppSkillz.
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Brief 09B checkpoint accepted: issues/pulls/code tabs verified landed
+(captures identical; fence 156/156; Manager PASSED; Company ALL PASSED).
+Worker stopped mid-brief (possibly at session limits). Continuation relayed
+via CompanySkylark/tmp/task.txt with the remaining tab locations mapped
+(GitHubRepoTabs.cpp: Projects 92, Security 183, Settings 214, Agents 245,
+Fallback 258; GitHubWorkflowViews.cpp: ActionsCatalog 134, WorkflowEditor
+258; GitHubUserView.cpp profile; GitHubActions.cpp verify-only). Same 09B
+decisions and per-tab gates apply. TaskFoundry note: QTF-to-HTML and TPP
+extraction stay server-side; wrappers only become witz.
