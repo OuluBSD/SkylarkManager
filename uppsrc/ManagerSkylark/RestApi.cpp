@@ -1,4 +1,5 @@
 #include "ManagerSkylark.h"
+#include "SfLegacyMigrationCli.h"
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
 #include "AssessmentViews.h"
@@ -77,6 +78,15 @@ CONSOLE_APP_MAIN
 		bool ok = ManagerSkylarkApp::RunSelfTests(18080);
 		fflush(stdout);
 		_exit(ok ? 0 : 1);
+	}
+
+	if(args.GetCount() > 0 && args[0] == "--migrate-sf-local") {
+		Vector<String> rest;
+		for(int i = 1; i < args.GetCount(); i++)
+			rest.Add(args[i]);
+		int rc = RunMigrateSfLocalCommand(rest);
+		fflush(stdout);
+		_exit(rc);
 	}
 
 	ManagerSkylarkApp app;

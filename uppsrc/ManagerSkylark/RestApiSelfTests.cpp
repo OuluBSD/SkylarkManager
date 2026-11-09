@@ -1,4 +1,5 @@
 #include "ManagerSkylark.h"
+#include "SfLegacyMigrationCli.h"
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
 #include "AssessmentViews.h"
@@ -208,6 +209,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!GitHubPlatformService::RunGitHubAdapterSyntheticTests(fixture.path)) {
 		Cerr() << "FAILED: GitHub adapter synthetic tests\n";
+		return false;
+	}
+	if(!RunSfLegacyMigrationSelfTests(AppendFileName(fixture.path, "sf-legacy-migration"))) {
+		Cerr() << "FAILED: SourceForge legacy migration synthetic tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

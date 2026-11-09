@@ -8,4 +8,6 @@ uses
 file
 	AGENTS.md,
 	PrivateHubWorkspace.h,
-	PrivateHubWorkspace.cpp;
+	PrivateHubWorkspace.cpp,
+	PrivateHubMigration.h,
+	PrivateHubMigration.cpp;

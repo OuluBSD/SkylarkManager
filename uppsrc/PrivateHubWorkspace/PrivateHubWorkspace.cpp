@@ -346,7 +346,7 @@ ForgeResult PrivateHubWorkspaceBackend::ListComments(const String& project, cons
 // --- record kinds ---------------------------------------------------------
 
 // Project keys are one or two [A-Za-z0-9._-] segments ("slug" or "org/repo").
-static bool ValidProjectKey(const String& project)
+bool PrivateHubWorkspaceBackend::ValidProjectKey(const String& project)
 {
 	if(project.IsEmpty() || project.GetCount() > 201)
 		return false;
@@ -354,13 +354,13 @@ static bool ValidProjectKey(const String& project)
 	if(parts.GetCount() < 1 || parts.GetCount() > 2)
 		return false;
 	for(const String& part : parts)
-		if(!PrivateHubWorkspaceBackend::ValidName(part))
+		if(!ValidName(part))
 			return false;
 	return true;
 }
 
 // Record ids: [A-Za-z0-9_-], plus '.' where the kind allows it (release files).
-static bool SafeRecordId(const String& id, bool allow_dot)
+bool PrivateHubWorkspaceBackend::SafeRecordId(const String& id, bool allow_dot)
 {
 	if(id.IsEmpty() || id.GetCount() > 100 || id == "." || id == "..")
 		return false;
@@ -373,9 +373,9 @@ static bool SafeRecordId(const String& id, bool allow_dot)
 	return true;
 }
 
-static void AddCardField(SchemaCard& card, const char *name, const char *type, bool required, int max_len)
+static void AddCardField(WebSchemaCard& card, const char *name, const char *type, bool required, int max_len)
 {
-	SchemaField f;
+	WebSchemaField f;
 	f.name = name;
 	f.type = type;
 	f.required = required;
@@ -385,7 +385,7 @@ static void AddCardField(SchemaCard& card, const char *name, const char *type, b
 
 void PrivateHubWorkspaceBackend::RegisterSchemas()
 {
-	SchemaCard wiki;
+	WebSchemaCard wiki;
 	wiki.schema_id = PRIVATEHUB_SCHEMA_WIKI_PAGE;
 	wiki.version = "1";
 	AddCardField(wiki, "slug", "string", true, 100);
@@ -395,7 +395,7 @@ void PrivateHubWorkspaceBackend::RegisterSchemas()
 	AddCardField(wiki, "provenance", "string", false, 64);
 	SchemaRegistry::Register(wiki);
 
-	SchemaCard topic;
+	WebSchemaCard topic;
 	topic.schema_id = PRIVATEHUB_SCHEMA_DISCUSSION_TOPIC;
 	topic.version = "1";
 	AddCardField(topic, "slug", "string", true, 100);
@@ -406,7 +406,7 @@ void PrivateHubWorkspaceBackend::RegisterSchemas()
 	AddCardField(topic, "provenance", "string", false, 64);
 	SchemaRegistry::Register(topic);
 
-	SchemaCard post;
+	WebSchemaCard post;
 	post.schema_id = PRIVATEHUB_SCHEMA_DISCUSSION_POST;
 	post.version = "1";
 	AddCardField(post, "post_id", "string", true, 100);
@@ -417,7 +417,7 @@ void PrivateHubWorkspaceBackend::RegisterSchemas()
 	AddCardField(post, "provenance", "string", false, 64);
 	SchemaRegistry::Register(post);
 
-	SchemaCard file;
+	WebSchemaCard file;
 	file.schema_id = PRIVATEHUB_SCHEMA_RELEASE_FILE;
 	file.version = "1";
 	AddCardField(file, "name", "string", true, 100);
@@ -438,7 +438,7 @@ StoreResult PrivateHubWorkspaceBackend::PutRecord(IRecordCollection& coll, const
 	JsonFileStore *store = dynamic_cast<JsonFileStore*>(&coll);
 	if(!store)
 		return StoreResult("collection is not a JSON file store");
-	SchemaCard card;
+	WebSchemaCard card;
 	String err;
 	if(SchemaRegistry::Find(schema_id, card) && !SchemaRegistry::Validate(card, data, err))
 		return StoreResult("schema validation failed: " + err);

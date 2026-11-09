@@ -141,6 +141,10 @@ public:
 
 	// --- workspace inspection ---
 	static bool ValidName(const String& name);       // org or repo name
+	// Project key: one or two ValidName segments ("slug" or "org/repo").
+	static bool ValidProjectKey(const String& project);
+	// Record id: [A-Za-z0-9_-], plus '.' when allow_dot (release file names).
+	static bool SafeRecordId(const String& id, bool allow_dot);
 	bool        IsContained(const String& rel) const;
 	String      RepoPath(const String& org, const String& repo) const;
 
