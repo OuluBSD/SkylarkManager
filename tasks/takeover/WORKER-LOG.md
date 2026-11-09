@@ -608,3 +608,13 @@ baseline, before any edit), then extract one tab per commit starting with
 `GitHubRepoTabs` (commits tab, git-backed and self-contained), then the rest.
 
 **Stopped after step 2 and waiting for decisions on step 3.**
+
+## Planner entry — 2026-11-09 (takeover agent)
+
+Assignment 8 steps 1-2 accepted. Planner re-verified: BazaarCore samesite
+restored (Http.h:151/155, alongside other parties' merged TUI work), fence
+156/156 with SameSite+HttpOnly assertions on both engine ports, Manager
+PASSED, Company ALL PASSED. Step-3 decisions: option (a) approved (app
+default template root now; engine site at T04); witz data models per view;
+capture harness FIRST (worker's recommended order approved). Next:
+WORKER-BRIEF-09.md (capture harness + GitHub tab extraction begins).
