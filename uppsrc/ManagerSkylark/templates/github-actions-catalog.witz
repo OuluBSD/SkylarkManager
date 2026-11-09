@@ -1,0 +1,94 @@
+<div style="display:flex; flex-direction:column; gap:1.25rem;">
+  <!-- Top Header & Search Bar -->
+  <div class="wf-card">
+    <div style="padding:16px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+      <div>
+        <h2 style="margin:0 0 4px 0; font-size:1.35rem; font-weight:700;">Choose a workflow</h2>
+        <p style="margin:0; font-size:0.86rem; color:var(--wf-fg-inactive,#8b919d);">Choose a starter workflow template to configure continuous integration, deployment, automation, or documentation for this repository.</p>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="text" id="workflow-search" placeholder="Search workflows..." value="$search_q" oninput="filterWorkflows(this.value)" class="wf-input" style="padding:6px 12px; font-size:0.85rem; border-radius:6px; background:var(--wf-bg-view,#151d2b); border:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); color:var(--wf-fg-normal,#d3dae3); width:260px;">
+      </div>
+    </div>
+  </div>
+
+  <!-- Category Nav Pills -->
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <a href="/repo/$owner/$repo/actions/new" class="wf-btn$btn_all" style="font-size:0.82rem; padding:5px 14px;">All</a>
+    <a href="/repo/$owner/$repo/actions/new?category=continuous-integration" class="wf-btn$btn_ci" style="font-size:0.82rem; padding:5px 14px;">Continuous integration</a>
+    <a href="/repo/$owner/$repo/actions/new?category=deployment" class="wf-btn$btn_deployment" style="font-size:0.82rem; padding:5px 14px;">Deployment</a>
+    <a href="/repo/$owner/$repo/actions/new?category=automation" class="wf-btn$btn_automation" style="font-size:0.82rem; padding:5px 14px;">Automation</a>
+    <a href="/repo/$owner/$repo/actions/new?category=pages" class="wf-btn$btn_pages" style="font-size:0.82rem; padding:5px 14px;">Pages</a>
+  </div>
+
+$if(show_suggested)  <div id="section-suggested">
+    <div style="display:flex; align-items:center; gap:8px; font-weight:700; font-size:1.05rem; margin-bottom:10px;">
+      <span>Suggested for this repository</span>
+      <span class="wf-badge wf-badge-cyan">Detected C++ &amp; U++ Codebase</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:16px;">
+$for(t in suggested)      <div class="wf-card wf-workflow-card" style="padding:18px; display:flex; flex-direction:column; justify-content:space-between; border:1px solid rgba(0,161,197,0.4); background:rgba(0,161,197,0.03);">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="padding:8px; border-radius:6px; background:rgba(0,161,197,0.15); color:var(--wf-accent-focus,#00a1c5);">
+                $raw(t.icon)
+              </div>
+              <div>
+                <div style="font-weight:700; font-size:1.05rem;">$t.title</div>
+                <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);">$t.author</div>
+              </div>
+            </div>
+            <span class="wf-badge wf-badge-emerald">Suggested</span>
+          </div>
+          <p style="font-size:0.86rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:14px;">$t.description</p>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));">
+          <span style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);"><code>$t.default_filename</code></span>
+          <div style="display:flex; gap:8px;">
+$if(t.has_preview)            <a href="/repo/$owner/$repo/actions/new?template=pages-upp-tpp&preview=1" class="wf-btn wf-btn-secondary" style="font-size:0.8rem; padding:4px 10px;">Preview Site</a>
+$endif            <a href="/repo/$owner/$repo/actions/new?template=$t.id" class="wf-btn wf-btn-primary" style="font-size:0.8rem; padding:4px 12px; font-weight:600;">Configure</a>
+          </div>
+        </div>
+      </div>
+$endfor    </div>
+  </div>
+
+$endif  <div>
+    <div style="font-weight:700; font-size:1.05rem; margin-bottom:12px;">
+      <span>$section_title</span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
+$for(t in others)      <div class="wf-card wf-workflow-card" style="padding:16px; display:flex; flex-direction:column; justify-content:space-between;">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="padding:6px; border-radius:6px; background:var(--wf-bg-alt,#1c202f); color:var(--wf-accent-focus,#00a1c5);">
+                $raw(t.icon)
+              </div>
+              <div>
+                <div style="font-weight:700; font-size:0.96rem;">$t.title</div>
+                <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);">$t.author</div>
+              </div>
+            </div>
+            <span class="wf-badge wf-badge-neutral" style="font-size:0.7rem;">$t.category</span>
+          </div>
+          <p style="font-size:0.84rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:12px;">$t.description</p>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));">
+          <span style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);"><code>$t.default_filename</code></span>
+          <a href="/repo/$owner/$repo/actions/new?template=$t.id" class="wf-btn wf-btn-secondary" style="font-size:0.8rem; padding:4px 12px; font-weight:600;">Configure</a>
+        </div>
+      </div>
+$endfor    </div>
+  </div>
+</div>
+<script>
+function filterWorkflows(q) {
+  q = (q || '').toLowerCase();
+  document.querySelectorAll('.wf-workflow-card').forEach(c => {
+    let t = c.innerText.toLowerCase();
+    c.style.display = (!q || t.includes(q)) ? 'flex' : 'none';
+  });
+}
+</script>

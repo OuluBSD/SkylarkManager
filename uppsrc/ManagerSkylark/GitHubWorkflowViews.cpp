@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "GitHubPlatform.h"
+#include "GitHubTemplates.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
 
@@ -137,122 +138,45 @@ String GitHubPlatformService::RenderActionsCatalog(const String& owner, const St
 	String cat = category;
 	if(cat.IsEmpty()) cat = "all";
 
-	String h;
-	h << "<div style=\"display:flex; flex-direction:column; gap:1.25rem;\">\n"
-	  << "  <!-- Top Header & Search Bar -->\n"
-	  << "  <div class=\"wf-card\">\n"
-	  << "    <div style=\"padding:16px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;\">\n"
-	  << "      <div>\n"
-	  << "        <h2 style=\"margin:0 0 4px 0; font-size:1.35rem; font-weight:700;\">Choose a workflow</h2>\n"
-	  << "        <p style=\"margin:0; font-size:0.86rem; color:var(--wf-fg-inactive,#8b919d);\">Choose a starter workflow template to configure continuous integration, deployment, automation, or documentation for this repository.</p>\n"
-	  << "      </div>\n"
-	  << "      <div style=\"display:flex; align-items:center; gap:8px;\">\n"
-	  << "        <input type=\"text\" id=\"workflow-search\" placeholder=\"Search workflows...\" value=\"" << EscapeHtml(search_q) << "\" oninput=\"filterWorkflows(this.value)\" class=\"wf-input\" style=\"padding:6px 12px; font-size:0.85rem; border-radius:6px; background:var(--wf-bg-view,#151d2b); border:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); color:var(--wf-fg-normal,#d3dae3); width:260px;\">\n"
-	  << "      </div>\n"
-	  << "    </div>\n"
-	  << "  </div>\n"
-	  << "\n"
-	  << "  <!-- Category Nav Pills -->\n"
-	  << "  <div style=\"display:flex; gap:8px; flex-wrap:wrap; align-items:center;\">\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new\" class=\"wf-btn" << (cat == "all" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">All</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=continuous-integration\" class=\"wf-btn" << (cat == "continuous-integration" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Continuous integration</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=deployment\" class=\"wf-btn" << (cat == "deployment" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Deployment</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=automation\" class=\"wf-btn" << (cat == "automation" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Automation</a>\n"
-	  << "    <a href=\"/repo/" << owner << "/" << repo << "/actions/new?category=pages\" class=\"wf-btn" << (cat == "pages" ? " wf-btn-primary" : " wf-btn-secondary") << "\" style=\"font-size:0.82rem; padding:5px 14px;\">Pages</a>\n"
-	  << "  </div>\n"
-	  << "\n";
+	bool show_suggested = cat == "all" || cat == "continuous-integration" || cat == "pages";
+	String section_title = cat == "all" ? "All Starter Workflows" : cat == "continuous-integration" ? "Continuous Integration" : cat == "deployment" ? "Deployment" : cat == "automation" ? "Automation" : "Pages";
 
-	// Suggested for this repository section
-	if(cat == "all" || cat == "continuous-integration" || cat == "pages") {
-		h << "  <div id=\"section-suggested\">\n"
-		  << "    <div style=\"display:flex; align-items:center; gap:8px; font-weight:700; font-size:1.05rem; margin-bottom:10px;\">\n"
-		  << "      <span>Suggested for this repository</span>\n"
-		  << "      <span class=\"wf-badge wf-badge-cyan\">Detected C++ &amp; U++ Codebase</span>\n"
-		  << "    </div>\n"
-		  << "    <div style=\"display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:16px;\">\n";
+	auto make_row = [](const WorkflowTemplate& t, int icon_size) {
+		ValueMap row;
+		row.Add("id", t.id);
+		row.Add("title", t.title);
+		row.Add("author", t.author);
+		row.Add("description", t.description);
+		row.Add("category", t.category);
+		row.Add("default_filename", t.default_filename);
+		row.Add("icon", VividIcon::Get(t.icon, icon_size));
+		return row;
+	};
 
-		for(const WorkflowTemplate& t : templates) {
-			if(!t.suggested) continue;
-			if(cat != "all" && t.category != cat) continue;
-			h << "      <div class=\"wf-card wf-workflow-card\" style=\"padding:18px; display:flex; flex-direction:column; justify-content:space-between; border:1px solid rgba(0,161,197,0.4); background:rgba(0,161,197,0.03);\">\n"
-			  << "        <div>\n"
-			  << "          <div style=\"display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;\">\n"
-			  << "            <div style=\"display:flex; align-items:center; gap:10px;\">\n"
-			  << "              <div style=\"padding:8px; border-radius:6px; background:rgba(0,161,197,0.15); color:var(--wf-accent-focus,#00a1c5);\">\n"
-			  << "                " << VividIcon::Get(t.icon, 22) << "\n"
-			  << "              </div>\n"
-			  << "              <div>\n"
-			  << "                <div style=\"font-weight:700; font-size:1.05rem;\">" << EscapeHtml(t.title) << "</div>\n"
-			  << "                <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\">" << EscapeHtml(t.author) << "</div>\n"
-			  << "              </div>\n"
-			  << "            </div>\n"
-			  << "            <span class=\"wf-badge wf-badge-emerald\">Suggested</span>\n"
-			  << "          </div>\n"
-			  << "          <p style=\"font-size:0.86rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:14px;\">" << EscapeHtml(t.description) << "</p>\n"
-			  << "        </div>\n"
-			  << "        <div style=\"display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));\">\n"
-			  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << t.default_filename << "</code></span>\n"
-			  << "          <div style=\"display:flex; gap:8px;\">\n";
-			if(t.id == "pages-upp-tpp") {
-				h << "            <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=pages-upp-tpp&preview=1\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 10px;\">Preview Site</a>\n";
-			}
-			h << "            <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=" << t.id << "\" class=\"wf-btn wf-btn-primary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
-			  << "          </div>\n"
-			  << "        </div>\n"
-			  << "      </div>\n";
-		}
-		h << "    </div>\n"
-		  << "  </div>\n\n";
-	}
-
-	// Other Categories Grid
-	h << "  <div>\n"
-	  << "    <div style=\"font-weight:700; font-size:1.05rem; margin-bottom:12px;\">\n"
-	  << "      <span>" << (cat == "all" ? "All Starter Workflows" : (cat == "continuous-integration" ? "Continuous Integration" : (cat == "deployment" ? "Deployment" : (cat == "automation" ? "Automation" : "Pages")))) << "</span>\n"
-	  << "    </div>\n"
-	  << "    <div style=\"display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;\">\n";
-
+	ValueArray suggested;
+	ValueArray others;
 	for(const WorkflowTemplate& t : templates) {
-		if(t.suggested && cat == "all") continue; // Already shown in suggested
-		if(cat != "all" && t.category != cat) continue;
-
-		h << "      <div class=\"wf-card wf-workflow-card\" style=\"padding:16px; display:flex; flex-direction:column; justify-content:space-between;\">\n"
-		  << "        <div>\n"
-		  << "          <div style=\"display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;\">\n"
-		  << "            <div style=\"display:flex; align-items:center; gap:10px;\">\n"
-		  << "              <div style=\"padding:6px; border-radius:6px; background:var(--wf-bg-alt,#1c202f); color:var(--wf-accent-focus,#00a1c5);\">\n"
-		  << "                " << VividIcon::Get(t.icon, 20) << "\n"
-		  << "              </div>\n"
-		  << "              <div>\n"
-		  << "                <div style=\"font-weight:700; font-size:0.96rem;\">" << EscapeHtml(t.title) << "</div>\n"
-		  << "                <div style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\">" << EscapeHtml(t.author) << "</div>\n"
-		  << "              </div>\n"
-		  << "            </div>\n"
-		  << "            <span class=\"wf-badge wf-badge-neutral\" style=\"font-size:0.7rem;\">" << t.category << "</span>\n"
-		  << "          </div>\n"
-		  << "          <p style=\"font-size:0.84rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.4; margin-bottom:12px;\">" << EscapeHtml(t.description) << "</p>\n"
-		  << "        </div>\n"
-		  << "        <div style=\"display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid var(--wf-border-color,rgba(0,161,197,0.15));\">\n"
-		  << "          <span style=\"font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);\"><code>" << t.default_filename << "</code></span>\n"
-		  << "          <a href=\"/repo/" << owner << "/" << repo << "/actions/new?template=" << t.id << "\" class=\"wf-btn wf-btn-secondary\" style=\"font-size:0.8rem; padding:4px 12px; font-weight:600;\">Configure</a>\n"
-		  << "        </div>\n"
-		  << "      </div>\n";
+		if(show_suggested && t.suggested && (cat == "all" || t.category == cat)) {
+			ValueMap row = make_row(t, 22);
+			row.Add("has_preview", t.id == "pages-upp-tpp");
+			suggested.Add(row);
+		}
+		if(!(t.suggested && cat == "all") && (cat == "all" || t.category == cat))
+			others.Add(make_row(t, 20));
 	}
 
-	h << "    </div>\n"
-	  << "  </div>\n"
-	  << "</div>\n"
-	  << "<script>\n"
-	  << "function filterWorkflows(q) {\n"
-	  << "  q = (q || '').toLowerCase();\n"
-	  << "  document.querySelectorAll('.wf-workflow-card').forEach(c => {\n"
-	  << "    let t = c.innerText.toLowerCase();\n"
-	  << "    c.style.display = (!q || t.includes(q)) ? 'flex' : 'none';\n"
-	  << "  });\n"
-	  << "}\n"
-	  << "</script>\n";
-
-	return h;
+	Renderer vars;
+	vars("owner", owner)("repo", repo)("search_q", search_q)
+		("btn_all", String(cat == "all" ? " wf-btn-primary" : " wf-btn-secondary"))
+		("btn_ci", String(cat == "continuous-integration" ? " wf-btn-primary" : " wf-btn-secondary"))
+		("btn_deployment", String(cat == "deployment" ? " wf-btn-primary" : " wf-btn-secondary"))
+		("btn_automation", String(cat == "automation" ? " wf-btn-primary" : " wf-btn-secondary"))
+		("btn_pages", String(cat == "pages" ? " wf-btn-primary" : " wf-btn-secondary"))
+		("show_suggested", show_suggested)
+		("suggested", suggested)
+		("section_title", section_title)
+		("others", others);
+	return RenderGitHubTemplate(vars, "github-actions-catalog");
 }
 
 String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const String& repo, const String& template_id, const String& filename)

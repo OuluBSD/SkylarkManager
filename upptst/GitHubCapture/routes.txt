@@ -31,3 +31,8 @@
 /repo/SeppoPakonen/second-repo?tab=actions
 /repo/SeppoPakonen/demo-repo?tab=agents&run=run-101
 /repo/SeppoPakonen/demo-repo?tab=agents&run=run-102
+/repo/SeppoPakonen/demo-repo/actions/new?category=deployment
+/repo/SeppoPakonen/demo-repo/actions/new?category=pages&q=pages
+/repo/SeppoPakonen/demo-repo/actions/new?template=upp-build
+/repo/SeppoPakonen/demo-repo/actions/new?template=auto-labeler
+/repo/SeppoPakonen/demo-repo/actions/new?template=pages-upp-tpp&preview=1

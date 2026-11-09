@@ -83,6 +83,7 @@ file
 	templates/github-user-packages.witz,
 	templates/github-user-agents.witz,
 	templates/github-user-sidebar.witz,
+	templates/github-actions-catalog.witz,
 	templates/github-issue-detail.witz,
 	templates/github-issues-list.witz,
 	templates/github-pull-detail.witz,
