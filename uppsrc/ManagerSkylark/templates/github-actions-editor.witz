@@ -1,0 +1,163 @@
+<div style="display:flex; flex-direction:column; gap:14px;">
+  <!-- Toast Notification -->
+  <div id="workflow-toast" style="display:none; padding:10px 16px; background:#238636; color:#ffffff; font-weight:600; border-radius:6px; font-size:0.88rem;"></div>
+
+  <!-- Top Bar: Breadcrumb + Action Controls -->
+  <div class="wf-card" style="padding:12px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+    <div style="display:flex; align-items:center; gap:8px; font-size:0.9rem;">
+      <a href="/repo/$owner/$repo/actions/new" style="color:var(--wf-accent-link,#00acd3); text-decoration:none; font-weight:600;">Actions</a>
+      <span style="color:var(--wf-fg-inactive,#8b919d);">/</span>
+      <span style="color:var(--wf-fg-inactive,#8b919d);">.github / workflows /</span>
+      <input type="text" id="workflow-filename" value="$filename" class="wf-input" style="padding:4px 8px; font-size:0.85rem; font-family:monospace; width:220px; background:var(--wf-bg-view,#151d2b); border:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); color:#ffffff; border-radius:4px;">
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a href="/repo/$owner/$repo/actions/new" class="wf-btn wf-btn-secondary" style="font-size:0.82rem; padding:5px 12px;">Cancel</a>
+      <button id="btn-commit-workflow" onclick="saveWorkflowFile()" class="wf-btn" style="background:#238636; color:#ffffff; font-weight:600; font-size:0.82rem; padding:6px 16px; border:none; border-radius:6px; cursor:pointer;">$raw(icon_check) Commit changes...</button>
+    </div>
+  </div>
+
+  <!-- Dual Layout: Code Editor on Left, Marketplace / Docs on Right -->
+  <div style="display:flex; gap:16px; align-items:flex-start;">
+    <!-- Left: YAML Workflow Code Editor -->
+    <div class="wf-card" style="flex:1; min-width:0; padding:12px; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:0.82rem; color:var(--wf-fg-inactive,#8b919d);">
+        <span>Workflow Definition (YAML) &middot; <code>$tpl_title</code></span>
+        <span style="font-size:0.75rem;">UTF-8 &middot; Indent: 2 spaces</span>
+      </div>
+      <textarea id="workflow-editor-yaml" spellcheck="false" style="width:100%; height:580px; font-family:Consolas, 'Courier New', monospace; font-size:0.88rem; line-height:1.5; background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:14px; box-sizing:border-box; resize:vertical; outline:none;">$raw(default_yaml)</textarea>
+    </div>
+
+    <!-- Right: Tabbed Panel (Marketplace & Documentation) -->
+    <div class="wf-card" style="width:380px; flex-shrink:0; padding:12px; display:flex; flex-direction:column; max-height:640px; overflow-y:auto;">
+      <!-- Drawer Tabs -->
+      <div style="display:flex; border-bottom:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); margin-bottom:12px;">
+        <button id="tab-btn-marketplace" onclick="switchDrawerTab('marketplace')" style="flex:1; background:none; border:none; padding:8px; font-weight:700; font-size:0.85rem; color:#ffffff; border-bottom:2px solid #00a1c5; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">$raw(icon_folder) Marketplace</button>
+        <button id="tab-btn-docs" onclick="switchDrawerTab('docs')" style="flex:1; background:none; border:none; padding:8px; font-weight:600; font-size:0.85rem; color:var(--wf-fg-inactive,#8b919d); border-bottom:none; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;">$raw(icon_file) Documentation</button>
+      </div>
+
+      <!-- View 1: Marketplace Tab Content -->
+      <div id="view-marketplace" style="display:block;">
+        <input type="text" id="marketplace-search" placeholder="Search actions..." oninput="filterMarketplace(this.value)" class="wf-input" style="width:100%; padding:6px 10px; font-size:0.82rem; margin-bottom:12px; box-sizing:border-box; background:var(--wf-bg-alt,#1c202f); border:1px solid var(--wf-border-color,rgba(0,161,197,0.2)); color:#ffffff; border-radius:4px;">
+        <div style="font-size:0.78rem; font-weight:700; color:var(--wf-fg-inactive,#8b919d); margin-bottom:8px; text-transform:uppercase;">Featured Actions</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+$for(a in actions)          <div class="wf-marketplace-item" style="padding:10px; border-radius:6px; background:var(--wf-bg-alt,#1c202f); border:1px solid var(--wf-border-color,rgba(0,161,197,0.15));">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <div>
+                <div style="font-weight:700; font-size:0.88rem; color:#ffffff;">$a.name</div>
+                <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);">by $a.author &middot; $a.version &middot; &#9733; $a.stars</div>
+              </div>
+              <button onclick="insertActionSnippet($raw(a.snippet_js))" class="wf-btn wf-btn-secondary" style="padding:3px 8px; font-size:0.75rem;">Insert</button>
+            </div>
+            <div style="font-size:0.8rem; color:var(--wf-fg-normal,#d3dae3); margin-top:4px; line-height:1.3;">$a.description</div>
+          </div>
+$endfor        </div>
+      </div>
+
+      <!-- View 2: Documentation Tab Content -->
+      <div id="view-documentation" style="display:none; font-size:0.84rem; color:var(--wf-fg-normal,#d3dae3); line-height:1.5;">
+        <h4 style="margin:0 0 6px 0; color:#00acd3; font-size:0.95rem;">Workflow Syntax Reference</h4>
+        <p style="margin-bottom:8px;">Workflows use YAML syntax with the following root keys:</p>
+        <ul style="padding-left:18px; margin:0 0 12px 0;">
+          <li><code>name</code>: Identifier shown in Actions runs list</li>
+          <li><code>on</code>: Triggers (<code>push</code>, <code>pull_request</code>, <code>workflow_dispatch</code>)</li>
+          <li><code>jobs</code>: Set of parallel/sequential execution jobs</li>
+          <li><code>steps</code>: List of tasks invoking actions or shell scripts</li>
+        </ul>
+        <h4 style="margin:10px 0 6px 0; color:#00acd3; font-size:0.95rem;">U++ Build Flag Guide</h4>
+        <ul style="padding-left:18px; margin:0;">
+          <li><code>method</code>: <code>CLANG</code>, <code>GCC</code>, <code>MINGW</code></li>
+          <li><code>MT</code>: Multi-threaded memory allocator and runtime</li>
+          <li><code>BLITZ</code>: Ultra-fast unity build compilation</li>
+          <li><code>DEBUG / DEBUG_FULL</code>: Debug symbols with runtime checks</li>
+          <li><code>flagSOMEFLAG</code>: Custom preprocessor definition mapping</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function switchDrawerTab(tab) {
+  let mTab = document.getElementById('tab-btn-marketplace');
+  let dTab = document.getElementById('tab-btn-docs');
+  let mView = document.getElementById('view-marketplace');
+  let dView = document.getElementById('view-documentation');
+  if(tab === 'marketplace') {
+    mTab.style.borderBottom = '2px solid #00a1c5';
+    mTab.style.color = '#ffffff';
+    dTab.style.borderBottom = 'none';
+    dTab.style.color = 'var(--wf-fg-inactive,#8b919d)';
+    mView.style.display = 'block';
+    dView.style.display = 'none';
+  } else {
+    dTab.style.borderBottom = '2px solid #00a1c5';
+    dTab.style.color = '#ffffff';
+    mTab.style.borderBottom = 'none';
+    mTab.style.color = 'var(--wf-fg-inactive,#8b919d)';
+    mView.style.display = 'none';
+    dView.style.display = 'block';
+  }
+}
+function insertActionSnippet(snippet) {
+  let ed = document.getElementById('workflow-editor-yaml');
+  if(!ed) return;
+  let pos = ed.selectionStart || ed.value.length;
+  let text = ed.value;
+  ed.value = text.substring(0, pos) + '\n' + snippet + text.substring(pos);
+  ed.focus();
+  let toast = document.getElementById('workflow-toast');
+  if(toast) {
+    toast.style.display = 'block';
+    toast.innerText = 'Action snippet inserted into workflow editor!';
+    setTimeout(() => { toast.style.display = 'none'; }, 2200);
+  }
+}
+function filterMarketplace(q) {
+  q = (q || '').toLowerCase();
+  document.querySelectorAll('.wf-marketplace-item').forEach(el => {
+    let t = el.innerText.toLowerCase();
+    el.style.display = (!q || t.includes(q)) ? 'block' : 'none';
+  });
+}
+function saveWorkflowFile() {
+  let btn = document.getElementById('btn-commit-workflow');
+  let fn = document.getElementById('workflow-filename').value.trim();
+  let yaml = document.getElementById('workflow-editor-yaml').value;
+  if(!fn) { alert('Filename cannot be empty'); return; }
+  btn.innerText = 'Committing...';
+  btn.disabled = true;
+  fetch('/api/gh/workflows/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      owner: '$owner',
+      repo: '$repo',
+      filename: fn,
+      content: yaml
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if(data.status === 'ok') {
+      btn.innerText = 'Committed!';
+      btn.style.background = '#0969da';
+      let toast = document.getElementById('workflow-toast');
+      if(toast) {
+        toast.style.display = 'block';
+        toast.innerText = 'Workflow successfully committed to ' + data.path + '!';
+      }
+      setTimeout(() => {
+        window.location.href = '/repo/$owner/$repo?tab=actions';
+      }, 1200);
+    } else {
+      alert('Error saving workflow: ' + (data.message || 'unknown error'));
+      btn.innerText = 'Commit changes...';
+      btn.disabled = false;
+    }
+  })
+  .catch(err => {
+    alert('Failed to save workflow: ' + err);
+    btn.innerText = 'Commit changes...';
+    btn.disabled = false;
+  });
+}
+</script>
