@@ -1,4 +1,7 @@
 #include <Core/Core.h>
+#ifdef PLATFORM_POSIX
+#include <unistd.h>
+#endif
 #include <Skylark/Skylark.h>
 #include <WebEngine/WebEngine.h>
 #include <WebAccounts/WebAccountsTotp.h>
@@ -453,6 +456,50 @@ CONSOLE_APP_MAIN
 	Cout() << "WebEngineTests: engine fence self-test\n";
 	s_root = GetHomeDirFile(Format("WebEngineTests/run-%d-%d", (int)msecs(), (int)Random(1000000)));
 	RealizeDirectory(s_root);
+
+	// --- T02: site static containment (SkylarkSiteRoots::ResolveStatic) ---
+	{
+		String sroot = AppendFileName(s_root, "static-containment");
+		String pub = AppendFileName(sroot, "public");
+		RealizeDirectory(AppendFileName(pub, "sub"));
+		SaveFile(AppendFileName(pub, "ok.css"), "body{}");
+		SaveFile(AppendFileName(pub, "sub/a.js"), "1");
+		SaveFile(AppendFileName(pub, "page.witz"), "x");
+		SaveFile(AppendFileName(pub, "x.html"), "x");
+		SaveFile(AppendFileName(sroot, "secret.txt"), "outside the site root");
+#ifdef PLATFORM_POSIX
+		symlink(AppendFileName(sroot, "secret.txt"), AppendFileName(pub, "link.css"));
+#endif
+		Check(!SkylarkSiteRoots::IsOverridden(), "no site root is set outside a request");
+		SkylarkSiteRoots::Set("", pub);
+		String full, mime;
+		Check(SkylarkSiteRoots::ResolveStatic("ok.css", full, mime) && mime == "text/css",
+		      "site static: plain css resolves with its content type");
+		Check(SkylarkSiteRoots::ResolveStatic("sub/a.js", full, mime) && mime == "text/javascript",
+		      "site static: nested js resolves");
+		Check(!SkylarkSiteRoots::ResolveStatic("../secret.txt", full, mime),
+		      "site static: ../ escape refused");
+		Check(!SkylarkSiteRoots::ResolveStatic("sub/../../secret.txt", full, mime),
+		      "site static: embedded ../ escape refused");
+		Check(!SkylarkSiteRoots::ResolveStatic("/etc/passwd", full, mime),
+		      "site static: absolute path refused");
+		Check(!SkylarkSiteRoots::ResolveStatic("sub\\..\\..\\secret.txt", full, mime),
+		      "site static: backslash escape refused");
+		Check(!SkylarkSiteRoots::ResolveStatic("sub/", full, mime),
+		      "site static: empty segment refused");
+		Check(!SkylarkSiteRoots::ResolveStatic("page.witz", full, mime),
+		      "site static: witz templates are never served");
+		Check(!SkylarkSiteRoots::ResolveStatic("x.html", full, mime),
+		      "site static: html is not an allowed static type");
+		Check(!SkylarkSiteRoots::ResolveStatic("missing.css", full, mime),
+		      "site static: missing file refused");
+#ifdef PLATFORM_POSIX
+		Check(!SkylarkSiteRoots::ResolveStatic("link.css", full, mime),
+		      "site static: symlink out of the site root refused");
+#endif
+		SkylarkSiteRoots::Clear();
+		Check(!SkylarkSiteRoots::IsOverridden(), "site root is cleared after the request scope");
+	}
 
 	// --- unit level: accounts ---
 	String report;

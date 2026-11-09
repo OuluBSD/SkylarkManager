@@ -3,6 +3,18 @@
 
 NAMESPACE_UPP
 
+// Sets a site's template and static roots for one dispatched request. The
+// roots are cleared when the scope ends, so a later request on the same thread
+// never sees them. A NULL site leaves the stock app-global roots in place.
+class SiteRootsScope {
+public:
+	explicit SiteRootsScope(const EngineSite* site) {
+		if(site)
+			SkylarkSiteRoots::Set(site->TemplateRoot(), site->StaticRoot());
+	}
+	~SiteRootsScope() { SkylarkSiteRoots::Clear(); }
+};
+
 // ---------------------------------------------------------------------------
 // Gateway catch-alls. Stock routes always win over these (Skylark best-match
 // prefers more specific paths); anything unmatched reaches the engine, which
@@ -102,6 +114,7 @@ void WebEngineHost::ListenerLoop(int listener_index)
 			// would close the socket before they arrive.
 			request.Timeout(30000);
 			WebEngine::SetCurrentListenerPort(L.port);
+			SiteRootsScope roots(TheWebEngine().FindSiteByPort(L.port));
 			Http http(*this);
 			http.Dispatch(request);
 		}

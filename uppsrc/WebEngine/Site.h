@@ -21,6 +21,11 @@ public:
 	void Init(const String& site_id, const String& site_title, const String& origin,
 	          const String& root, int ttl = 12);
 
+	// Site-owned witz template and static roots, under data_root. Served only
+	// while this site's request is dispatched (see WebEngineHost listeners).
+	String        TemplateRoot() const { return AppendFileName(data_root, "templates"); }
+	String        StaticRoot() const   { return AppendFileName(data_root, "static"); }
+
 	SiteAccounts& Accounts();
 	SiteRouter&   Router()             { return router; }
 	String        CookieName() const;
