@@ -407,3 +407,45 @@ ALL PASSED + GCC rc 0. WORKER: RESUME Brief-06A step 2 — your worktree files
 are intact (PrivateHubWorkspace.cpp carries the mechanical rename; it
 commits with your step-2 work). Commit step 2 when its gate passes, then
 step 3 per 06A.
+
+## Brief 06A — steps 2 and 3 done (update, 2026-11-09)
+
+The blocker above is resolved. BazaarCore now provides the Skylark APIs
+(Http::GetMethod, FilterHandler, cookies, ManagerStore::SetRootDir), and the
+planner landed the WebSchemaCard/WebSchemaField rename (7560954). Full gate
+re-run on each commit below.
+
+**Step 2 — commit 67a3f41.** `--migrate-sf-local <legacy-dir> <data-root>`
+converter: `PrivateHubWorkspace/PrivateHubMigration.{h,cpp}`,
+`ManagerSkylark/SfLegacyMigrationCli.{h,cpp}`, `SfLegacyMigrationTests.cpp`,
+dispatch in `RestApi.cpp`. Originals are read-only; provenance
+`migrated-from-legacy`; corrupt/absent stores reported; fixture-based --test
+(byte-compare of originals, idempotence, CLI exit codes).
+
+**Step 3 — commit e57b457.** `PrivateHubService : IBrokerService`
+(`ManagerSkylark/PrivateHubService.{h,cpp}`) with `RegisterPrivateHubService`.
+Ops: issue.list/get/create/comment, wiki.list/get, topic.list/get, post.list,
+file.list/get. Deny by default: unknown op 404; read scope `privatehub:read`,
+write scope `privatehub:write` (403 otherwise); writes need caller_id (401)
+and an idempotency_key (400). Author is always caller_id. Successful writes are
+recorded under (caller, op, key) in a `broker-idempotency` collection, so a
+repeat returns the recorded result. Writes are serialized by an in-process
+mutex. --test (`PrivateHubServiceTests.cpp`) runs through a WebBroker with a
+temp workspace and temp data root.
+
+**Gate after step 3 (all green):** fence 135/135; ManagerSkylark --test PASSED;
+CompanySkylark --test ALL TESTS PASSED (CLANG); GCC rc 0 for ManagerSkylark,
+WebEngineTests, CompanySkylark.
+
+**Known gaps, recorded:**
+- The site id for the PrivateHub broker comes from the caller of
+  `RegisterPrivateHubService`. No PrivateHub site entry exists yet in the
+  ManagerSkylark config; wiring that is T04.
+- The idempotency record store has no expiry, and the mutex only serializes
+  one process. Two processes sharing a data root can race a duplicate key.
+- Live sourceforge.net smoke test: manual follow-up.
+
+**Deferred as recorded:** PrivateHub engine-site UI and fence additions;
+engine-host composition (T04); git-subcommand allowlist tightening (backlog).
+
+**Stopped after step 3 and waiting for acceptance.**
