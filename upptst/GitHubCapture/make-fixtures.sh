@@ -32,3 +32,10 @@ commit "2026-11-03T09:15:00Z" "Document usage"
 repo second-repo
 printf 'Second fixture repo.\n' > NOTES.txt
 commit "2026-11-04T08:00:00Z" "Add notes"
+
+# Plain (uncompressed) TPP topics for the documentation preview route. The
+# preview reads <dev>/ai-upp/uppsrc/Core/srcdoc.tpp/*.tpp, so the harness's
+# DEV_DIR points it here and never at a real checkout.
+mkdir -p "$DEV/ai-upp/uppsrc/Core/srcdoc.tpp"
+printf 'TITLE("Fixture alpha")\n\n&\nAlpha paragraph one.\n&\nAlpha paragraph two.\n' > "$DEV/ai-upp/uppsrc/Core/srcdoc.tpp/alpha.tpp"
+printf 'TITLE("Fixture beta")\n\n&\nBeta body text.\n' > "$DEV/ai-upp/uppsrc/Core/srcdoc.tpp/beta.tpp"

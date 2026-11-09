@@ -88,15 +88,12 @@ and 09B). Interim state:
   warning bar. `GitHubActions.cpp` has no HTML and needed no change.
 - Stays server-side on purpose: QTF-to-HTML and TPP text extraction. The
   renderers pass their output in as one raw value.
-- Known gaps, not fixed in T02:
-  - the workflow editor's `<script>` writes `owner` and `repo` with witz's HTML
-    escaping, not `GitHubJsEscape`. It matches the fixtures; a name with a quote
-    would break the script. Route it through `GitHubJsEscape` with `$raw`;
-  - the editor's marketplace Insert button puts `AsCString` output inside a
-    double-quoted `onclick` attribute. The old code did the same, so it is not
-    valid HTML when a snippet contains a quote;
-  - the TPP doc site's topic loops render zero items in the harness, because the
-    topic directory is absent there. A fixture directory would cover them.
+- Former gaps, fixed in brief 10 step 1:
+  - the workflow editor script takes `owner` and `repo` through `GitHubJsEscape`;
+  - the marketplace Insert button carries its snippet in an escaped `data-snippet`
+    attribute and reads it with `this.dataset`, so quotes are safe;
+  - the TPP preview reads topics from `GetDevDir()/ai-upp` (honors `DEV_DIR`), and
+    the capture harness writes two fixture topics there.
 - Capture check: `upptst/GitHubCapture/` (see its README) before and after each
   change. Tests that call a view in process need the app's template root and
   cannot render templates; route-level checks belong in the capture harness.

@@ -46,7 +46,7 @@ $for(a in actions)          <div class="wf-marketplace-item" style="padding:10px
                 <div style="font-weight:700; font-size:0.88rem; color:#ffffff;">$a.name</div>
                 <div style="font-size:0.75rem; color:var(--wf-fg-inactive,#8b919d);">by $a.author &middot; $a.version &middot; &#9733; $a.stars</div>
               </div>
-              <button onclick="insertActionSnippet($raw(a.snippet_js))" class="wf-btn wf-btn-secondary" style="padding:3px 8px; font-size:0.75rem;">Insert</button>
+              <button data-snippet="$a.snippet" onclick="insertActionSnippet(this.dataset.snippet)" class="wf-btn wf-btn-secondary" style="padding:3px 8px; font-size:0.75rem;">Insert</button>
             </div>
             <div style="font-size:0.8rem; color:var(--wf-fg-normal,#d3dae3); margin-top:4px; line-height:1.3;">$a.description</div>
           </div>
@@ -129,8 +129,8 @@ function saveWorkflowFile() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      owner: '$owner',
-      repo: '$repo',
+      owner: '$raw(js_owner)',
+      repo: '$raw(js_repo)',
       filename: fn,
       content: yaml
     })
@@ -146,7 +146,7 @@ function saveWorkflowFile() {
         toast.innerText = 'Workflow successfully committed to ' + data.path + '!';
       }
       setTimeout(() => {
-        window.location.href = '/repo/$owner/$repo?tab=actions';
+        window.location.href = '/repo/$raw(js_owner)/$raw(js_repo)?tab=actions';
       }, 1200);
     } else {
       alert('Error saving workflow: ' + (data.message || 'unknown error'));

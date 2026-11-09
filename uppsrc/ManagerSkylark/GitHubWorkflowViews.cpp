@@ -153,13 +153,13 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 		row.Add("author", a.author);
 		row.Add("version", a.version);
 		row.Add("stars", a.stars);
-		row.Add("snippet_js", AsCString(a.yaml_snippet));
+		row.Add("snippet", a.yaml_snippet);
 		row.Add("description", a.description);
 		actions.Add(row);
 	}
 
 	Renderer vars;
-	vars("owner", owner)("repo", repo)("filename", fn)
+	vars("owner", owner)("repo", repo)("js_owner", GitHubJsEscape(owner))("js_repo", GitHubJsEscape(repo))("filename", fn)
 		("tpl_title", tpl.title)
 		("default_yaml", EscapeHtml(tpl.default_yaml))
 		("icon_check", VividIcon::Get("check", 14))
@@ -171,18 +171,20 @@ String GitHubPlatformService::RenderWorkflowEditor(const String& owner, const St
 
 String GitHubPlatformService::RenderTppDocSite(const String& tpp_rel_dir)
 {
-	String full_tpp_dir = AppendFileName(GetHomeDirFile("Dev/ai-upp"), tpp_rel_dir);
+	String full_tpp_dir = AppendFileName(AppendFileName(GetDevDir(), "ai-upp"), tpp_rel_dir);
 	Vector<String> files;
 	Vector<String> titles;
 	FindFile ff(AppendFileName(full_tpp_dir, "*.tpp"));
 	while(ff) {
-		if(ff.IsFile()) {
+		if(ff.IsFile())
 			files.Add(ff.GetPath());
-			String tit;
-			ExtractTppText(ff.GetPath(), tit);
-			titles.Add(tit);
-		}
 		ff.Next();
+	}
+	Sort(files); // directory order is not stable across filesystems
+	for(const String& f : files) {
+		String tit;
+		ExtractTppText(f, tit);
+		titles.Add(tit);
 	}
 
 	ValueArray nav;
