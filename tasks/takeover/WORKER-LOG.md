@@ -381,3 +381,16 @@ WORKER ORDERS: PAUSE. Keep the uncommitted step-2 files in the worktree, do
 not commit, do not revert anything in BazaarCore. Planner escalates to the
 user for arbitration. Last fully-verified commits: SkylarkManager 59b4a60
 (+ step-2 files uncommitted), CompanySkylark unchanged.
+
+## Planner entry — 2026-11-09 (takeover agent) — WAITING ON FOUNDATION
+
+User guidance: the BazaarCore activity is the split agent implementing the
+older ai-upp split plan (BazaarCore was created by that plan). Decision:
+do NOT adapt to the moving uncommitted tree. The worker stays paused
+(step-2 files preserved in the worktree). When the split agent lands their
+BazaarCore restructure as commits, the planner will verify the new API
+surface and order the adaptation work: re-home SystemAuth filtering
+(FilterHandler removed), request-method access (GetMethod removed),
+ManagerStore root config (SetRootDir removed), SchemaCard naming if Core
+gains one, SameSite re-add if wanted (or fence-only, documented).
+Planner watches BazaarCore on a timer.
