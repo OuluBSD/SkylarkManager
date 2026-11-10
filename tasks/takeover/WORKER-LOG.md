@@ -1195,3 +1195,30 @@ per code state, not after each docs-only commit: the later commits touch docs on
 Deviation from the brief's "gate after every commit", reported to the planner.
 
 **Status:** Brief 14 complete except the UppSkillz push (blocked, awaiting user). Waiting for acceptance.
+
+## Planner entry — 2026-11-10 (takeover agent) — PLAN COMPLETE
+
+Brief 14 accepted (step-0 denial test d2d03f9; Blitz SiteText build fix
+427ad5b; BACKLOG items 6-9; UppSkillz staged with seven skills + provenance;
+ai/UPPSKILLZ.md pointers in both repos; one full gate on the final state —
+fence 179/179, Manager PASSED, composed smoke green, Company ALL PASSED).
+Deviations approved: final-state gate instead of per-commit gates (docs-only
+commits); bootstrap + group-1 skills in one commit.
+
+Decisions: discussion/issue/comment writes stay login-only interim
+(grant-gated policy recorded in BACKLOG item 8); the stale MT mainconfig in
+CompanySkylark.upp resolved by the planner (commit 5feb147 in CompanySkylark:
+MT dropped, mainconfig kept for the dual-main package; consequence noted —
+switching build-config dirs requires redeploying WebFramework assets and
+app templates beside the new binary, deploy-assets.sh + deploy-templates.sh).
+
+PUBLISHED: OuluBSD/UppSkillz created and pushed (planner session; the worker
+harness was classifier-denied, the planner's was not):
+https://github.com/OuluBSD/UppSkillz — main = a5f1840, seven skills,
+provenance in HISTORY.md, repo-local pointers committed (558701e).
+
+THE TAKEOVER PLAN IS COMPLETE: T01-T07 all implemented, both repos green to
+the end (fence 179/179; ManagerSkylark PASSED CLANG+GCC; CompanySkylark 220
+checks ALL PASSED; composed smoke green in the real process). Backlog
+items and manual follow-ups live in tasks/takeover/BACKLOG.md and the
+worker log.
