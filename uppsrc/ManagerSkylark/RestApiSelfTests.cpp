@@ -1,6 +1,7 @@
 #include "ManagerSkylark.h"
 #include "SfLegacyMigrationCli.h"
 #include "PrivateHubService.h"
+#include <TaskFoundry/TaskFoundryService.h>
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
 #include "AssessmentViews.h"
@@ -218,6 +219,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunPrivateHubServiceSelfTests(AppendFileName(fixture.path, "privatehub-service"))) {
 		Cerr() << "FAILED: PrivateHub broker service synthetic tests\n";
+		return false;
+	}
+	if(!RunTaskFoundrySelfTests(AppendFileName(fixture.path, "taskfoundry-service"))) {
+		Cerr() << "FAILED: TaskFoundry service synthetic tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

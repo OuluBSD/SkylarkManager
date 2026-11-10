@@ -75,7 +75,7 @@ static bool IsKnownOp(const String& op)
 	static const char *ops[] = {
 		"issue.list", "issue.get", "issue.create", "issue.comment",
 		"wiki.list", "wiki.get", "topic.list", "topic.get", "post.list",
-		"file.list", "file.get",
+		"file.list", "file.get", "repo.info",
 	};
 	for(const char *o : ops)
 		if(op == o)
@@ -169,6 +169,20 @@ BrokerResult PrivateHubService::Execute(const BrokerCallContext& ctx, const Brok
 	if(!PrivateHubWorkspaceBackend::ValidProjectKey(project))
 		return Reply(400, "project is missing or invalid");
 
+	if(op == "repo.info") {
+		// Live branch and head of the local checkout, for evidence references.
+		Vector<String> parts = Split(project, '/');
+		if(parts.GetCount() != 2)
+			return Reply(400, "repo.info needs an org/repo project");
+		RepoInfo info = backend.RepoStatus(parts[0], parts[1]);
+		if(!info.is_repo)
+			return Reply(404, "no local checkout for " + project);
+		ValueMap out;
+		out.Add("project", project);
+		out.Add("branch", info.branch);
+		out.Add("head_commit", info.head_commit);
+		return Done(out);
+	}
 	if(op == "issue.list") {
 		Vector<ForgeIssue> items;
 		ForgeResult fr = backend.ListIssues(project, items);

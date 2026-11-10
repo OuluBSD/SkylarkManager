@@ -9,6 +9,7 @@ uses
 	WebChat,
 	WebAuth,
 	PrivateHubWorkspace,
+	TaskFoundry,
 	Science,
 	WebEngine,
 	WebBroker,

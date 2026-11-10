@@ -1,0 +1,18 @@
+description "TaskFoundry: candidates, proposals, evidence, validation and submission to Company through the broker\377";
+
+uses
+	Core,
+	WebBroker,
+	WebStorage,
+	WebEngine;
+
+file
+	AGENTS.md,
+	TaskFoundryService.h,
+	TaskFoundryService.cpp,
+	TaskFoundrySite.h,
+	TaskFoundrySite.cpp,
+	TaskFoundrySelfTests.cpp;
+
+mainconfig
+	"" = "MT";
