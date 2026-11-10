@@ -972,3 +972,25 @@ requirement. TaskFoundry currently makes no science.author writes, so the requir
 needs a planner call on what TaskFoundry authors.
 Interim policy: TaskFoundryMemberScopes() gives every signed-in member all TaskFoundry
 scopes. Grant-based scopes replace it later.
+
+## Planner entry — 2026-11-10 (takeover agent)
+
+Brief 11B steps 0-3 accepted. Planner re-verified: SkylarkManager fence
+179/179, Manager PASSED (CLANG+GCC), composed-site smoke 23/23 rc 0
+(Science provisioning + caller-bound authoring in the real process);
+CompanySkylark ALL PASSED (CLANG) + GCC rc 0; dual-use (main.cpp flagMAIN),
+Company broker (idempotent create-proposal-draft + status), TaskFoundry
+package, and the T05 trailing-newline cleanup all landed. Tree clean in
+both repos.
+
+DECISION (worker's step-4 question): APPROVED — link CompanySkylark into
+ManagerSkylark as a composed module. Constraints: (1) host-compose
+direction only — CompanySkylark must never depend on the ManagerSkylark
+app package (the revised T05 rule stays); (2) ManagerSkylark consumes ONLY
+the Company broker service surface (create-proposal-draft /
+get-proposal-status) through the module registry from 11B step 1 — no
+direct store/data access; (3) the composed Company instance gets its own
+data root via a CLI flag (e.g. --company-root, defaulting under the
+site dir); (4) standalone CompanySkylark unchanged. Step 4 (fence round
+trip) may proceed on this basis. Both AGENTS files must record the
+host-compose direction.
