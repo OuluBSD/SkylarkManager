@@ -13,41 +13,41 @@ void RegisterComposedBrokerCommands()
 	CommandManifest& cm = TheWebEngine().Manifest();
 	Vector<String> project = {"project:string:required"};
 
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("issue-list", "issue.list", kBrokerAuth, "List issues of a project", project));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("issue-get", "issue.get", kBrokerAuth, "Read one issue",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-issue-list", "issue.list", kBrokerAuth, "List issues of a project", project));
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-issue-get", "issue.get", kBrokerAuth, "Read one issue",
 	                                                 {"project:string:required", "issue_id:string:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("issue-create", "issue.create", kBrokerAuth, "Open an issue",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-issue-create", "issue.create", kBrokerAuth, "Open an issue",
 	                                                 {"project:string:required", "title:string:required", "body:text"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("issue-comment", "issue.comment", kBrokerAuth, "Comment on an issue",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-issue-comment", "issue.comment", kBrokerAuth, "Comment on an issue",
 	                                                 {"project:string:required", "issue_id:string:required", "body:text:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("wiki-list", "wiki.list", kBrokerAuth, "List wiki pages", project));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("wiki-get", "wiki.get", kBrokerAuth, "Read one wiki page",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-wiki-list", "wiki.list", kBrokerAuth, "List wiki pages", project));
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-wiki-get", "wiki.get", kBrokerAuth, "Read one wiki page",
 	                                                 {"project:string:required", "slug:string:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("topic-list", "topic.list", kBrokerAuth, "List discussion topics", project));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("topic-get", "topic.get", kBrokerAuth, "Read one discussion topic",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-topic-list", "topic.list", kBrokerAuth, "List discussion topics", project));
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-topic-get", "topic.get", kBrokerAuth, "Read one discussion topic",
 	                                                 {"project:string:required", "slug:string:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("post-list", "post.list", kBrokerAuth, "List posts in a topic",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-post-list", "post.list", kBrokerAuth, "List posts in a topic",
 	                                                 {"project:string:required", "topic:string:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("file-list", "file.list", kBrokerAuth, "List release files", project));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("file-get", "file.get", kBrokerAuth, "Read one release file",
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-file-list", "file.list", kBrokerAuth, "List release files", project));
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-file-get", "file.get", kBrokerAuth, "Read one release file",
 	                                                 {"project:string:required", "name:string:required"}));
-	cm.Add("privatehub", "PrivateHub", BrokerCommand("repo-info", "repo.info", kBrokerAuth, "Read the project's repository facts", project));
+	cm.Add("privatehub", "PrivateHub", BrokerCommand("broker-repo-info", "repo.info", kBrokerAuth, "Read the project's repository facts", project));
 
-	cm.Add("science", "Science", BrokerCommand("papers-list", "list-papers", kBrokerAuth, "List papers in the corpus", {}));
-	cm.Add("science", "Science", BrokerCommand("paper-get", "get-paper", kBrokerAuth, "Read one paper's metadata",
+	cm.Add("science", "Science", BrokerCommand("broker-papers-list", "list-papers", kBrokerAuth, "List papers in the corpus", {}));
+	cm.Add("science", "Science", BrokerCommand("broker-paper-get", "get-paper", kBrokerAuth, "Read one paper's metadata",
 	                                           {"id:string:required"}));
-	cm.Add("science", "Science", BrokerCommand("article-get", "get-article", kBrokerAuth, "Read one paper's article tree",
+	cm.Add("science", "Science", BrokerCommand("broker-article-get", "get-article", kBrokerAuth, "Read one paper's article tree",
 	                                           {"id:string:required"}));
-	cm.Add("science", "Science", BrokerCommand("article-write", "put-article", kBrokerAuth,
+	cm.Add("science", "Science", BrokerCommand("broker-article-write", "put-article", kBrokerAuth,
 	                                           "Replace the article tree when the expected revision matches",
 	                                           {"id:string:required", "expected_paper_revision:string:required",
 	                                            "article:text:required"}));
 
-	cm.Add("company", "Company", BrokerCommand("proposal-draft", COMPANY_BROKER_CREATE_DRAFT, kBrokerAuth,
+	cm.Add("company", "Company", BrokerCommand("broker-proposal-draft", COMPANY_BROKER_CREATE_DRAFT, kBrokerAuth,
 	                                           "Create a proposal draft for a repository",
 	                                           {"title:string:required", "description:text", "repository:string:required",
 	                                            "estimated_hours:number:required"}));
-	cm.Add("company", "Company", BrokerCommand("proposal-status", COMPANY_BROKER_STATUS, kBrokerAuth,
+	cm.Add("company", "Company", BrokerCommand("broker-proposal-status", COMPANY_BROKER_STATUS, kBrokerAuth,
 	                                           "Read a proposal's status", {"proposal_id:string:required"}));
 }
 

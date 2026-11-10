@@ -163,6 +163,20 @@ static void IssuesList(WebRequest& r)
 	Page(r, Project(r) + " issues", String(b));
 }
 
+// Success for a mutation route. A browser gets the redirect to the new resource; a client
+// that asks for JSON gets the same target as {ok, location}, so the CLI can print the result.
+static void Done(WebRequest& r, const String& location)
+{
+	if(r.Header("accept").Find("json") < 0) {
+		r.Redirect(location);
+		return;
+	}
+	ValueMap m;
+	m.Add("ok", true);
+	m.Add("location", location);
+	r.Json(m);
+}
+
 static void IssueCreate(WebRequest& r)
 {
 	if(!RequireUser(r))
@@ -184,7 +198,7 @@ static void IssueCreate(WebRequest& r)
 	}
 	Vector<Value> args = ArgsOf(r, 2);
 	args << Value(out.issue_id);
-	r.Redirect(r.Site().Url("privatehub/*/*/issues/*", args));
+	Done(r, r.Site().Url("privatehub/*/*/issues/*", args));
 }
 
 static void IssueDetail(WebRequest& r)
@@ -229,7 +243,7 @@ static void IssueComment(WebRequest& r)
 		Failed(r, 400, res.error);
 		return;
 	}
-	r.Redirect(r.Site().Url("privatehub/*/*/issues/*", ArgsOf(r, 3)));
+	Done(r, r.Site().Url("privatehub/*/*/issues/*", ArgsOf(r, 3)));
 }
 
 // --- wiki -----------------------------------------------------------------
@@ -346,7 +360,7 @@ static void TopicPost(WebRequest& r)
 		Failed(r, 400, res.error);
 		return;
 	}
-	r.Redirect(r.Site().Url("privatehub/*/*/discussions/*", ArgsOf(r, 3)));
+	Done(r, r.Site().Url("privatehub/*/*/discussions/*", ArgsOf(r, 3)));
 }
 
 // --- release files --------------------------------------------------------
@@ -471,7 +485,7 @@ static void WikiCreate(WebRequest& r)
 	}
 	Vector<Value> args = ArgsOf(r, 2);
 	args << Value(page.slug);
-	r.Redirect(r.Site().Url("privatehub/*/*/wiki/*", args));
+	Done(r, r.Site().Url("privatehub/*/*/wiki/*", args));
 }
 
 static void WikiEdit(WebRequest& r)
@@ -514,7 +528,7 @@ static void WikiSave(WebRequest& r)
 		Failed(r, 409, "not saved, the page changed since you opened it: " + res.error);
 		return;
 	}
-	r.Redirect(r.Site().Url("privatehub/*/*/wiki/*", ArgsOf(r, 3)));
+	Done(r, r.Site().Url("privatehub/*/*/wiki/*", ArgsOf(r, 3)));
 }
 
 static void TopicCreate(WebRequest& r)
@@ -546,7 +560,7 @@ static void TopicCreate(WebRequest& r)
 	}
 	Vector<Value> args = ArgsOf(r, 2);
 	args << Value(topic.slug);
-	r.Redirect(r.Site().Url("privatehub/*/*/discussions/*", args));
+	Done(r, r.Site().Url("privatehub/*/*/discussions/*", args));
 }
 
 static void FileRegister(WebRequest& r)
@@ -582,7 +596,7 @@ static void FileRegister(WebRequest& r)
 	}
 	Vector<Value> args = ArgsOf(r, 2);
 	args << Value(file.name);
-	r.Redirect(r.Site().Url("privatehub/*/*/files/*", args));
+	Done(r, r.Site().Url("privatehub/*/*/files/*", args));
 }
 
 void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend)
