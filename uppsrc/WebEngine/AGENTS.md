@@ -50,11 +50,14 @@ namespace, and route tree.
   claims `login`, `logout`, `p/*`, `issues` and others, so a composed route with
   one of those first segments is shadowed.
 - **Stock routes are not served on engine listeners.** `ManagerSkylarkApp`
-  answers any non-gateway stock match with 404, except the home route `/`. The
-  gateway rebuilds the request path from the route's wildcard arguments, and a
-  stock route with literal segments loses them, so a gateway hand-off would
-  serve the wrong page. Fixing this needs a public raw-URI accessor on
-  `Http` in ai-upp (the header is private); until then, keep the rule.
+  answers any non-gateway stock match with 404, except the home route `/`. This
+  is still the policy. The shadowing problem it guarded against is fixed: the
+  gateway used to rebuild the path from the route's wildcard arguments, which
+  lose literal segments, so a hand-off could serve the wrong page. The gateway
+  now takes the path from `Http::GetRequestURI()` (BazaarCore `Skylark/Http.h`,
+  the raw request target), strips the query string, and percent-decodes each
+  segment. A future change may serve stock routes on engine listeners without
+  that shadowing risk. Keep the 404 rule until that is a deliberate decision.
 
 ## Known WP1 limitations (by design)
 

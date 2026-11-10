@@ -102,6 +102,11 @@ check "stock /issues is not served on privatehub" 404 "$PH_URL/issues" -b "$T/ph
 check "stock /goals is not served on science" 404 "$SC_URL/goals"
 check "privatehub routes are not served on science" 404 "$SC_URL/privatehub/acme/widget/issues"
 
+# The gateway routes on the raw request target: the query string is ignored and
+# percent-encoded segments decode to the route's segments.
+check "composed route ignores a query string" 200 "$SC_URL/papers/2612.00002?view=1"
+check "composed route decodes a percent-encoded segment" 200 "$SC_URL/papers/2612%2E00002"
+
 # CSRF: a mutation without the token is refused even for a session user.
 check "privatehub issue create without csrf is refused" 403 \
 	"$PH_URL/privatehub/acme/widget/issues/create" -b "$T/ph.jar" \

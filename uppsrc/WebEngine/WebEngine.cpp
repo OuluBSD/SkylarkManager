@@ -112,9 +112,21 @@ void WebEngine::Gateway(Http& http)
 	}
 	String method = http.GetMethod();
 
+	// The path comes from the raw request target, not from the wildcard arguments,
+	// which lose the literal segments of a route they were matched through.
+	// Segments are percent-decoded to match what the wildcard arguments carried.
 	Vector<String> segs;
-	for(int i = 0; i < http.GetParamCount(); i++)
-		segs.Add(http[i]);
+	String target = http.GetRequestURI();
+	if(target.StartsWith("/")) {
+		int q = target.Find('?');
+		if(q >= 0)
+			target = target.Left(q);
+		for(const String& part : Split(target, '/', true))
+			segs.Add(UrlDecode(part, false));
+	}
+	else
+		for(int i = 0; i < http.GetParamCount(); i++)
+			segs.Add(http[i]);
 	String path = "/";
 	if(segs.GetCount())
 		path << Join(segs, "/");
