@@ -994,3 +994,35 @@ data root via a CLI flag (e.g. --company-root, defaulting under the
 site dir); (4) standalone CompanySkylark unchanged. Step 4 (fence round
 trip) may proceed on this basis. Both AGENTS files must record the
 host-compose direction.
+
+### Brief 11B — step 4 result (`158ebae` SkylarkManager, `06548d6` CompanySkylark)
+
+- Host-compose direction, as decided: CompanySkylark never depends on ManagerSkylark.
+  The Company module is package `uppsrc/CompanyComposed` (CompanySkylark repo). The
+  host opens it with `--company-root` and calls only the broker surface through
+  `CompanyBrokerSite`. Rule 8 is in CompanySkylark's AGENTS.md. The direction is also
+  in ManagerSkylark's AGENTS.md, with the composed-sites table and build note.
+- `--company-repos` is the operator's allowlist. An empty default refuses every proposal.
+- Composed in the real process: taskfoundry on `--taskfoundry-port` (18213), the Company
+  module, and the PrivateHub broker service (`privatehub`, with the new `repo.info` op).
+  ComposeEngineSites now fails the start, with an error, when the Company store cannot open.
+- `--set-taskfoundry-user` provisions TaskFoundry accounts.
+- Real-process round trip in `upptst/ComposedSite/smoke.sh`: candidate from a Science
+  paper, proposal, Science evidence (node p1), PrivateHub evidence (acme/widget, now a real
+  git checkout), edit, validate, submit to Company, Company status proposed, repeat submit
+  returns the same submission and Company id, anonymous submit refused.
+- Bug fixed in this step: TaskFoundry form actions carried the `:POST` route suffix. The
+  suffix belongs only to the route table.
+- Gate green on both commits (fence 179/179, ManagerSkylark PASSED, composed 0 failed with
+  the round trip, CompanySkylark ALL PASSED, GCC rc 0 x3, GitHub captures identical).
+- Build change: ManagerSkylark builds now need `-a ../CompanySkylark/uppsrc`. The gate
+  script is updated to match.
+
+Open, for planner acceptance:
+- "grant caller-binding applies to TaskFoundry's science.author use": TaskFoundry makes no
+  science.author writes today, so there is no call to bind. Needs a planner decision on
+  what TaskFoundry should author, or a confirmation that the requirement is met by the
+  existing Science caller-binding tests.
+- Interim policy: every signed-in TaskFoundry user gets all TaskFoundry scopes.
+- The broker idempotency key is the content hash. Company keys its own dedup by its own
+  content hash, so the key is not read on that path.
