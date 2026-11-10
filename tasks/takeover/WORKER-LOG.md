@@ -1162,3 +1162,36 @@ member-role denial test folds into Brief 14 step 0. Stale WebAuth/sidebar
 plan file correctly ignored.
 Next: WORKER-BRIEF-14.md — T07 UppSkillz (final plan item) + the step-0
 micro-fixes.
+
+## Brief 14 — step 0, UppSkillz, pointers
+
+- **Step 0 (`d2d03f9`, SkylarkManager).** `--privatehub-role` on `--set-privatehub-user`
+  (default member). The composed smoke provisions a viewer account and checks the denials:
+  the wiki new-page form, wiki create, topic create, and release register return 403; the
+  refused create leaves no page. BACKLOG items 6 (user-facing grant consent), 7 (Windows
+  LockFileEx validation), and 8 (login-only issue, comment, and discussion-post writes) added.
+- **Build fix (`427ad5b`, SkylarkManager).** TaskFoundrySite.cpp's file-static `Text()`
+  collided with TaskFoundryService.cpp's under the Blitz unit build. Renamed to `SiteText`.
+  Same body; the Blitz build had failed on the committed code.
+- **Step 1, UppSkillz repo: NOT PUBLISHED.** `gh repo create OuluBSD/UppSkillz --public`
+  was denied by the auto-mode classifier (public surface). No remote was created. The
+  repo is staged locally at `~/Dev/UppSkillz` with the full batch. Push awaits the user.
+- **Step 2, first batch (UppSkillz, local):** bootstrap and method files (`a961292` →
+  `f47e8e1`, amended), U++ fundamentals (containers, value/JSON, sync), build and packaging
+  (`452eff5`), Skylark web (`1a45961`: witz, engine fence, socket and console hygiene),
+  provenance links (`d1ff026`), explicit static deployment fix (`96e1d01`), BACKLOG
+  pointer (`a5f1840`). HEAD `a5f1840`. Batch check: 7 skills, 0 problems (frontmatter,
+  <500 lines, relative links). Grouping: bootstrap and group 1 share one commit, not one each.
+  Stale guidance fixed: MT required, bin/build paths, automatic asset copy, POST_RAW caveat
+  stated. Verified against code: Vector move-only, Core.h MT, INITBLOCK_, Skylark.upp
+  custom(_NEVER), Dispatch.cpp POST_RAW, WebEngine.cpp fence, Socket.cpp EINPROGRESS.
+- **Step 3, pointers.** `SkylarkManager/ai/UPPSKILLZ.md` (`7a584a9`) and
+  `CompanySkylark/ai/UPPSKILLZ.md` (`558701e`) point at UppSkillz and say it is unpublished.
+  SkylarkManager BACKLOG item 9 (stale `MT` mainconfig in CompanySkylark.upp) added in `7a584a9`.
+
+**Gate:** one full gate on the final HEADs (SkylarkManager `427ad5b` code plus docs through `7a584a9`; CompanySkylark
+`558701e`): 16/16 rc 0, composed smoke 0 failed, GitHub captures identical (76). Gate run
+per code state, not after each docs-only commit: the later commits touch docs only.
+Deviation from the brief's "gate after every commit", reported to the planner.
+
+**Status:** Brief 14 complete except the UppSkillz push (blocked, awaiting user). Waiting for acceptance.
