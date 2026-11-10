@@ -56,6 +56,23 @@ static void Login(WebRequest& r)
 	r.Json(m);
 }
 
+static void Whoami(WebRequest& r)
+{
+	if(!r.HasUser()) {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "not signed in");
+		r.Json(m, 401);
+		return;
+	}
+	ValueMap m;
+	m.Add("ok", true);
+	m.Add("user", r.User().username);
+	m.Add("user_id", r.User().user_id);
+	m.Add("csrf", r.CsrfToken());
+	r.Json(m);
+}
+
 static void Logout(WebRequest& r)
 {
 	r.DropSession();
@@ -69,6 +86,7 @@ void InstallSessionRoutes(EngineSite& site)
 	site.Router().Add("session/login", LoginForm);
 	site.Router().Add("session/login:POST", Login);
 	site.Router().Add("session/logout:POST", Logout);
+	site.Router().Add("session/whoami", Whoami);
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	cm.Add(site.id, site.title, HttpCommand("session-login", "POST", "session/login", "any account of this site",
@@ -76,6 +94,8 @@ void InstallSessionRoutes(EngineSite& site)
 	                                        {"username:string:required", "password:string:required"}));
 	cm.Add(site.id, site.title, HttpCommand("session-logout", "POST", "session/logout", "open session",
 	                                        "json", "Close the current session", {}));
+	cm.Add(site.id, site.title, HttpCommand("session-whoami", "GET", "session/whoami", "open session",
+	                                        "json", "Show the signed-in account", {}));
 }
 
 END_UPP_NAMESPACE

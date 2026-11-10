@@ -1644,6 +1644,10 @@ CONSOLE_APP_MAIN
 		Check(beta_cmds.GetCount() == 1 && (String)ValueMap(beta_cmds[0])["broker_op"] == "ping.op" &&
 		      (String)ValueMap(beta_cmds[0])["transport"] == "broker",
 		      "broker command carries its operation name and transport");
+		Check(!local.Add("beta", "Beta", BrokerCommand("ping", "ping.again", "broker caller", "Again", {})) &&
+		      local.Add("alpha", "Alpha", BrokerCommand("ping", "ping.op", "broker caller", "Ping", {})) &&
+		      local.GetCount() == 3,
+		      "a command name repeats within one site is refused; the same name on another site is listed");
 		ValueMap alpha_cmd = ValueArray(ValueMap(all_sites[0])["commands"])[0];
 		ValueArray alpha_args = alpha_cmd["args"];
 		Check(alpha_args.GetCount() == 2 && (String)ValueMap(alpha_args[0])["name"] == "name" &&
@@ -1676,7 +1680,7 @@ CONSOLE_APP_MAIN
 			}
 			covered = covered && found;
 		}
-		Check(posts == 2 && covered && cmds.GetCount() == 2,
+		Check(posts == 2 && covered && cmds.GetCount() == 3,
 		      "session POST routes each have a manifest command with the same path and method");
 	}
 

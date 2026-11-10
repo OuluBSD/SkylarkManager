@@ -2,13 +2,17 @@
 
 NAMESPACE_UPP
 
-void CommandManifest::Add(const String& site_id, const String& site_title, CommandDesc cmd)
+bool CommandManifest::Add(const String& site_id, const String& site_title, CommandDesc cmd)
 {
 	Mutex::Lock lock(mutex);
+	for(const Entry& e : entries)
+		if(e.site_id == site_id && e.cmd.name == cmd.name)
+			return false;
 	Entry& e = entries.Add();
 	e.site_id = site_id;
 	e.site_title = site_title;
 	e.cmd = pick(cmd);
+	return true;
 }
 
 static ValueMap ArgToValue(const CommandArg& a)

@@ -35,8 +35,10 @@ struct CommandDesc : Moveable<CommandDesc> {
 
 class CommandManifest {
 public:
-	// Registers one command for a site. Titles are shown in the manifest.
-	void Add(const String& site_id, const String& site_title, CommandDesc cmd);
+	// Registers one command for a site. Titles are shown in the manifest. A command
+	// name must be unique within its site: a second one with the same name is
+	// refused (false) and not listed, so the first registration stays the one shown.
+	bool Add(const String& site_id, const String& site_title, CommandDesc cmd);
 
 	// Descriptor for every enabled site (site_id empty) or for one site.
 	// Returns the JSON-ready schema: {schema, sites: [{id, title, commands: [...]}]}.
