@@ -1,0 +1,15 @@
+description "skylarkctl: agent-first client for a Skylark server's command manifest\377B128,0,0";
+
+uses
+	Core,
+	Core/SSL,
+	Core/Ext;
+
+file
+	SiteCli.h,
+	SiteCli.cpp,
+	SiteCliSelfTests.cpp,
+	SiteCli.upp;
+
+mainconfig
+	"" = "";
