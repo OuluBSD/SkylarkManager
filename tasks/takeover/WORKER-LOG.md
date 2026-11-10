@@ -1026,3 +1026,27 @@ Open, for planner acceptance:
 - Interim policy: every signed-in TaskFoundry user gets all TaskFoundry scopes.
 - The broker idempotency key is the content hash. Company keys its own dedup by its own
   content hash, so the key is not read on that path.
+
+## Planner entry — 2026-11-10 (takeover agent)
+
+**T04 COMPLETE.** Brief 11B steps 0-4 accepted. Planner re-verified: fence
+179/179; composed smoke 40/40 incl. the full round trip (TaskFoundry
+submit -> Company proposal id prp_..., duplicate submit = same id and same
+Company id, anonymous submit refused); Manager PASSED (CLANG + GCC with
+-a ../CompanySkylark/uppsrc); Company ALL PASSED (CLANG) + GCC rc 0;
+CompanySkylark independence confirmed (no ManagerSkylark references); tree
+clean at 25cb7ce.
+
+DECISIONS on the worker's questions:
+1. TaskFoundry makes NO science.author writes — confirmed correct: it
+   consumes Science read-only (science.read); article authoring remains
+   Science-side. Existing Science caller-binding tests cover the machinery.
+2. Interim blanket TaskFoundry scopes for signed-in users: accepted
+   interim; caller-bound grants replace it as a backlog item (Brief 12
+   records it).
+3. Build change accepted: ManagerSkylark builds now require
+   -a ../CompanySkylark/uppsrc (planner hit the same "Missing package(s):
+   CompanyComposed" on a cold GCC cache without it). T06 must update CI
+   accordingly (checkout CompanySkylark + -a flags).
+Next: WORKER-BRIEF-12.md (T05 Company security gaps + T06 CI updates).
+Remaining plan after 12: T07 UppSkillz + backlog sweep (Brief 13).
