@@ -45,7 +45,9 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 
 // Creates or updates a PrivateHub account (role "member") on the composed
 // PrivateHub site. Requires ComposeEngineSites to have run.
-bool SetPrivateHubPassword(const String& username, const String& password, String& error);
+// role is the one PrivateHub role given to the account; "member" may author, anything else may read only.
+bool SetPrivateHubPassword(const String& username, const String& password, String& error,
+                           const String& role = "member");
 
 // Creates or resets a Science account with the science-author role, which is
 // what authoring needs. Requires ComposeEngineSites to have run.

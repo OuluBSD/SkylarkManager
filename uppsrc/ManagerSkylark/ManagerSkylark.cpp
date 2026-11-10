@@ -88,6 +88,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("revoke-taskfoundry-grant", 0, "Revoke an active TaskFoundry grant by id and exit", true, "grant-id");
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
+	cla.AddArg("privatehub-role", 0, "Role for --set-privatehub-user (default member; only member may author)", true, "role");
 	cla.AddArg("set-science-user", 0, "Create/update a Science author account with hidden prompt (or MANAGERSKYLARK_SCIENCE_PASSWORD)", true, "username");
 
 	if(!cla.Parse(args))
@@ -223,7 +224,10 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			if(!ReadEnginePassword("MANAGERSKYLARK_PRIVATEHUB_PASSWORD", "New PrivateHub password: ", password))
 				return false;
 			String error;
-			if(!SetPrivateHubPassword(ph_user, password, error)) {
+			String ph_role = cla.GetArg("privatehub-role");
+			if(ph_role.IsEmpty())
+				ph_role = "member";
+			if(!SetPrivateHubPassword(ph_user, password, error, ph_role)) {
 				Cerr() << "Failed to write PrivateHub credentials: " << error << "\n";
 				return false;
 			}

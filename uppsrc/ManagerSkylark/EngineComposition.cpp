@@ -110,10 +110,10 @@ static bool SetEngineUser(const char *site_id, const String& username, const Str
 	return r.ok;
 }
 
-bool SetPrivateHubPassword(const String& username, const String& password, String& error)
+bool SetPrivateHubPassword(const String& username, const String& password, String& error, const String& role)
 {
 	Vector<String> roles;
-	roles.Add("member");
+	roles.Add(role);
 	return SetEngineUser("privatehub", username, password, roles, error);
 }
 

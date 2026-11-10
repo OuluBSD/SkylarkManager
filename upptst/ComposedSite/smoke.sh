@@ -44,6 +44,9 @@ printf '%s' '{"id":"2612.00002","kind":"paper","title":"Smoke paper","status":"d
 MANAGERSKYLARK_PRIVATEHUB_PASSWORD=pw-ph "$BIN" --site-dir "$T" --privatehub-workspace "$T/ws" \
 	--set-privatehub-user dev >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision PrivateHub account"; else fail "provision PrivateHub account"; fi
+MANAGERSKYLARK_PRIVATEHUB_PASSWORD=pw-view "$BIN" --site-dir "$T" --privatehub-workspace "$T/ws" \
+	--set-privatehub-user viewer --privatehub-role viewer >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision PrivateHub viewer account (no member role)"; else fail "provision PrivateHub viewer account (no member role)"; fi
 MANAGERSKYLARK_SCIENCE_PASSWORD=pw-sci "$BIN" --site-dir "$T" --set-science-user author >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Science author account"; else fail "provision Science author account"; fi
 MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos acme/widget \
@@ -129,6 +132,21 @@ check "privatehub wiki save from the current revision redirects" 302 "$PH_WIKI/s
 	-H "Origin: $PH_URL" --data "expected_revision=$ph_rev&title=Smoke&body=Smoke+edited&__wf_csrf__=$ph_csrf"
 check "privatehub wiki page shows the saved edit" 200 "$PH_WIKI/smoke-page" -b "$T/ph.jar"
 if grep -q "Smoke edited" "$T/body"; then pass "privatehub wiki page shows the edited body"; else fail "privatehub wiki page shows the edited body"; fi
+
+# A logged-in PrivateHub account without the member role is refused every authoring endpoint,
+# and its refused create leaves nothing behind.
+curl -s -c "$T/viewer.jar" -o /dev/null -H "Origin: $PH_URL" -H "Accept: text/html" \
+	--data "username=viewer&password=pw-view" "$PH_URL/session/login"
+check "privatehub viewer reads the issues list (with a csrf form)" 200 "$PH_URL/privatehub/acme/widget/issues" -b "$T/viewer.jar"
+view_csrf=$(sed -n 's/.*__wf_csrf__" value="\([^"]*\)".*/\1/p' "$T/body")
+check "privatehub viewer cannot open the wiki new-page form" 403 "$PH_WIKI/new" -b "$T/viewer.jar"
+check "privatehub viewer wiki create is refused" 403 "$PH_WIKI/create" -b "$T/viewer.jar" \
+	-H "Origin: $PH_URL" --data "slug=viewer-page&title=Nope&body=x&__wf_csrf__=$view_csrf"
+check "privatehub viewer topic create is refused" 403 "$PH_URL/privatehub/acme/widget/discussions/create" -b "$T/viewer.jar" \
+	-H "Origin: $PH_URL" --data "slug=viewer-topic&title=Nope&__wf_csrf__=$view_csrf"
+check "privatehub viewer release register is refused" 403 "$PH_URL/privatehub/acme/widget/files/register" -b "$T/viewer.jar" \
+	-H "Origin: $PH_URL" --data "name=nope.zip&release=1.0.0&size_bytes=1&url=file:///nope.zip&__wf_csrf__=$view_csrf"
+check "refused viewer wiki create left no page behind" 404 "$PH_WIKI/viewer-page" -b "$T/viewer.jar"
 
 # Discussion topics and release files: a member starts a topic and registers a release file.
 check "privatehub topic create redirects" 302 "$PH_URL/privatehub/acme/widget/discussions/create" -b "$T/ph.jar" \

@@ -86,3 +86,31 @@ source so a later brief can pick it up. All five are done as of brief 13; each e
   topics, or release files. Witz templates were routed with it.
 - **Source:** WORKER-LOG (brief 11A open items, routed to brief 12); TaskFoundry
   uses PrivateHub read operations only, so this does not block it.
+
+## 6. User-facing grant consent (MetaAccount composition)
+
+- **What:** TaskFoundry grants are approved only through the operator CLI
+  (`approve-taskfoundry-grant`, `revoke-taskfoundry-grant`). MetaAccount is not
+  composed into the real host process, so a user cannot consent to a grant in the UI.
+- **Decision (planner, brief 14):** interim operator-CLI consent stays. User-facing
+  consent means composing MetaAccount into the host; that is a later decision.
+- **Source:** WORKER-BRIEF-13 item 1 residual; WORKER-BRIEF-14 residual decision 1.
+
+## 7. Windows LockFileEx runtime validation
+
+- **What:** the PrivateHub data-root owner lock (`DataRootOwner`, `owner.lock`) has a
+  Windows path using `LockFileEx`. It is compile-only coverage. Its runtime behavior
+  is not run on Windows, since no Windows runner executes the tests.
+- **Decision (planner, brief 14):** deferred. POSIX is the supported path until a
+  Windows runner can execute the tests.
+- **Source:** WORKER-BRIEF-13 item 4 residual; WORKER-BRIEF-14 residual decision 2.
+
+## 8. Login-only PrivateHub writes (issues, comments, discussion posts)
+
+- **What:** issue create, issue comment, and discussion post are still gated by login
+  only (`RequireUser`), not the member role. Item 5 gated only the authoring endpoints
+  it added (wiki, topic, release file). Under the rule that every mutation checks the
+  actor's role, these three need the same gate.
+- **Status:** not changed in brief 14, because the brief names only the authoring
+  endpoints. Needs a planner decision on whether viewers may comment.
+- **Source:** found while writing the viewer-denial fence (brief 14 step 0).
