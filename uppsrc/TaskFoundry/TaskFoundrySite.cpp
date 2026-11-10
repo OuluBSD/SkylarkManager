@@ -39,7 +39,7 @@ static Vector<Value> IdArgs(const String& id)
 	return args;
 }
 
-static String Text(const ValueMap& m, const char *key)
+static String SiteText(const ValueMap& m, const char *key)
 {
 	return (String)m.Get(key, "");
 }
@@ -142,8 +142,8 @@ static void Board(WebRequest& r)
 	ValueArray cands = res.payload.Get("candidates", ValueArray());
 	for(int i = 0; i < cands.GetCount(); i++) {
 		ValueMap c = cands[i];
-		b << ListItem(r.Site().Url("candidates/*", IdArgs(Text(c, "id"))), Text(c, "title"),
-		              "paper " + Text(c, "paper_id"));
+		b << ListItem(r.Site().Url("candidates/*", IdArgs(SiteText(c, "id"))), SiteText(c, "title"),
+		              "paper " + SiteText(c, "paper_id"));
 	}
 	b << "</ul>"
 	     "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/create")) << "\">"
@@ -156,7 +156,7 @@ static void Board(WebRequest& r)
 	ValueArray props = res.payload.Get("proposals", ValueArray());
 	for(int i = 0; i < props.GetCount(); i++) {
 		ValueMap p = props[i];
-		b << ListItem(r.Site().Url("proposals/*", IdArgs(Text(p, "id"))), Text(p, "title"), Text(p, "status"));
+		b << ListItem(r.Site().Url("proposals/*", IdArgs(SiteText(p, "id"))), SiteText(p, "title"), SiteText(p, "status"));
 	}
 	b << "</ul>";
 	Page(r, "TaskFoundry", String(b));
@@ -171,7 +171,7 @@ static void CandidateCreate(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
-	r.Redirect(r.Site().Url("candidates/*", IdArgs(Text(res.payload, "candidate_id"))));
+	r.Redirect(r.Site().Url("candidates/*", IdArgs(SiteText(res.payload, "candidate_id"))));
 }
 
 static void CandidateDetail(WebRequest& r)
@@ -185,12 +185,12 @@ static void CandidateDetail(WebRequest& r)
 		return;
 	}
 	StringBuffer b;
-	b << "<p>" << Esc(Text(res.payload, "summary")) << "</p>"
-	  << "<p>Science paper <code>" << Esc(Text(res.payload, "paper_id")) << "</code>, revision "
-	  << Esc(Text(res.payload, "paper_revision")) << "</p>"
+	b << "<p>" << Esc(SiteText(res.payload, "summary")) << "</p>"
+	  << "<p>Science paper <code>" << Esc(SiteText(res.payload, "paper_id")) << "</code>, revision "
+	  << Esc(SiteText(res.payload, "paper_revision")) << "</p>"
 	  << "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/*/propose", IdArgs(id))) << "\">"
 	  << Hidden(r) << "<button>Start a proposal from this candidate</button></form>";
-	Page(r, Text(res.payload, "title"), String(b));
+	Page(r, SiteText(res.payload, "title"), String(b));
 }
 
 static void CandidatePropose(WebRequest& r)
@@ -202,16 +202,16 @@ static void CandidatePropose(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
-	r.Redirect(r.Site().Url("proposals/*", IdArgs(Text(res.payload, "proposal_id"))));
+	r.Redirect(r.Site().Url("proposals/*", IdArgs(SiteText(res.payload, "proposal_id"))));
 }
 
 static String EvidenceRow(const ValueMap& e)
 {
-	if(Text(e, "kind") == "science")
-		return "<li>science paper <code>" + Esc(Text(e, "paper_id")) + "</code> revision " +
-		       Esc(Text(e, "paper_revision")) + " node <code>" + Esc(Text(e, "node_id")) + "</code></li>";
-	return "<li>privatehub <code>" + Esc(Text(e, "project")) + "</code> branch " + Esc(Text(e, "branch")) +
-	       " at <code>" + Esc(Text(e, "head_commit")) + "</code></li>";
+	if(SiteText(e, "kind") == "science")
+		return "<li>science paper <code>" + Esc(SiteText(e, "paper_id")) + "</code> revision " +
+		       Esc(SiteText(e, "paper_revision")) + " node <code>" + Esc(SiteText(e, "node_id")) + "</code></li>";
+	return "<li>privatehub <code>" + Esc(SiteText(e, "project")) + "</code> branch " + Esc(SiteText(e, "branch")) +
+	       " at <code>" + Esc(SiteText(e, "head_commit")) + "</code></li>";
 }
 
 static void ProposalEditor(WebRequest& r)
@@ -226,13 +226,13 @@ static void ProposalEditor(WebRequest& r)
 	}
 	const ValueMap& p = res.payload;
 	StringBuffer b;
-	b << "<p>Status: <strong>" << Esc(Text(p, "status")) << "</strong></p>";
+	b << "<p>Status: <strong>" << Esc(SiteText(p, "status")) << "</strong></p>";
 
 	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/edit", IdArgs(id))) << "\">" << Hidden(r)
-	  << "<input name=\"title\" value=\"" << Esc(Text(p, "title")) << "\" required>"
-	  << "<input name=\"repository\" value=\"" << Esc(Text(p, "repository")) << "\" placeholder=\"owner/repo\">"
+	  << "<input name=\"title\" value=\"" << Esc(SiteText(p, "title")) << "\" required>"
+	  << "<input name=\"repository\" value=\"" << Esc(SiteText(p, "repository")) << "\" placeholder=\"owner/repo\">"
 	  << "<input name=\"estimated_hours\" value=\"" << Esc(AsString((double)p.Get("estimated_hours", 0.0))) << "\">"
-	  << "<textarea name=\"body\">" << Esc(Text(p, "body")) << "</textarea>"
+	  << "<textarea name=\"body\">" << Esc(SiteText(p, "body")) << "</textarea>"
 	  << "<button>Save</button></form>";
 
 	b << "<h2>Evidence</h2><ul>";
@@ -251,8 +251,8 @@ static void ProposalEditor(WebRequest& r)
 
 	b << "<h2>Validation</h2>";
 	ValueArray msgs = p.Get("messages", ValueArray());
-	if(msgs.GetCount() == 0 && Text(p, "status") == TF_STATUS_VALIDATED)
-		b << "<p>Valid. Content hash <code>" << Esc(Text(p, "content_hash")) << "</code></p>";
+	if(msgs.GetCount() == 0 && SiteText(p, "status") == TF_STATUS_VALIDATED)
+		b << "<p>Valid. Content hash <code>" << Esc(SiteText(p, "content_hash")) << "</code></p>";
 	else if(msgs.GetCount() > 0) {
 		b << "<ul>";
 		for(int i = 0; i < msgs.GetCount(); i++)
@@ -263,12 +263,12 @@ static void ProposalEditor(WebRequest& r)
 	  << "<button>Validate</button></form>";
 
 	b << "<h2>Submit to Company</h2>";
-	if(Text(p, "status") == TF_STATUS_SUBMITTED)
-		b << "<p>Submitted as <a href=\"" << Esc(r.Site().Url("submissions/*", IdArgs(Text(p, "submission_id"))))
-		  << "\">" << Esc(Text(p, "submission_id")) << "</a></p>";
+	if(SiteText(p, "status") == TF_STATUS_SUBMITTED)
+		b << "<p>Submitted as <a href=\"" << Esc(r.Site().Url("submissions/*", IdArgs(SiteText(p, "submission_id"))))
+		  << "\">" << Esc(SiteText(p, "submission_id")) << "</a></p>";
 	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/submit", IdArgs(id))) << "\">" << Hidden(r)
 	  << "<button>Submit</button></form>";
-	Page(r, Text(p, "title"), String(b));
+	Page(r, SiteText(p, "title"), String(b));
 }
 
 static void ProposalEdit(WebRequest& r)
@@ -321,7 +321,7 @@ static void ProposalSubmit(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
-	r.Redirect(r.Site().Url("submissions/*", IdArgs(Text(res.payload, "id"))));
+	r.Redirect(r.Site().Url("submissions/*", IdArgs(SiteText(res.payload, "id"))));
 }
 
 static void SubmissionStatus(WebRequest& r)
@@ -336,10 +336,10 @@ static void SubmissionStatus(WebRequest& r)
 	}
 	const ValueMap& s = res.payload;
 	StringBuffer b;
-	b << "<p>Company proposal <code>" << Esc(Text(s, "company_proposal_id")) << "</code></p>"
-	  << "<p>Company status: <strong>" << Esc(Text(s, "company_status")) << "</strong></p>"
-	  << "<p>Content hash <code>" << Esc(Text(s, "content_hash")) << "</code></p>"
-	  << "<p>Submitted " << Esc(Text(s, "submitted")) << "</p>";
+	b << "<p>Company proposal <code>" << Esc(SiteText(s, "company_proposal_id")) << "</code></p>"
+	  << "<p>Company status: <strong>" << Esc(SiteText(s, "company_status")) << "</strong></p>"
+	  << "<p>Content hash <code>" << Esc(SiteText(s, "content_hash")) << "</code></p>"
+	  << "<p>Submitted " << Esc(SiteText(s, "submitted")) << "</p>";
 	Page(r, "Submission " + id, String(b));
 }
 
