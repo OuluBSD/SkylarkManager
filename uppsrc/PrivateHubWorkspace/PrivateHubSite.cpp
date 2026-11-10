@@ -55,6 +55,23 @@ static bool RequireUser(WebRequest& r)
 	return false;
 }
 
+static const char *AUTHOR_ROLE = "member";
+
+static bool CanAuthor(WebRequest& r)
+{
+	if(!r.HasUser())
+		return false;
+	for(const String& role : r.User().roles)
+		if(role == AUTHOR_ROLE)
+			return true;
+	return false;
+}
+
+static String CsrfField(WebRequest& r)
+{
+	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
+}
+
 static void Page(WebRequest& r, const String& title, const String& body)
 {
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -235,6 +252,8 @@ static void WikiList(WebRequest& r)
 		b << "<li><a href=\"" << Esc(r.Site().Url("privatehub/*/*/wiki/*", args)) << "\">" << Esc(p.title) << "</a></li>";
 	}
 	b << "</ul>";
+	if(CanAuthor(r))
+		b << "<p><a href=\"" << Esc(r.Site().Url("privatehub/*/*/wiki/new", ArgsOf(r, 2))) << "\">New page</a></p>";
 	Page(r, Project(r) + " wiki", String(b));
 }
 
@@ -247,7 +266,10 @@ static void WikiPage(WebRequest& r)
 		Failed(r, 404, "wiki page not found");
 		return;
 	}
-	Page(r, page.title, ProjectNav(r) + "<pre style=\"white-space:pre-wrap\">" + Esc(page.body) + "</pre>");
+	String edit;
+	if(CanAuthor(r))
+		edit = "<p><a href=\"" + Esc(r.Site().Url("privatehub/*/*/wiki/*/edit", ArgsOf(r, 3))) + "\">Edit</a></p>";
+	Page(r, page.title, ProjectNav(r) + edit + "<pre style=\"white-space:pre-wrap\">" + Esc(page.body) + "</pre>");
 }
 
 // --- discussions ----------------------------------------------------------
@@ -271,6 +293,13 @@ static void TopicList(WebRequest& r)
 		  << "</a> <small>" << Esc(t.forum) << "</small></li>";
 	}
 	b << "</ul>";
+	if(CanAuthor(r))
+		b << "<h2>New topic</h2><form method=\"post\" action=\""
+		  << Esc(r.Site().Url("privatehub/*/*/discussions/create", ArgsOf(r, 2))) << "\">" << CsrfField(r)
+		  << "<p><input name=\"slug\" required maxlength=\"80\" placeholder=\"slug\"> "
+		     "<input name=\"forum\" maxlength=\"80\" placeholder=\"forum (general)\"></p>"
+		     "<p><input name=\"title\" required maxlength=\"200\" placeholder=\"Title\"></p>"
+		     "<p><button type=\"submit\">Start topic</button></p></form>";
 	Page(r, Project(r) + " discussions", String(b));
 }
 
@@ -341,6 +370,14 @@ static void FileList(WebRequest& r)
 		  << "<td>" << Esc(f.release) << "</td><td>" << f.size_bytes << "</td></tr>";
 	}
 	b << "</table>";
+	if(CanAuthor(r))
+		b << "<h2>Register release file</h2><form method=\"post\" action=\""
+		  << Esc(r.Site().Url("privatehub/*/*/files/register", ArgsOf(r, 2))) << "\">" << CsrfField(r)
+		  << "<p><input name=\"name\" required maxlength=\"200\" placeholder=\"file name\"> "
+		     "<input name=\"release\" required maxlength=\"80\" placeholder=\"release\"> "
+		     "<input name=\"size_bytes\" required inputmode=\"numeric\" placeholder=\"bytes\"></p>"
+		     "<p><input name=\"url\" required maxlength=\"2000\" placeholder=\"download URL or path\"></p>"
+		     "<p><button type=\"submit\">Register</button></p></form>";
 	Page(r, Project(r) + " files", String(b));
 }
 
@@ -362,6 +399,192 @@ static void FileDetail(WebRequest& r)
 	     "<dt>Source</dt><dd><code>" + Esc(file.url) + "</code></dd></dl>");
 }
 
+// --- authoring ------------------------------------------------------------
+// Writes need the PrivateHub member role on top of a login. A create refuses an
+// existing slug, so it never overwrites a record. An edit must name the revision
+// it was made from, so a save over a newer revision is refused rather than lost.
+
+static bool RequireAuthor(WebRequest& r)
+{
+	if(!RequireUser(r))
+		return false;
+	if(!CanAuthor(r)) {
+		Failed(r, 403, "your account cannot write to PrivateHub");
+		return false;
+	}
+	return true;
+}
+
+static String Today()
+{
+	Date d = GetSysDate();
+	return Format("%04d-%02d-%02d", d.year, d.month, d.day);
+}
+
+static String WikiForm(WebRequest& r, const String& action, const PrivateHubWikiPage& page, bool editing)
+{
+	StringBuffer b;
+	b << "<form method=\"post\" action=\"" << Esc(action) << "\">" << CsrfField(r);
+	if(editing)
+		b << "<input type=\"hidden\" name=\"expected_revision\" value=\"" << Esc(page.revision) << "\">"
+		  << "<p>Slug: <code>" << Esc(page.slug) << "</code></p>";
+	else
+		b << "<p><input name=\"slug\" required maxlength=\"80\" placeholder=\"slug\"></p>";
+	b << "<p><input name=\"title\" required maxlength=\"200\" placeholder=\"Title\" value=\"" << Esc(page.title) << "\"></p>"
+	  << "<p><textarea name=\"body\" rows=\"16\" cols=\"80\">" << Esc(page.body) << "</textarea></p>"
+	  << "<p><button type=\"submit\">" << (editing ? "Save page" : "Create page") << "</button></p></form>";
+	return String(b);
+}
+
+static void WikiNew(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubWikiPage blank;
+	Page(r, "New wiki page", ProjectNav(r) +
+	     WikiForm(r, r.Site().Url("privatehub/*/*/wiki/create", ArgsOf(r, 2)), blank, false));
+}
+
+static void WikiCreate(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubWikiPage page;
+	page.slug = r.Param("slug");
+	page.title = r.Param("title");
+	page.body = r.Param("body");
+	page.updated = Today();
+	if(page.title.IsEmpty() || page.title.GetCount() > 200) {
+		Failed(r, 400, "wiki page title is required (max 200 characters)");
+		return;
+	}
+	PrivateHubWikiPage existing;
+	if(Backend().GetWikiPage(Project(r), page.slug, existing).ok) {
+		Failed(r, 409, "a wiki page with this slug already exists");
+		return;
+	}
+	String rev;
+	ForgeResult res = Backend().PutWikiPage(Project(r), page, "", rev);
+	if(!res.ok) {
+		Failed(r, 422, res.error);
+		return;
+	}
+	Vector<Value> args = ArgsOf(r, 2);
+	args << Value(page.slug);
+	r.Redirect(r.Site().Url("privatehub/*/*/wiki/*", args));
+}
+
+static void WikiEdit(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubWikiPage page;
+	if(!Backend().GetWikiPage(Project(r), r.PathArg(2), page).ok) {
+		Failed(r, 404, "wiki page not found");
+		return;
+	}
+	Page(r, "Edit " + page.title, ProjectNav(r) +
+	     WikiForm(r, r.Site().Url("privatehub/*/*/wiki/*/save", ArgsOf(r, 3)), page, true));
+}
+
+static void WikiSave(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubWikiPage page;
+	if(!Backend().GetWikiPage(Project(r), r.PathArg(2), page).ok) {
+		Failed(r, 404, "wiki page not found");
+		return;
+	}
+	String expected = r.Param("expected_revision");
+	if(expected.IsEmpty()) {
+		Failed(r, 400, "the edit does not name the revision it was made from");
+		return;
+	}
+	page.title = r.Param("title");
+	page.body = r.Param("body");
+	page.updated = Today();
+	if(page.title.IsEmpty() || page.title.GetCount() > 200) {
+		Failed(r, 400, "wiki page title is required (max 200 characters)");
+		return;
+	}
+	String rev;
+	ForgeResult res = Backend().PutWikiPage(Project(r), page, expected, rev);
+	if(!res.ok) {
+		Failed(r, 409, "not saved, the page changed since you opened it: " + res.error);
+		return;
+	}
+	r.Redirect(r.Site().Url("privatehub/*/*/wiki/*", ArgsOf(r, 3)));
+}
+
+static void TopicCreate(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubDiscussionTopic topic;
+	topic.slug = r.Param("slug");
+	topic.title = r.Param("title");
+	topic.forum = r.Param("forum");
+	if(topic.forum.IsEmpty())
+		topic.forum = "general";
+	topic.author = r.User().username;
+	topic.created = Today();
+	if(topic.title.IsEmpty() || topic.title.GetCount() > 200) {
+		Failed(r, 400, "topic title is required (max 200 characters)");
+		return;
+	}
+	PrivateHubDiscussionTopic existing;
+	if(Backend().GetDiscussionTopic(Project(r), topic.slug, existing).ok) {
+		Failed(r, 409, "a topic with this slug already exists");
+		return;
+	}
+	String rev;
+	ForgeResult res = Backend().PutDiscussionTopic(Project(r), topic, "", rev);
+	if(!res.ok) {
+		Failed(r, 422, res.error);
+		return;
+	}
+	Vector<Value> args = ArgsOf(r, 2);
+	args << Value(topic.slug);
+	r.Redirect(r.Site().Url("privatehub/*/*/discussions/*", args));
+}
+
+static void FileRegister(WebRequest& r)
+{
+	if(!RequireAuthor(r))
+		return;
+	PrivateHubReleaseFile file;
+	file.name = r.Param("name");
+	file.release = r.Param("release");
+	file.url = r.Param("url");
+	file.updated = Today();
+	String size = r.Param("size_bytes");
+	int64 bytes = size.IsEmpty() ? -1 : ScanInt64(size);
+	if(bytes < 0 || AsString(bytes) != size) {
+		Failed(r, 400, "size_bytes must be a whole number of bytes");
+		return;
+	}
+	file.size_bytes = bytes;
+	if(file.name.IsEmpty() || file.url.IsEmpty()) {
+		Failed(r, 400, "file name and source are required");
+		return;
+	}
+	PrivateHubReleaseFile existing;
+	if(Backend().GetReleaseFile(Project(r), file.name, existing).ok) {
+		Failed(r, 409, "a release file with this name is already registered");
+		return;
+	}
+	String rev;
+	ForgeResult res = Backend().PutReleaseFile(Project(r), file, "", rev);
+	if(!res.ok) {
+		Failed(r, 422, res.error);
+		return;
+	}
+	Vector<Value> args = ArgsOf(r, 2);
+	args << Value(file.name);
+	r.Redirect(r.Site().Url("privatehub/*/*/files/*", args));
+}
+
 void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend)
 {
 	s_backend = &backend;
@@ -373,11 +596,17 @@ void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend
 	rt.Add("privatehub/*/*/issues/*", IssueDetail);
 	rt.Add("privatehub/*/*/issues/*/comment:POST", IssueComment);
 	rt.Add("privatehub/*/*/wiki", WikiList);
+	rt.Add("privatehub/*/*/wiki/new", WikiNew);
+	rt.Add("privatehub/*/*/wiki/create:POST", WikiCreate);
 	rt.Add("privatehub/*/*/wiki/*", WikiPage);
+	rt.Add("privatehub/*/*/wiki/*/edit", WikiEdit);
+	rt.Add("privatehub/*/*/wiki/*/save:POST", WikiSave);
 	rt.Add("privatehub/*/*/discussions", TopicList);
+	rt.Add("privatehub/*/*/discussions/create:POST", TopicCreate);
 	rt.Add("privatehub/*/*/discussions/*", TopicDetail);
 	rt.Add("privatehub/*/*/discussions/*/post:POST", TopicPost);
 	rt.Add("privatehub/*/*/files", FileList);
+	rt.Add("privatehub/*/*/files/register:POST", FileRegister);
 	rt.Add("privatehub/*/*/files/*", FileDetail);
 }
 

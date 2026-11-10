@@ -112,6 +112,32 @@ check "privatehub issue create without csrf is refused" 403 \
 	"$PH_URL/privatehub/acme/widget/issues/create" -b "$T/ph.jar" \
 	-H "Origin: $PH_URL" --data "title=no-token"
 
+# PrivateHub wiki authoring in the real process: a member creates a page, a duplicate
+# create is refused, an edit from a stale revision is refused, and the current revision saves.
+PH_WIKI="$PH_URL/privatehub/acme/widget/wiki"
+check "privatehub wiki new-page form renders for a member" 200 "$PH_WIKI/new" -b "$T/ph.jar"
+ph_csrf=$(sed -n 's/.*__wf_csrf__" value="\([^"]*\)".*/\1/p' "$T/body")
+check "privatehub wiki create redirects" 302 "$PH_WIKI/create" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "slug=smoke-page&title=Smoke&body=first&__wf_csrf__=$ph_csrf"
+check "privatehub wiki create refuses an existing slug" 409 "$PH_WIKI/create" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "slug=smoke-page&title=Again&body=x&__wf_csrf__=$ph_csrf"
+check "privatehub wiki edit form renders" 200 "$PH_WIKI/smoke-page/edit" -b "$T/ph.jar"
+ph_rev=$(sed -n 's/.*name="expected_revision" value="\([^"]*\)".*/\1/p' "$T/body")
+check "privatehub wiki save from a stale revision is refused" 409 "$PH_WIKI/smoke-page/save" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "expected_revision=stale&title=Smoke&body=lost&__wf_csrf__=$ph_csrf"
+check "privatehub wiki save from the current revision redirects" 302 "$PH_WIKI/smoke-page/save" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "expected_revision=$ph_rev&title=Smoke&body=Smoke+edited&__wf_csrf__=$ph_csrf"
+check "privatehub wiki page shows the saved edit" 200 "$PH_WIKI/smoke-page" -b "$T/ph.jar"
+if grep -q "Smoke edited" "$T/body"; then pass "privatehub wiki page shows the edited body"; else fail "privatehub wiki page shows the edited body"; fi
+
+# Discussion topics and release files: a member starts a topic and registers a release file.
+check "privatehub topic create redirects" 302 "$PH_URL/privatehub/acme/widget/discussions/create" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "slug=smoke-topic&title=Smoke+topic&forum=general&__wf_csrf__=$ph_csrf"
+check "privatehub release file register redirects" 302 "$PH_URL/privatehub/acme/widget/files/register" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "name=smoke.zip&release=1.0.0&size_bytes=2048&url=file:///smoke.zip&__wf_csrf__=$ph_csrf"
+check "privatehub release file size must be a whole number" 400 "$PH_URL/privatehub/acme/widget/files/register" -b "$T/ph.jar" \
+	-H "Origin: $PH_URL" --data "name=bad.zip&release=1.0.0&size_bytes=twelve&url=file:///bad.zip&__wf_csrf__=$ph_csrf"
+
 # Science login with an unknown account is refused.
 check "science login with unknown account is refused" 401 \
 	"$SC_URL/session/login" -H "Origin: $SC_URL" -H "Accept: application/json" --data "username=nobody&password=x"
