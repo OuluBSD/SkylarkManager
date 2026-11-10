@@ -1,4 +1,4 @@
-description "Official-github adapter for the forge suite: IForgeBackend over argv-only gh api calls with remote provenance and no synthetic fallback\377";
+description "GitHub forge contract: GitHubForgeBackend with the argv-only gh connector and the local file-backed emulation\377";
 
 uses
 	Core,
@@ -7,4 +7,8 @@ uses
 file
 	AGENTS.md,
 	GitHubForge.h,
-	GitHubForge.cpp;
+	GitHubForge.cpp,
+	GitHubGhConnector.h,
+	GitHubGhConnector.cpp,
+	GitHubEmulatedBackend.h,
+	GitHubEmulatedBackend.cpp;

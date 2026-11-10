@@ -1,27 +1,37 @@
 # GitHubForge Package Guide
 
-`uppsrc/GitHubForge` is the official-github adapter for the forge domain
-suite: implements `IForgeBackend` against the real github.com through the
-`gh` CLI, executed argv-only (never shell).
+`uppsrc/GitHubForge` is the GitHub forge contract. `GitHubForgeBackend` is an
+abstract interface over `IForgeBackend` with two implementations, chosen per
+process by `GitHubForgeBackend::Configure` (ManagerSkylark `--github-backend`
+`gh|emulated`, default `gh`) and obtained through `GitHubForgeBackend::Create()`.
 
 ## File Map
 
 | File | Role |
 |------|------|
-| `GitHubForge.h/.cpp` | `GitHubForgeBackend` (issue list/get/create/comment/state via `gh api`; pull request list/get/diff/create/state/merge, repo list via `gh repo list`, workflow run list via `gh api`), GitHub JSON mapping, ISO-8601 time parsing, repo-slug and login/branch validation |
+| `GitHubForge.h/.cpp` | Abstract `GitHubForgeBackend`: full op surface (issues, pull requests, repos, runs), process-wide `Config`, `Create()` factory, GitHub JSON mapping, ISO-8601 time parsing, repo-slug / login / branch validation |
+| `GitHubGhConnector.h/.cpp` | `GitHubGhConnector`: github.com through the argv-only `gh` CLI (`GhRun` over `LocalProcess::Start2`) |
+| `GitHubEmulatedBackend.h/.cpp` | `GitHubEmulatedBackend`: stateful local emulation, no network, no gh executable; JSON store with flock and atomic replace |
 
 ## Binding rules
 
 1. **Argv only, never shell**: repository slugs, issue ids, titles and bodies
    are separate argv entries via `LocalProcess::Start2`; retained output is
    bounded; timeouts kill the child (same proven pattern as CompanyGitHub).
-2. **Remote provenance or nothing**: a successful call reports
-   `provenance = remote`; any failure (missing gh, non-zero exit, bad JSON)
-   reports `unavailable` with the diagnostic. No synthetic fallback.
-3. **Pull requests are not issues**: list results containing the
-   `pull_request` marker are filtered out.
+2. **Provenance is never faked**: a connector success reports `remote`; an
+   emulation success reports `local-persistent`; any failure reports
+   `unavailable` with the diagnostic. No fallback between implementations.
+3. **Pull requests are not issues**: issue listings exclude pull requests
+   (the `pull_request` marker for the connector; separate records in the emulation).
 4. **Strict validation before execution**: `owner/repo` slugs and numeric
-   issue ids are validated before argv construction.
-5. **Testable without network**: the gh executable path is injectable
-   (constructor or `GHFORGE_GH` env); tests use a fake gh that prints canned
-   JSON, never live credentials.
+   ids are validated before argv construction or store lookup.
+5. **Testable without network**: the connector's gh path is injectable
+   (constructor or `GHFORGE_GH`); the connector's shared-contract run uses a
+   canned gh only because it has to execute one. The emulation needs no
+   executable at all, and the capture harness runs on it.
+6. **One store, many writers**: every emulated operation holds an exclusive
+   `flock` on `github-emulated.lock` for its whole read-modify-write; mutations
+   replace `github-emulated.json` through a temp file, fsync and rename. Without
+   POSIX locks the emulation refuses to run.
+7. **Shared contract**: `ManagerSkylark/GitHubBackendContractTests.cpp` runs one
+   body of expectations against both implementations on the fixture.

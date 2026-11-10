@@ -6,51 +6,47 @@
 
 NAMESPACE_UPP
 
-// Official github.com adapter: implements IForgeBackend through the gh CLI.
-// All invocations are argv-only (LocalProcess::Start2); user data never
-// reaches a shell. Failures report provenance=unavailable; there is no
-// synthetic fallback.
+// GitHub forge contract. Two implementations sit behind it:
+//   GitHubGhConnector      github.com through the argv-only gh CLI (remote provenance)
+//   GitHubEmulatedBackend  file-backed local emulation, no network, no gh executable
+// Callers obtain an instance from Create(), which follows the process-wide
+// configuration set once at startup with Configure(). Failures report
+// provenance=unavailable (connector) or a diagnostic (emulation); there is no
+// fallback from one implementation to the other.
 class GitHubForgeBackend : public IForgeBackend {
 public:
-	// gh_bin: path to the gh executable (or "gh" on PATH). The environment
-	// variable GHFORGE_GH overrides the default at construction time.
-	GitHubForgeBackend(const String& gh_bin = String());
+	enum class Kind { Gh, Emulated };
+
+	struct Config {
+		Kind   kind = Kind::Gh;
+		String gh_bin;       // Kind::Gh: gh executable (default: GHFORGE_GH or "gh")
+		String store_dir;    // Kind::Emulated: directory holding github-emulated.json
+	};
+
+	// Set before the server starts; Create() reads it at each call.
+	static void          Configure(const Config& cfg);
+	static const Config& GetConfig();
+	static bool          ParseKind(const String& name, Kind& kind);
+	static One<GitHubForgeBackend> Create();
 
 	String          BackendId() const override { return "github"; }
 	const ForgeCapabilities& Capabilities() const override { return caps; }
 
-	ForgeResult ListIssues(const String& project, Vector<ForgeIssue>& out) override;
-	ForgeResult GetIssue(const String& project, const String& issue_id, ForgeIssue& out) override;
-	ForgeResult CreateIssue(const String& project, const ForgeIssue& draft, ForgeIssue& out) override;
-	ForgeResult AddComment(const String& project, const String& issue_id,
-	                       const ForgeComment& comment, ForgeComment& out) override;
-	ForgeResult SetIssueState(const String& project, const String& issue_id,
-	                          bool open, ForgeIssue& out) override;
-	ForgeResult ListComments(const String& project, const String& issue_id,
-	                         Vector<ForgeComment>& out) override;
+	// Whether the implementation can reach GitHub (gh logged in, or the emulation is usable).
+	virtual bool AuthAvailable() = 0;
 
 	// Pull requests, repositories and workflow runs. These are GitHub-specific
 	// until the forge domain grows the matching contract. Pull requests share
 	// the issue comment endpoints: use AddComment/ListComments with the number.
-	ForgeResult ListPullRequests(const String& project, Vector<ForgePullRequest>& out);
-	ForgeResult GetPullRequest(const String& project, const String& pr_id, ForgePullRequest& out);
-	ForgeResult GetPullRequestDiff(const String& project, const String& pr_id, String& out);
-	ForgeResult CreatePullRequest(const String& project, const String& title, const String& body,
-	                              const String& head, const String& base, ForgePullRequest& out);
-	ForgeResult SetPullRequestState(const String& project, const String& pr_id, bool open, ForgePullRequest& out);
-	ForgeResult MergePullRequest(const String& project, const String& pr_id, String& message);
-	ForgeResult ListRepos(const String& owner, Vector<ForgeRepo>& out);
-	ForgeResult ListRuns(const String& project, int limit, Vector<ForgeRun>& out);
-
-	// One gh invocation. Exposed for tests.
-	struct GhOutcome {
-		bool   ok = false;
-		int    exit_code = -1;
-		String output;
-		String error;
-		String command_summary;
-	};
-	GhOutcome GhRun(const Vector<String>& args, int timeout_ms = 30000);
+	virtual ForgeResult ListPullRequests(const String& project, Vector<ForgePullRequest>& out) = 0;
+	virtual ForgeResult GetPullRequest(const String& project, const String& pr_id, ForgePullRequest& out) = 0;
+	virtual ForgeResult GetPullRequestDiff(const String& project, const String& pr_id, String& out) = 0;
+	virtual ForgeResult CreatePullRequest(const String& project, const String& title, const String& body,
+	                                      const String& head, const String& base, ForgePullRequest& out) = 0;
+	virtual ForgeResult SetPullRequestState(const String& project, const String& pr_id, bool open, ForgePullRequest& out) = 0;
+	virtual ForgeResult MergePullRequest(const String& project, const String& pr_id, String& message) = 0;
+	virtual ForgeResult ListRepos(const String& owner, Vector<ForgeRepo>& out) = 0;
+	virtual ForgeResult ListRuns(const String& project, int limit, Vector<ForgeRun>& out) = 0;
 
 	static bool IsValidRepoSlug(const String& slug);
 	static bool IsValidIssueId(const String& issue_id);
@@ -67,10 +63,12 @@ public:
 	static ForgeIssue IssueFromJson(const ValueMap& m, const String& project);
 	static ForgeComment CommentFromJson(const ValueMap& m);
 
-private:
-	static String ResolveGhPath(const String& configured);
+	static String Field(const ValueMap& m, const char *key);
+	static String SubField(const Value& v, const char *key);
 
-	String           gh_bin;
+protected:
+	GitHubForgeBackend() {}
+
 	ForgeCapabilities caps;
 };
 
