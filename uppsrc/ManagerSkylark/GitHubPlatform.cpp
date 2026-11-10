@@ -85,8 +85,8 @@ bool GitHubPlatformService::IsGhCliAvailable()
 	static bool tested = false;
 	static bool available = false;
 	if(!tested) {
-		GitHubForgeBackend backend;
-		available = backend.GhRun({"auth", "status"}).ok;
+		One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
+		available = backend->AuthAvailable();
 		tested = true;
 	}
 	return available;
@@ -102,9 +102,9 @@ Vector<LocalRepoInfo> GitHubPlatformService::GetLiveGitHubRepos(const String& ow
 		return clone(cached_repos);
 
 	Vector<LocalRepoInfo> list;
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	Vector<ForgeRepo> repos;
-	if(backend.ListRepos(owner, repos).ok) {
+	if(backend->ListRepos(owner, repos).ok) {
 		for(const ForgeRepo& r : repos) {
 			LocalRepoInfo info;
 			info.owner = owner;
@@ -157,9 +157,9 @@ static String IsoTime(const Time& t)
 Vector<ValueMap> GitHubPlatformService::GetLiveIssues(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	Vector<ForgeIssue> issues;
-	ForgeResult res = backend.ListIssues(owner + "/" + repo, issues);
+	ForgeResult res = backend->ListIssues(owner + "/" + repo, issues);
 	if(!res.ok) {
 		if(unavailable)
 			*unavailable = res.error;
@@ -181,17 +181,17 @@ Vector<ValueMap> GitHubPlatformService::GetLiveIssues(const String& owner, const
 ValueMap GitHubPlatformService::GetLiveIssueDetail(const String& owner, const String& repo, int number, String* unavailable)
 {
 	ValueMap res;
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	String project = owner + "/" + repo;
 	ForgeIssue issue;
-	ForgeResult issue_res = backend.GetIssue(project, AsString(number), issue);
+	ForgeResult issue_res = backend->GetIssue(project, AsString(number), issue);
 	if(!issue_res.ok) {
 		if(unavailable)
 			*unavailable = issue_res.error;
 		return res;
 	}
 	Vector<ForgeComment> comments;
-	ForgeResult comments_res = backend.ListComments(project, AsString(number), comments);
+	ForgeResult comments_res = backend->ListComments(project, AsString(number), comments);
 	if(!comments_res.ok) {
 		if(unavailable)
 			*unavailable = comments_res.error;
@@ -224,12 +224,12 @@ ValueMap GitHubPlatformService::GetLiveIssueDetail(const String& owner, const St
 
 String GitHubPlatformService::CreateIssue(const String& owner, const String& repo, const String& title, const String& body)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgeIssue draft;
 	draft.title = title;
 	draft.body = body;
 	ForgeIssue created;
-	ForgeResult res = backend.CreateIssue(owner + "/" + repo, draft, created);
+	ForgeResult res = backend->CreateIssue(owner + "/" + repo, draft, created);
 	if(!res.ok)
 		return "error: " + res.error;
 	return "https://github.com/" + owner + "/" + repo + "/issues/" + created.issue_id;
@@ -237,11 +237,11 @@ String GitHubPlatformService::CreateIssue(const String& owner, const String& rep
 
 String GitHubPlatformService::AddComment(const String& owner, const String& repo, int number, const String& body)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgeComment comment;
 	comment.body = body;
 	ForgeComment posted;
-	ForgeResult res = backend.AddComment(owner + "/" + repo, AsString(number), comment, posted);
+	ForgeResult res = backend->AddComment(owner + "/" + repo, AsString(number), comment, posted);
 	if(!res.ok)
 		return "error: " + res.error;
 	return "https://github.com/" + owner + "/" + repo + "/issues/" + AsString(number) + "#issuecomment-" + posted.comment_id;
@@ -249,9 +249,9 @@ String GitHubPlatformService::AddComment(const String& owner, const String& repo
 
 String GitHubPlatformService::ToggleIssueState(const String& owner, const String& repo, int number, bool close_it)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgeIssue updated;
-	ForgeResult res = backend.SetIssueState(owner + "/" + repo, AsString(number), !close_it, updated);
+	ForgeResult res = backend->SetIssueState(owner + "/" + repo, AsString(number), !close_it, updated);
 	if(!res.ok)
 		return "error: " + res.error;
 	return close_it ? "closed" : "reopened";
@@ -262,9 +262,9 @@ String GitHubPlatformService::ToggleIssueState(const String& owner, const String
 Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner, const String& repo, String* unavailable)
 {
 	Vector<ValueMap> list;
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	Vector<ForgePullRequest> prs;
-	ForgeResult res = backend.ListPullRequests(owner + "/" + repo, prs);
+	ForgeResult res = backend->ListPullRequests(owner + "/" + repo, prs);
 	if(!res.ok) {
 		if(unavailable)
 			*unavailable = res.error;
@@ -289,17 +289,17 @@ Vector<ValueMap> GitHubPlatformService::GetLivePullRequests(const String& owner,
 ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, const String& repo, int number, String* unavailable)
 {
 	ValueMap res;
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	String project = owner + "/" + repo;
 	ForgePullRequest pr;
-	ForgeResult pr_res = backend.GetPullRequest(project, AsString(number), pr);
+	ForgeResult pr_res = backend->GetPullRequest(project, AsString(number), pr);
 	if(!pr_res.ok) {
 		if(unavailable)
 			*unavailable = pr_res.error;
 		return res;
 	}
 	Vector<ForgeComment> comments;
-	ForgeResult comments_res = backend.ListComments(project, AsString(number), comments);
+	ForgeResult comments_res = backend->ListComments(project, AsString(number), comments);
 	if(!comments_res.ok) {
 		if(unavailable)
 			*unavailable = comments_res.error;
@@ -334,9 +334,9 @@ ValueMap GitHubPlatformService::GetLivePullRequestDetail(const String& owner, co
 
 String GitHubPlatformService::GetPullRequestDiff(const String& owner, const String& repo, int number, String* unavailable)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	String diff;
-	ForgeResult res = backend.GetPullRequestDiff(owner + "/" + repo, AsString(number), diff);
+	ForgeResult res = backend->GetPullRequestDiff(owner + "/" + repo, AsString(number), diff);
 	if(!res.ok) {
 		if(unavailable)
 			*unavailable = res.error;
@@ -347,9 +347,9 @@ String GitHubPlatformService::GetPullRequestDiff(const String& owner, const Stri
 
 String GitHubPlatformService::CreatePullRequest(const String& owner, const String& repo, const String& title, const String& body, const String& head, const String& base)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgePullRequest pr;
-	ForgeResult res = backend.CreatePullRequest(owner + "/" + repo, title, body, head, base.IsEmpty() ? String("master") : base, pr);
+	ForgeResult res = backend->CreatePullRequest(owner + "/" + repo, title, body, head, base.IsEmpty() ? String("master") : base, pr);
 	if(!res.ok)
 		return "error: " + res.error;
 	return pr.url.IsEmpty() ? "https://github.com/" + owner + "/" + repo + "/pull/" + pr.pr_id : pr.url;
@@ -357,9 +357,9 @@ String GitHubPlatformService::CreatePullRequest(const String& owner, const Strin
 
 String GitHubPlatformService::MergePullRequest(const String& owner, const String& repo, int number)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	String message;
-	ForgeResult res = backend.MergePullRequest(owner + "/" + repo, AsString(number), message);
+	ForgeResult res = backend->MergePullRequest(owner + "/" + repo, AsString(number), message);
 	if(!res.ok)
 		return "error: " + res.error;
 	return message.IsEmpty() ? String("Merged successfully") : message;
@@ -367,9 +367,9 @@ String GitHubPlatformService::MergePullRequest(const String& owner, const String
 
 String GitHubPlatformService::ClosePullRequest(const String& owner, const String& repo, int number)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgePullRequest pr;
-	ForgeResult res = backend.SetPullRequestState(owner + "/" + repo, AsString(number), false, pr);
+	ForgeResult res = backend->SetPullRequestState(owner + "/" + repo, AsString(number), false, pr);
 	if(!res.ok)
 		return "error: " + res.error;
 	return "Closed successfully";
@@ -378,11 +378,11 @@ String GitHubPlatformService::ClosePullRequest(const String& owner, const String
 // Pull request conversation comments are issue comments on GitHub.
 String GitHubPlatformService::AddPullRequestComment(const String& owner, const String& repo, int number, const String& body)
 {
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	ForgeComment comment;
 	comment.body = body;
 	ForgeComment posted;
-	ForgeResult res = backend.AddComment(owner + "/" + repo, AsString(number), comment, posted);
+	ForgeResult res = backend->AddComment(owner + "/" + repo, AsString(number), comment, posted);
 	if(!res.ok)
 		return "error: " + res.error;
 	return "https://github.com/" + owner + "/" + repo + "/issues/" + AsString(number) + "#issuecomment-" + posted.comment_id;

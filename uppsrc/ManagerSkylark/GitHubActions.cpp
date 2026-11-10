@@ -724,9 +724,9 @@ Vector<ValueMap> GitHubPlatformService::GetLiveActions(const String& owner, cons
 			list.Add(r);
 		}
 	}
-	GitHubForgeBackend backend;
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
 	Vector<ForgeRun> runs;
-	ForgeResult res = backend.ListRuns(owner + "/" + repo, 15, runs);
+	ForgeResult res = backend->ListRuns(owner + "/" + repo, 15, runs);
 	if(!res.ok) {
 		// Runs started from this site are still listed; GitHub runs are not.
 		if(unavailable)

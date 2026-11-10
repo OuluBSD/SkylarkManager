@@ -111,6 +111,7 @@ public:
 	static bool                          SaveWorkflowFile(const String& repo_path, const String& filename, const String& content);
 	static void                          TriggerLocalBuildAsync();
 	static bool RunGitHubAdapterSyntheticTests(const String& scratch_dir);
+	static bool RunGitHubBackendContractTests(const String& scratch_dir);
 };
 
 // Page renderers used by the GitHub route handlers (GitHubRoutes.cpp)

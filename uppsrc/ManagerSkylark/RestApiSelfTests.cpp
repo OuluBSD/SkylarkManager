@@ -214,6 +214,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: GitHub adapter synthetic tests\n";
 		return false;
 	}
+	if(!GitHubPlatformService::RunGitHubBackendContractTests(AppendFileName(fixture.path, "github-contract"))) {
+		Cerr() << "FAILED: GitHub shared backend contract tests\n";
+		return false;
+	}
 	if(!RunSfLegacyMigrationSelfTests(AppendFileName(fixture.path, "sf-legacy-migration"))) {
 		Cerr() << "FAILED: SourceForge legacy migration synthetic tests\n";
 		return false;

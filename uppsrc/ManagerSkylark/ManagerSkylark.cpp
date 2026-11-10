@@ -2,6 +2,7 @@
 #include "EngineComposition.h"
 #include "SystemAuth.h"
 #include "AssessmentViews.h"
+#include <GitHubForge/GitHubForge.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include "HostPlatform.h"
@@ -89,6 +90,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("privatehub-role", 0, "Role for --set-privatehub-user (default member; only member may author)", true, "role");
+	cla.AddArg("github-backend", 0, "GitHub backend: gh (argv-only gh CLI, default) or emulated (local file-backed emulation, no network)", true, "gh|emulated");
+	cla.AddArg("github-store", 0, "Emulated GitHub store directory (default <site-dir>/github)", true, "directory");
 	cla.AddArg("set-science-user", 0, "Create/update a Science author account with hidden prompt (or MANAGERSKYLARK_SCIENCE_PASSWORD)", true, "username");
 
 	if(!cla.Parse(args))
@@ -121,6 +124,16 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 		RealizeDirectory(site_dir);
 	if(custom_site_dir && !DirectoryExists(site_dir))
 		return false;
+	GitHubForgeBackend::Config github_cfg;
+	String github_backend = cla.GetArg("github-backend");
+	if(!github_backend.IsEmpty() && !GitHubForgeBackend::ParseKind(github_backend, github_cfg.kind)) {
+		Cerr() << "--github-backend must be gh or emulated.\n";
+		return false;
+	}
+	github_cfg.store_dir = cla.GetArg("github-store");
+	if(github_cfg.store_dir.IsEmpty() && custom_site_dir)
+		github_cfg.store_dir = AppendFileName(site_dir, "github");
+	GitHubForgeBackend::Configure(github_cfg);
 	SystemAuthService::ConfigureSite(site_dir, demo_site);
 	DataStore::SetRootRegistrationPath(custom_site_dir ? AppendFileName(site_dir, "data-root.json") : String());
 	if(!set_site_user.IsEmpty()) {
