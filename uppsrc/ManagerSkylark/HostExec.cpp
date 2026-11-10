@@ -58,25 +58,93 @@ bool SafeHash(const String& hash)
 	return hash.GetCount() >= 7 && hash.GetCount() <= 40 && AllChars(hash, 40, IsHexChar);
 }
 
+// Options each git subcommand may take. Anything else that starts with '-' is
+// refused, so the set of options a request can reach git with is fixed here.
+static bool IsDigits(const String& s, int from)
+{
+	if(from >= s.GetCount())
+		return false;
+	for(int i = from; i < s.GetCount(); i++)
+		if(s[i] < '0' || s[i] > '9')
+			return false;
+	return true;
+}
+
+static bool GitOptionAllowed(const String& sub, const String& tok)
+{
+	if(tok == "--")
+		return true;
+	static const char *const status[] = { "--short", "-s", "--branch", "-b", "--porcelain", "--no-color", NULL };
+	static const char *const log[] = { "--oneline", "--no-color", "--stat", "--decorate", "--no-decorate",
+	                                   "--date-order", "--no-patch", NULL };
+	static const char *const show[] = { "--oneline", "--no-color", "--stat", "--name-only", "--no-patch", "-s", NULL };
+	static const char *const diff[] = { "--no-color", "--stat", "--name-only", "--cached", "--staged", NULL };
+	static const char *const branch[] = { "--list", "-a", "-r", "-v", "--show-current", "--no-color", NULL };
+	static const char *const rev_parse[] = { "--short", "--abbrev-ref", "--verify", "--show-toplevel",
+	                                         "--is-inside-work-tree", NULL };
+	static const char *const fetch[] = { "--prune", "--tags", "--no-tags", "--quiet", "-q", "--all", NULL };
+	static const char *const pull[] = { "--ff-only", "--quiet", "-q", NULL };
+	const char *const *allowed = NULL;
+	if(sub == "status") allowed = status;
+	else if(sub == "log") allowed = log;
+	else if(sub == "show") allowed = show;
+	else if(sub == "diff") allowed = diff;
+	else if(sub == "branch") allowed = branch;
+	else if(sub == "rev-parse") allowed = rev_parse;
+	else if(sub == "fetch") allowed = fetch;
+	else if(sub == "pull") allowed = pull;
+	if(!allowed)
+		return false;
+	for(const char *const *o = allowed; *o; o++)
+		if(tok == *o)
+			return true;
+	// Log takes a count: -5, -n5, --max-count=5.
+	if(sub == "log") {
+		if(tok.StartsWith("-n") && IsDigits(tok, 2))
+			return true;
+		if(tok.StartsWith("--max-count=") && IsDigits(tok, 12))
+			return true;
+		if(tok.StartsWith("-") && IsDigits(tok, 1))
+			return true;
+	}
+	return false;
+}
+
 bool SafeGitArgs(const String& args, Vector<String>& tokens)
 {
 	static const char *const subcommands[] = { "status", "log", "branch", "show", "diff", "rev-parse", "fetch", "pull" };
-	static const char *const refused[] = { "-c", "--config-env", "--exec", "--upload-pack", "--receive-pack",
-	                                       "--output", "--ext-diff", "--textconv" };
 	tokens.Clear();
 	Vector<String> parts = Split(args, ' ', false);
 	for(const String& p : parts) {
 		if(p.IsEmpty()) continue;
-		if(tokens.GetCount() >= 16 || !AllChars(p, 256, IsGitTokenChar)) return false;
-		for(const char *r : refused)
-			if(p == r || p.StartsWith(String(r) + "=")) return false;
+		if(tokens.GetCount() >= 16 || !AllChars(p, 256, IsGitTokenChar)) {
+			tokens.Clear();
+			return false;
+		}
 		tokens.Add(p);
 	}
-	if(tokens.IsEmpty()) return false;
+	if(tokens.IsEmpty()) {
+		tokens.Clear();
+		return false;
+	}
+	bool known = false;
 	for(const char *s : subcommands)
-		if(tokens[0] == s) return true;
-	tokens.Clear();
-	return false;
+		if(tokens[0] == s)
+			known = true;
+	if(!known) {
+		tokens.Clear();
+		return false;
+	}
+	// Options must be on the subcommand's allowlist. Other tokens are revisions or
+	// paths: they never start with '-' (AllChars allows it, so check here).
+	for(int i = 1; i < tokens.GetCount(); i++) {
+		const String& t = tokens[i];
+		if(t[0] == '-' && !GitOptionAllowed(tokens[0], t)) {
+			tokens.Clear();
+			return false;
+		}
+	}
+	return true;
 }
 
 bool SafeBuildFlags(const String& flags, Vector<String>& tokens)

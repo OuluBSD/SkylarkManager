@@ -126,6 +126,7 @@ file
 	HostRoutes.cpp,
 	HostExec.cpp,
 	HostExec.h,
+	HostExecSelfTests.cpp,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
 	ManagerSkylarkSetup.cpp,

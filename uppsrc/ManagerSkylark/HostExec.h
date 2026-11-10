@@ -36,6 +36,9 @@ String Run(const char *program, const Vector<String>& args, bool merge_stderr, c
 
 }
 
+// Synthetic --test checks for the validators above (HostExecSelfTests.cpp).
+bool RunHostExecSelfTests();
+
 END_UPP_NAMESPACE
 
 #endif

@@ -412,7 +412,12 @@ String HostPlatformService::ExecRemoteGit(const String& node_id, const String& r
 	Vector<String> git_argv;
 	if(!HostExec::SafeGitArgs(git_args, git_argv)) return "Error: invalid git arguments.";
 	Vector<String> ssh_args = HostExec::SshArgs(port, user, target->hostname, 3);
-	ssh_args.Add("git -C " + remote_repo + " " + Join(git_argv, " ") + " 2>&1");
+	// Each token is single-quoted for the remote login shell. Git tokens never
+	// contain a quote character (SafeGitArgs), so quoting cannot be broken out of.
+	String quoted;
+	for(const String& t : git_argv)
+		quoted << " '" << t << "'";
+	ssh_args.Add("git -C " + remote_repo + quoted + " 2>&1");
 	return HostExec::Run("ssh", ssh_args, false);
 }
 
