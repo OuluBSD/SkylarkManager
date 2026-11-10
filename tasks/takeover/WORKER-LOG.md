@@ -1101,3 +1101,16 @@ store; the Company store already takes the file lock); PrivateHub wiki/topic/rel
 authoring UI.
 
 **Status:** T05 and T06 complete pending acceptance. Waiting for planner.
+
+## Planner entry — 2026-11-10 (takeover agent)
+
+**T05 + T06 COMPLETE.** Brief 12 accepted. Planner re-verified: CI carries
+CompanySkylark (8 refs); BACKLOG.md documents all five items with sources;
+Company fixes present (platform_version validation, 0600 temp files +
+secret.key chmod, "32 hex" id doc); fence 179/179; Manager PASSED (CLANG);
+Company ALL PASSED (CLANG) + GCC rc 0; Company --test 131 ok lines (220
+checks, 17 new). Worker's self-notes recorded: GH_BASELINE env required
+for correct capture comparison; CI YAML parsed, not run in Actions; old
+record files keep their mode until rewritten; Windows has no 0600
+equivalent in this code. Next: WORKER-BRIEF-13.md (backlog sweep — five
+items). After that: T07 UppSkillz completes the plan.
