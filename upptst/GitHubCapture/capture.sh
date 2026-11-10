@@ -1,6 +1,6 @@
 #!/bin/sh
 # Headless GitHub route capture for ManagerSkylark.
-# Boots the binary on a temp site with fixture repos and the fake gh, logs in,
+# Boots the binary on a temp site with fixture repos and the emulated GitHub backend, logs in,
 # fetches every route in routes.txt into <out_dir>, then stops the server and
 # deletes its temp data.
 # Usage: capture.sh <ManagerSkylark binary> <out_dir> [port]
@@ -23,7 +23,7 @@ mkdir -p "$WORK/site" "$WORK/dev" "$OUT"
 sh "$HERE/make-fixtures.sh" "$WORK/dev"
 sh "$HERE/make-store.sh" "$WORK/site"
 MANAGERSKYLARK_SITE_PASSWORD=capture-pw "$BIN" --site-dir "$WORK/site" --set-site-password capture > "$WORK/setup.log" 2>&1
-DEV_DIR="$WORK/dev" GHFORGE_GH="$HERE/fake-gh.sh" "$BIN" --site-dir "$WORK/site" --port "$PORT" > "$WORK/server.log" 2>&1 &
+DEV_DIR="$WORK/dev" "$BIN" --site-dir "$WORK/site" --github-backend emulated --github-store "$WORK/github" --port "$PORT" > "$WORK/server.log" 2>&1 &
 SRV=$!
 
 up=0
