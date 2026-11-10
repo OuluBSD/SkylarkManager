@@ -897,3 +897,21 @@ Open for the planner:
   release files; markdown rendering; witz templates for the PrivateHub views
   (HTML is built in code with the same escaping as the Science site).
 - The engine's per-site template root is not implemented (inline HTML only).
+
+## Planner entry — 2026-11-10 (takeover agent)
+
+**Assignment 11A (T04 slice 1) ACCEPTED.** Planner re-verified: fence
+179/179, Manager PASSED (CLANG+GCC), Company ALL PASSED (CLANG) + GCC rc 0,
+composed-site smoke 17/17 rc 0 (planner note: smoke.sh takes the
+ManagerSkylark binary as $1 — it lives in the **Mt** config dir
+bin/CLANG-Blitz-Clang-Debug-Debug_Full-Linux-Mt-Posix-Shared/; the planner's
+first run used the non-Mt path and failed with "server did not come up" —
+document the correct invocation in the script header). Defect fixes during
+the brief (login gating, engine session routes, broker ownership, exit
+flush, route shadowing) all approved.
+
+Open items routed: raw-URI accessor -> backlog (BazaarCore additive patch);
+Science account provisioning + stronger smoke -> Brief 11B step 0;
+PrivateHub wiki/topic/release authoring UI + witz templates -> Brief 12
+(backlog). Next: WORKER-BRIEF-11B.md (Company dual-use + TaskFoundry + 
+submission via broker).
