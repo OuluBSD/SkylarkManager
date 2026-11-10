@@ -837,3 +837,63 @@ Authoring page inline HTML: acceptable interim; witz form folds into T04's
 Science UI work. Real-corpus writes stay untested (fixtures only).
 Next: WORKER-BRIEF-11A.md (engine-host composition into ManagerSkylark +
 PrivateHub UI).
+
+## Worker entry — Brief 11A (T04 first slice: composed engine host + PrivateHub UI), 2026-11-10
+
+Status: steps 1-5 done, each committed with the full gate green. Stopped and
+waiting for acceptance; brief 11B (TaskFoundry + Company submission) is next
+after acceptance.
+
+Commits (SkylarkManager):
+- 3dce138 step 1, composition: ManagerSkylarkApp derives from WebEngineHost;
+  PrivateHub (18211) and Science (18212) composed on the real server, with
+  --privatehub-port, --science-port, --science-corpus, --privatehub-workspace;
+  the Science broker service is registered; engine gateway handler ids are
+  exempt from the stock login redirect.
+- 4adbc54 step 2, caller binding: a science.author grant authorizes a write only
+  from the authenticated session of its subject_user_id. Fence: the grant from
+  another session is refused (403); the grant id with no session is refused
+  (403).
+- a088f1f step 3, PrivateHub views: issues list/detail/create/comment, wiki,
+  discussion topics and posts, release files. Login-gated; CSRF on writes. Also
+  engine session routes (InstallSessionRoutes) and --set-privatehub-user.
+- 3d4274f step 4, real-process fence: upptst/ComposedSite/smoke.sh starts the
+  ManagerSkylark binary with both sites composed; 17 HTTP checks, 0 failed;
+  runs from gate_full.sh.
+- 8e52463 step 5, docs: ManagerSkylark AGENTS composed-sites section and route
+  table; README overview and run section; WebEngine AGENTS path rules.
+
+Defects found and fixed during this brief:
+- Step 1 let the PrivateHub overview list repositories with no login check.
+  Fixed in step 3: every page now requires a session.
+- The engine had no login route, so no composed site could be signed into.
+  Fixed in step 3: session/login, session/logout.
+- The broker owns the service it receives; a static holder double-freed it.
+- Composed processes leaked engine singletons at exit; the debug heap check
+  aborted with rc 133. Composed processes now end with _exit after flushing.
+- Stock literal routes shadowed engine routes: "login" and "logout" (fixed by
+  session/), and "p/*" (fixed by privatehub/). A stock route also served the
+  wrong page through the gateway (/issues on the PrivateHub port showed the
+  PrivateHub root). Stock matches on engine ports now return 404, except the
+  home route.
+
+Gate per step: WebEngineTests 177 then 179/179; ManagerSkylark --test PASSED;
+composed-site checks 0 failed (from step 4); CompanySkylark --test ALL TESTS
+PASSED (CLANG); GCC rc 0 for ManagerSkylark, WebEngineTests and CompanySkylark;
+GitHub captures IDENTICAL after normalization (76 files).
+
+Open for the planner:
+- Raw request URI. The gateway cannot see the raw path when a stock route
+  matches, so composed routes must avoid stock literals (documented in WebEngine
+  AGENTS). The real fix is a public URI accessor on Http in ai-upp (the header
+  is private). Not changed here because ai-upp is outside this repo.
+- Science login is not provisioned. There is no CLI for Science accounts, so
+  the real-process check cannot exercise a Science session. Caller binding is
+  covered in WebEngineTests (in-process), not in the real process.
+- The composed-site check is weak in one place: the Science author route returns
+  403 both anonymously and with the PrivateHub cookie. It shows the cookie is
+  not honored, not that a Science session would be.
+- Not in this slice (brief scope): creating wiki pages, discussion topics and
+  release files; markdown rendering; witz templates for the PrivateHub views
+  (HTML is built in code with the same escaping as the Science site).
+- The engine's per-site template root is not implemented (inline HTML only).
