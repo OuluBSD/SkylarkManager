@@ -1,4 +1,5 @@
 #include "SessionRoutes.h"
+#include "Engine.h"
 #include "Request.h"
 
 NAMESPACE_UPP
@@ -68,6 +69,13 @@ void InstallSessionRoutes(EngineSite& site)
 	site.Router().Add("session/login", LoginForm);
 	site.Router().Add("session/login:POST", Login);
 	site.Router().Add("session/logout:POST", Logout);
+
+	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("session-login", "POST", "session/login", "any account of this site",
+	                                        "json", "Sign in and open a session cookie",
+	                                        {"username:string:required", "password:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("session-logout", "POST", "session/logout", "open session",
+	                                        "json", "Close the current session", {}));
 }
 
 END_UPP_NAMESPACE

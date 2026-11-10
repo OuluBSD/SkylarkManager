@@ -17,6 +17,8 @@ file
 	Site.cpp,
 	Request.h,
 	Request.cpp,
+	Manifest.h,
+	Manifest.cpp,
 	Engine readonly separator,
 	Engine.h,
 	WebEngine.cpp,

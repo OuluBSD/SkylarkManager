@@ -6,6 +6,7 @@
 #include "Router.h"
 #include "Site.h"
 #include "Request.h"
+#include "Manifest.h"
 
 NAMESPACE_UPP
 
@@ -25,6 +26,7 @@ public:
 	EngineSite* FindSiteByPort(int port); // 0 = stock listener -> default binding
 
 	WebBroker&  Broker()                  { return broker; }
+	CommandManifest& Manifest()           { return manifest; }
 	String      DiagnosticsJSON(int max_entries = 100) { return broker.DiagnosticsJSON(max_entries); }
 
 	// Gateway entry, called by the SKYLARK catch-alls in Host.cpp.
@@ -38,6 +40,7 @@ private:
 	VectorMap<int, int>     port_site;   // port -> sites index
 	int                     default_port_site = -1;
 	WebBroker               broker;
+	CommandManifest         manifest;
 	Mutex                          mutex;
 };
 
