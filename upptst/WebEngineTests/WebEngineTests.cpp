@@ -4,6 +4,7 @@
 #endif
 #include <Skylark/Skylark.h>
 #include <WebEngine/WebEngine.h>
+#include <WebEngine/SessionRoutes.h>
 #include <WebAccounts/WebAccountsTotp.h>
 #include <MetaAccount/MetaAccountSite.h>
 #include <ForgeCore/ForgeCore.h>
@@ -1621,6 +1622,62 @@ CONSOLE_APP_MAIN
 		call.payload.Add("scopes", scopes);
 		BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
 		Check(res.ok && !(bool)res.payload.Get("active"), "revoked grant is inactive via check-grant");
+	}
+
+	// Command manifest: the registry shape, and the session routes checked against their descriptors.
+	{
+		CommandManifest local;
+		local.Add("alpha", "Alpha", HttpCommand("probe", "POST", "probe/run", "open session", "json", "Probe",
+		                                        {"name:string:required", "count:int"}));
+		local.Add("beta", "Beta", BrokerCommand("ping", "ping.op", "broker caller", "Ping", {}));
+		Check(local.HasSite("alpha") && local.HasSite("beta") && !local.HasSite("gamma"),
+		      "manifest lists only sites that registered commands");
+		ValueMap all = local.Describe();
+		Check(all.Get("schema") == "skylark-command-manifest/1", "manifest carries its schema id");
+		ValueArray all_sites = all["sites"];
+		Check(all_sites.GetCount() == 2, "manifest describes every registered site");
+		ValueMap one = local.Describe("beta");
+		ValueArray beta_sites = one["sites"];
+		Check(beta_sites.GetCount() == 1 && (String)ValueMap(beta_sites[0])["id"] == "beta",
+		      "single-site descriptor lists only that site");
+		ValueArray beta_cmds = ValueMap(beta_sites[0])["commands"];
+		Check(beta_cmds.GetCount() == 1 && (String)ValueMap(beta_cmds[0])["broker_op"] == "ping.op" &&
+		      (String)ValueMap(beta_cmds[0])["transport"] == "broker",
+		      "broker command carries its operation name and transport");
+		ValueMap alpha_cmd = ValueArray(ValueMap(all_sites[0])["commands"])[0];
+		ValueArray alpha_args = alpha_cmd["args"];
+		Check(alpha_args.GetCount() == 2 && (String)ValueMap(alpha_args[0])["name"] == "name" &&
+		      (bool)ValueMap(alpha_args[0])["required"] && (String)ValueMap(alpha_args[1])["type"] == "int" &&
+		      !(bool)ValueMap(alpha_args[1])["required"],
+		      "argument specs parse name, type and required");
+	}
+	{
+		EngineSite probe;
+		probe.id = "probe";
+		probe.title = "Probe";
+		InstallSessionRoutes(probe);
+		ValueMap described = TheWebEngine().Manifest().Describe("probe");
+		ValueArray sites = described["sites"];
+		ValueArray cmds;
+		if(sites.GetCount())
+			cmds = ValueMap(sites[0])["commands"];
+		bool covered = true;
+		int posts = 0;
+		for(int i = 0; i < probe.Router().GetCount(); i++) {
+			const SiteRoute& rt = probe.Router()[i];
+			if(rt.method != "POST")
+				continue;
+			posts++;
+			bool found = false;
+			for(int k = 0; k < cmds.GetCount(); k++) {
+				ValueMap c = cmds[k];
+				if((String)c["method"] == rt.method && (String)c["api_path"] == rt.pattern)
+					found = true;
+			}
+			covered = covered && found;
+		}
+		Check(posts == 2 && covered && cmds.GetCount() == 2,
+		      "session POST routes each have a manifest command with the same path and method");
 	}
 
 	host.StopEngines();

@@ -75,6 +75,27 @@ pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT"
 check "stock / redirects to login" 302 "$MAIN_URL/"
 check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 
+# Command manifest (task 003): public, read-only, lists the sites that registered commands.
+check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
+man=$(cat "$T/body")
+for site in privatehub science taskfoundry company github; do
+	if printf '%s' "$man" | grep -q "\"id\": *\"$site\""; then pass "manifest lists $site"; else fail "manifest lists $site"; fi
+done
+for path in 'api/papers' 'api/papers/\*/article' 'session/login' 'privatehub/\*/\*/issues/create' \
+	'privatehub/\*/\*/files/register' 'candidates/create' 'proposals/\*/submit' 'api/gh/issues/\*/create'; do
+	if printf '%s' "$man" | grep -q "\"api_path\": *\"$path\""; then pass "manifest covers $path"; else fail "manifest covers $path"; fi
+done
+check "manifest for privatehub" 200 "$MAIN_URL/api/cli/manifest/privatehub"
+ph=$(cat "$T/body")
+if printf '%s' "$ph" | grep -q '"id": *"privatehub"' && ! printf '%s' "$ph" | grep -q '"id": *"science"'; then
+	pass "privatehub manifest lists PrivateHub only"
+else
+	fail "privatehub manifest lists PrivateHub only"
+fi
+check "manifest for an unknown site" 404 "$MAIN_URL/api/cli/manifest/nosuch"
+got=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$MAIN_URL/api/cli/manifest")
+if [ "$got" != "200" ]; then pass "manifest refuses writes ($got)"; else fail "manifest refuses writes ($got)"; fi
+
 # Anonymous callers on composed ports get no content.
 check "privatehub / anonymous redirects" 302 "$PH_URL/"
 check "privatehub project issues anonymous redirects" 302 "$PH_URL/privatehub/acme/widget/issues"

@@ -141,6 +141,8 @@ file
 	RestApiProjects.cpp,
 	RestApiSweAgent.cpp,
 	RestApiGitHub.cpp,
+	CommandManifestRoutes.h,
+	CommandManifestRoutes.cpp,
 	RestApiSelfTests.cpp;
 
 mainconfig

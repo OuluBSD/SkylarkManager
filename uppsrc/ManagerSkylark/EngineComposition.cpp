@@ -1,4 +1,5 @@
 #include "EngineComposition.h"
+#include "CommandManifestRoutes.h"
 NAMESPACE_UPP
 
 EngineComposition EngineComposition::Defaults()
@@ -83,6 +84,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
 	InstallSessionRoutes(tf);
 	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
+	RegisterComposedBrokerCommands();
 	return true;
 }
 

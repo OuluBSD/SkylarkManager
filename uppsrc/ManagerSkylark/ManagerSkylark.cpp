@@ -3,6 +3,7 @@
 #include "SystemAuth.h"
 #include "AssessmentViews.h"
 #include <GitHubForge/GitHubForge.h>
+#include "CommandManifestRoutes.h"
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include "HostPlatform.h"
@@ -134,6 +135,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	if(github_cfg.store_dir.IsEmpty() && custom_site_dir)
 		github_cfg.store_dir = AppendFileName(site_dir, "github");
 	GitHubForgeBackend::Configure(github_cfg);
+	RegisterGitHubCommands();
 	SystemAuthService::ConfigureSite(site_dir, demo_site);
 	DataStore::SetRootRegistrationPath(custom_site_dir ? AppendFileName(site_dir, "data-root.json") : String());
 	if(!set_site_user.IsEmpty()) {
