@@ -22,7 +22,7 @@ static String EscHtml(const String& s)
 static void LoginForm(WebRequest& r)
 {
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title></head><body>"
-	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("login")) + "\">"
+	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">"
 	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
 	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
 	       "<p><button type=\"submit\">Sign in</button></p></form></body></html>");
@@ -65,9 +65,9 @@ static void Logout(WebRequest& r)
 
 void InstallSessionRoutes(EngineSite& site)
 {
-	site.Router().Add("login", LoginForm);
-	site.Router().Add("login:POST", Login);
-	site.Router().Add("logout:POST", Logout);
+	site.Router().Add("session/login", LoginForm);
+	site.Router().Add("session/login:POST", Login);
+	site.Router().Add("session/logout:POST", Logout);
 }
 
 END_UPP_NAMESPACE

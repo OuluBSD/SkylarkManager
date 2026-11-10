@@ -6,8 +6,8 @@
 NAMESPACE_UPP
 
 // Adds the session routes every composed site needs, using the site's own
-// accounts and session cookie: GET login (form), login:POST (JSON for API
-// callers, redirect to / for browser forms) and logout:POST.
+// accounts and session cookie under session/: GET session/login (form), session/login:POST (JSON for API
+// callers, redirect to / for browser forms) and session/logout:POST.
 void InstallSessionRoutes(EngineSite& site);
 
 END_UPP_NAMESPACE

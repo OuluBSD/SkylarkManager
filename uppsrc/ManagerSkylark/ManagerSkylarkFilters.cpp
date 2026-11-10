@@ -10,13 +10,21 @@ NAMESPACE_UPP
 
 bool ManagerSkylarkApp::FilterHandler(Http& http)
 {
-	// Engine listeners serve only their composed sites: stock routes are never
-	// reachable there, whatever the path, so every request goes through the
-	// engine gateway and the site's own session.
+	// Engine listeners serve only their composed sites. A stock route can claim
+	// a path before the engine catch-all: the gateway then rebuilds the path
+	// from the route's wildcard arguments, which drops literal segments, so it
+	// would serve the wrong page. Only the home route is safe to hand over: its
+	// pattern matches exactly "/", the one path it can be reached with.
 	if(WebEngine::CurrentListenerPort() > 0) {
-		if(IsEngineGatewayHandler(http.GetHandlerId()))
+		String id = http.GetHandlerId();
+		if(IsEngineGatewayHandler(id))
 			return true;
-		TheWebEngine().Gateway(http);
+		if(id == "HomePage") {
+			TheWebEngine().Gateway(http);
+			return false;
+		}
+		http << "not found";
+		http.Response(404, "Not found");
 		return false;
 	}
 	return test_mode || SystemAuthService::AuthorizeRequest(http);

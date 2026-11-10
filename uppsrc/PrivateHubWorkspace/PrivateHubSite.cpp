@@ -51,7 +51,7 @@ static bool RequireUser(WebRequest& r)
 {
 	if(r.HasUser())
 		return true;
-	r.Redirect(r.Site().Url("login"));
+	r.Redirect(r.Site().Url("session/login"));
 	return false;
 }
 
