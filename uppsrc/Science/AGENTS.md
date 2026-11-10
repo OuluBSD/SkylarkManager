@@ -45,9 +45,10 @@ has no `.gitignore`, so `*.article.json` sidecars are git-visible by design.
 5. **Authoring is deny by default**: `POST api/papers/<id>/article` and the
    `papers/<id>/author` form require either a session user with the
    `science-author` role, or an active meta-account grant carrying
-   `science.author` presented in the `x-science-grant` header. The grant path is
-   bearer-style: a grant id acts for its subject, so only the consent flow may
-   issue one. Writes go through `ScienceCorpus::SaveArticleTree` (schema,
+   `science.author` presented in the `x-science-grant` header. The grant is
+   caller-bound: it authorizes only the authenticated session of its
+   `subject_user_id`. A grant id presented by another session, or without a
+   session, is refused (403). Writes go through `ScienceCorpus::SaveArticleTree` (schema,
    optimistic `expected_paper_revision` -> 409 on drift, atomic sidecar write).
    Status codes: 403 unauthorized, 404 unknown paper, 400 invalid body or tree,
    409 drift, 500 write failure.

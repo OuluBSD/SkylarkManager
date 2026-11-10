@@ -32,6 +32,9 @@ static String Esc(const String& s)
 // author role, or an active grant that carries science.author. The grant path
 // is bearer-style: whoever presents the grant id acts for its subject, so
 // grants must only be handed to callers the consent flow approved.
+// Caller binding: a grant authorizes only the authenticated session of its
+// subject user. A grant id presented by anyone else, or without a session, is
+// refused, so possessing the id alone is never enough.
 static bool MayAuthor(WebRequest& r)
 {
 	if(r.HasUser())
@@ -39,10 +42,12 @@ static bool MayAuthor(WebRequest& r)
 			if(role == SCIENCE_AUTHOR_ROLE)
 				return true;
 	String grant_id = r.Header(SCIENCE_GRANT_HEADER);
-	if(grant_id.IsEmpty() || !s_grants)
+	if(grant_id.IsEmpty() || !s_grants || !r.HasUser())
 		return false;
 	WebAccountGrant g;
 	if(!s_grants->GetGrant(grant_id, g) || !g.IsActive())
+		return false;
+	if(g.subject_user_id != r.User().user_id)
 		return false;
 	return g.HasScopes(Vector<String>() << String(SCIENCE_AUTHOR_SCOPE));
 }

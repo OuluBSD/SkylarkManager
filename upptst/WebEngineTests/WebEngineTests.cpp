@@ -376,6 +376,8 @@ struct AlphaService : IBrokerService {
 
 static String s_root;
 static WebGrants *s_meta_grants = NULL;
+static String     s_sci_reader_uid;
+static String     s_sci_other_uid;
 static ScienceCorpus *s_sci_corpus = NULL;
 
 static void SetupSites()
@@ -433,7 +435,8 @@ static void SetupSites()
 	Vector<String> reader_roles;
 	reader_roles.Add("member");
 	science.Accounts().CreateUser("author", "pw-author", "Author", author_roles, uid, existed);
-	science.Accounts().CreateUser("reader", "pw-reader", "Reader", reader_roles, uid, existed);
+	science.Accounts().CreateUser("reader", "pw-reader", "Reader", reader_roles, s_sci_reader_uid, existed);
+	science.Accounts().CreateUser("other", "pw-other", "Other", reader_roles, s_sci_other_uid, existed);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -1164,18 +1167,41 @@ CONSOLE_APP_MAIN
 		Check(rmeta.status == 200 && rmeta.body.Find("Metadata-only record") >= 0,
 		      "science metadata-only paper still renders as metadata-only");
 
-		// Grant path: an active science.author grant authorizes a session member.
+		// Caller-bound grant path (brief 11A step 2). The reader holds no author
+		// role, so only the grant can authorize the write.
 		Vector<String> scopes;
 		scopes.Add(SCIENCE_AUTHOR_SCOPE);
 		String gid;
 		bool gexisted = false;
-		s_meta_grants->RequestGrant("subject-1", "science", "taskfoundry", scopes, gid, gexisted);
+		s_meta_grants->RequestGrant(s_sci_reader_uid, "science", "taskfoundry", scopes, gid, gexisted);
 		s_meta_grants->Decide(gid, true);
 		VectorMap<String, String> gr_h;
 		SciHeaders(gr_h, rd_cookie, rd_csrf);
 		gr_h.Add(SCIENCE_GRANT_HEADER, gid);
 		HttpReply rgrant = HttpCall("POST", SCIENCE_PORT, article_path, gr_h, good, "application/json");
-		Check(rgrant.status == 200, "science article write with an active science.author grant is allowed");
+		Check(rgrant.status == 200, "science grant is allowed for its subject's own session");
+
+		// The same grant id presented by another user's session is refused.
+		VectorMap<String, String> ot_f;
+		ot_f.Add("username", "other");
+		ot_f.Add("password", "pw-other");
+		HttpReply rot = HttpCall("POST", SCIENCE_PORT, "/login", sci_origin, FormEncode(ot_f));
+		String ot_csrf = (String)ParseJSON(rot.body)["csrf"];
+		String ot_pair;
+		String ot_cookie = "wfs_science=" + CookieOf(rot, "wfs_science", ot_pair);
+		VectorMap<String, String> other_h;
+		SciHeaders(other_h, ot_cookie, ot_csrf);
+		other_h.Add(SCIENCE_GRANT_HEADER, gid);
+		HttpReply rother = HttpCall("POST", SCIENCE_PORT, article_path, other_h, good, "application/json");
+		Check(rother.status == 403, "science grant presented by another user's session is refused");
+
+		// The grant id alone, with no session, is refused.
+		VectorMap<String, String> anon_h;
+		SciHeaders(anon_h, "", "");
+		anon_h.Add(SCIENCE_GRANT_HEADER, gid);
+		HttpReply ranon = HttpCall("POST", SCIENCE_PORT, article_path, anon_h, good, "application/json");
+		Check(ranon.status == 403, "science grant id without a session is refused");
+
 		VectorMap<String, String> bad_h;
 		SciHeaders(bad_h, rd_cookie, rd_csrf);
 		bad_h.Add(SCIENCE_GRANT_HEADER, "wag_unknown");
