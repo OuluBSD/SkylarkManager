@@ -4,11 +4,21 @@
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include "HostPlatform.h"
+#include "EngineComposition.h"
 
 NAMESPACE_UPP
 
 bool ManagerSkylarkApp::FilterHandler(Http& http)
 {
+	// Engine listeners serve only their composed sites: stock routes are never
+	// reachable there, whatever the path, so every request goes through the
+	// engine gateway and the site's own session.
+	if(WebEngine::CurrentListenerPort() > 0) {
+		if(IsEngineGatewayHandler(http.GetHandlerId()))
+			return true;
+		TheWebEngine().Gateway(http);
+		return false;
+	}
 	return test_mode || SystemAuthService::AuthorizeRequest(http);
 }
 

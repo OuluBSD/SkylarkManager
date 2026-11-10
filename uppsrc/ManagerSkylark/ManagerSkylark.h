@@ -3,6 +3,7 @@
 
 #include <Core/Core.h>
 #include <Skylark/Skylark.h>
+#include <WebEngine/Host.h>
 #include <Manager/Manager.h>
 #include <SweAgent/SweAgent.h>
 #include <WebChat/WebChat.h>
@@ -17,7 +18,7 @@
 
 NAMESPACE_UPP
 
-class ManagerSkylarkApp : public SkylarkApp {
+class ManagerSkylarkApp : public WebEngineHost {
 public:
 	ManagerSkylarkApp();
 	~ManagerSkylarkApp() override;

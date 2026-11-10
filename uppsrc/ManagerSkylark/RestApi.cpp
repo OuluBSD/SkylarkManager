@@ -63,6 +63,7 @@ SKYLARK(ManagerFrameworkSpec, "api/framework/spec")
 
 SKYLARK(QuitHandler, "quit")
 {
+	ManagerSkylarkApp::Get().StopEngines();
 	ManagerSkylarkApp::Get().Quit();
 	http.ContentType("text/plain") << "Server shutting down\n";
 }

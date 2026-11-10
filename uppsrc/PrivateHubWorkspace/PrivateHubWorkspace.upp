@@ -3,11 +3,14 @@ description "PrivateHub workspace backend: live local-repo inspection via argv-o
 uses
 	Core,
 	ForgeCore,
-	WebStorage;
+	WebStorage,
+	WebEngine;
 
 file
 	AGENTS.md,
 	PrivateHubWorkspace.h,
 	PrivateHubWorkspace.cpp,
 	PrivateHubMigration.h,
-	PrivateHubMigration.cpp;
+	PrivateHubMigration.cpp,
+	PrivateHubSite.h,
+	PrivateHubSite.cpp;

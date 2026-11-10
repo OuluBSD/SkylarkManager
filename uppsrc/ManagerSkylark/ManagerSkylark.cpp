@@ -1,4 +1,5 @@
 #include "ManagerSkylark.h"
+#include "EngineComposition.h"
 #include "SystemAuth.h"
 #include "AssessmentViews.h"
 #include <openssl/crypto.h>
@@ -58,6 +59,10 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("set-site-password", 0, "Create/update a site account with hidden prompt (or MANAGERSKYLARK_SITE_PASSWORD)", true, "username");
 	cla.AddArg("demo-site", 0, "Run an isolated synthetic, read-only demo site", false);
 	cla.AddArg("test", 0, "Run automated HTTP and store verification", false);
+	cla.AddArg("privatehub-port", 0, "PrivateHub engine site port (default 18211)", true, "port");
+	cla.AddArg("science-port", 0, "Science engine site port (default 18212)", true, "port");
+	cla.AddArg("science-corpus", 0, "Science corpus directory (default ~/Dev/AnthologyPrivate/site/data)", true, "directory");
+	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
 
 	if(!cla.Parse(args))
 		return false;
@@ -121,6 +126,19 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 		custom_port = ScanInt(p_str);
 		if(custom_port > 0 && custom_port < 65536)
 			port = custom_port;
+	}
+
+	if(!test_mode && !demo_site) {
+		EngineComposition cfg = EngineComposition::Defaults();
+		if(!cla.GetArg("privatehub-port").IsEmpty())
+			cfg.privatehub_port = ScanInt(cla.GetArg("privatehub-port"));
+		if(!cla.GetArg("science-port").IsEmpty())
+			cfg.science_port = ScanInt(cla.GetArg("science-port"));
+		if(!cla.GetArg("science-corpus").IsEmpty())
+			cfg.science_corpus = NormalizePath(cla.GetArg("science-corpus"));
+		if(!cla.GetArg("privatehub-workspace").IsEmpty())
+			cfg.privatehub_workspace = NormalizePath(cla.GetArg("privatehub-workspace"));
+		ComposeEngineSites(*this, site_dir, cfg);
 	}
 
 	InitApp();

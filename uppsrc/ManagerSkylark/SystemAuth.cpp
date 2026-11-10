@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+#include "EngineComposition.h"
 #include <WebAuth/WebAuth.h>
 
 NAMESPACE_UPP
@@ -75,7 +76,8 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 {
 	String id = http.GetHandlerId();
 	bool public_route = id == "LoginPage" || id == "LoginPost" || id == "LogoutHandler" ||
-	                    id == "ApiHealth" || id == "ApiAuthStatus" || id == "ApiAuthLogin";
+	                    id == "ApiHealth" || id == "ApiAuthStatus" || id == "ApiAuthLogin" ||
+	                    IsEngineGatewayHandler(id); // engine sites authenticate with their own sessions
 	if(public_route)
 		return true;
 
