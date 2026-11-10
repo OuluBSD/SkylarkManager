@@ -114,3 +114,12 @@ source so a later brief can pick it up. All five are done as of brief 13; each e
 - **Status:** not changed in brief 14, because the brief names only the authoring
   endpoints. Needs a planner decision on whether viewers may comment.
 - **Source:** found while writing the viewer-denial fence (brief 14 step 0).
+
+## 9. Stale `MT` mainconfig in CompanySkylark
+
+- **What:** `uppsrc/CompanySkylark/CompanySkylark.upp` still declares `mainconfig "" = "MT";`.
+  Multithreading is always compiled in, so the `MT` setting does nothing. The mainconfig
+  itself is kept only because the package builds a standalone main behind `flagMAIN`.
+- **Status:** not changed in brief 14. The change is a CompanySkylark edit, and it needs a
+  planner decision on whether the mainconfig stays with an empty value or is removed.
+- **Source:** found while verifying the UppSkillz build skill (brief 14 step 2).
