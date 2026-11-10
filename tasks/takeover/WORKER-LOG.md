@@ -915,3 +915,60 @@ Science account provisioning + stronger smoke -> Brief 11B step 0;
 PrivateHub wiki/topic/release authoring UI + witz templates -> Brief 12
 (backlog). Next: WORKER-BRIEF-11B.md (Company dual-use + TaskFoundry + 
 submission via broker).
+
+## Brief 11B — T04 slice 2 (partial: steps 0-2 committed)
+
+- Step 0 — `76babad`: `--set-science-user` (shared account helper with PrivateHub);
+  smoke.sh provisions a Science author, logs in, and checks a caller-bound article
+  write (200), sidecar in the temp corpus, 409 on a stale revision, 403 without a session.
+  Gate green (fence 179/179, composed 0 failed, CompanySkylark ALL PASSED, GCC rc 0).
+- Step 1 — `9cd5608` (CompanySkylark repo): `main.cpp` under `flagMAIN` calls
+  `CompanyMain()`; `CompanyModule.cpp` registers a descriptor with `INITBLOCK_(CompanySkylark)`.
+  Deviation: brief named `.icpp`; the package has no `.icpp` convention, so this is a `.cpp`.
+  Non-Blitz verified with a temporary `CLANG_NOBLITZ_TMP` method (Core/Skylark/Manager
+  built as Noblitz; symbol present); the temp method file was removed afterwards.
+  Gate green.
+- Step 2 — `47073e3` (CompanySkylark repo): `CompanyBroker` in CompanyWorkflow.
+  create-proposal-draft is idempotent by SHA-256 content hash (id derived from it;
+  201 then 200 duplicate); `CompanyStore::CreateProposalOnce` does check-and-create
+  under one lock; snapshot stored once. get-proposal-status (proposals:read).
+  20 broker checks in CompanySkylark --test. Gate green.
+  Decision needed: the WebBroker adapter is not in CompanySkylark. WebBroker is not on
+  CompanySkylark's reuse allowlist (AGENTS.md rule 1). A host adapter belongs in the
+  composing app, or the allowlist needs an amendment.
+- Step 3 — `fc7e2eb` (SkylarkManager repo): TaskFoundry engine module (see the step
+  3 entry below). Steps 0-3 are the committed state; step 4 is open.
+
+### Brief 11B — step 3 result (`fc7e2eb`, SkylarkManager)
+
+- New package `uppsrc/TaskFoundry`: TaskFoundryService (candidates, proposals,
+  evidence, validate, submit, status) and InstallTaskFoundrySite (board, candidate,
+  proposal editor, evidence, validate, submit, submission status routes).
+- Records are plain ValueMaps in JsonFileStore collections: StoreAsJsonValue
+  degrades vectors of structs, so it is not used for them.
+- Evidence: Science article node (get-paper for the revision, get-article to confirm
+  the node) and PrivateHub repo (new read-only `repo.info` op in PrivateHubService:
+  branch and head).
+- Submit calls Company `create-proposal-draft` through the broker with the content
+  hash as idempotency key. The submission id derives from proposal id + content hash.
+  The snapshot is written once; later edits do not change it.
+- Tests: 28 TaskFoundry checks in ManagerSkylark --test, against contract stand-ins
+  for Science, PrivateHub and Company on a local broker.
+- Gate green (fence 179/179; ManagerSkylark PASSED; composed 0 failed; CompanySkylark
+  ALL PASSED; GCC rc 0 x3; GitHub captures identical).
+
+### Brief 11B — step 4: NOT STARTED (decision needed)
+
+Step 4 needs the real Company broker in the composed ManagerSkylark process. That
+means linking the Company packages (CompanyWorkflow, CompanyStore and their deps)
+into ManagerSkylark, which needs `-a ../CompanySkylark/uppsrc` in the ManagerSkylark
+build and in gate_full.sh. The brief's "Company module registration is enough"
+implies this, but it is a build-graph change across repos. Decision needed:
+  (a) approve the cross-assembly link into ManagerSkylark (gate script updated), or
+  (b) move the Company adapter behind a host-side module that ManagerSkylark loads
+      without linking Company sources.
+Also open for step 4: the "grant caller-binding applies to its science.author use"
+requirement. TaskFoundry currently makes no science.author writes, so the requirement
+needs a planner call on what TaskFoundry authors.
+Interim policy: TaskFoundryMemberScopes() gives every signed-in member all TaskFoundry
+scopes. Grant-based scopes replace it later.
