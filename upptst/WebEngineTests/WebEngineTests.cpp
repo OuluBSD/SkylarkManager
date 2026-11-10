@@ -8,6 +8,7 @@
 #include <MetaAccount/MetaAccountSite.h>
 #include <ForgeCore/ForgeCore.h>
 #include <GitHubForge/GitHubForge.h>
+#include <GitHubForge/GitHubGhConnector.h>
 #include <SourceForgeForge/SourceForgeForge.h>
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 #include <Science/ScienceModel.h>
@@ -691,7 +692,7 @@ CONSOLE_APP_MAIN
 		SaveFile(ghpath, String(sh));
 		system(~String("chmod +x \"" + ghpath + "\""));
 
-		GitHubForgeBackend ghb(ghpath);
+		GitHubGhConnector ghb(ghpath);
 		Check(ghb.BackendId() == "github" && ghb.Capabilities().create_issue, "github adapter capabilities declared");
 
 		Vector<ForgeIssue> issues;
@@ -729,7 +730,7 @@ CONSOLE_APP_MAIN
 		Check(ghb.SetIssueState("owner/repo", "1", false, closed).ok && !closed.open, "github set state");
 
 		Check(!ghb.ListIssues("bad slug/x", issues).ok, "invalid slug rejected");
-		GitHubForgeBackend missing("/no/such/gh/binary");
+		GitHubGhConnector missing("/no/such/gh/binary");
 		ForgeResult mf = missing.GetIssue("owner/repo", "1", got);
 		Check(!mf.ok && mf.provenance == ForgeProvenance::Unavailable, "missing gh reports unavailable provenance");
 	}
