@@ -20,6 +20,8 @@ file
 	Engine readonly separator,
 	Engine.h,
 	WebEngine.cpp,
+	SessionRoutes.h,
+	SessionRoutes.cpp,
 	Host readonly separator,
 	Host.h,
 	Host.cpp;

@@ -93,4 +93,8 @@ CONSOLE_APP_MAIN
 	ManagerSkylarkApp app;
 	if(app.Initialize(args))
 		app.Run();
+	if(app.IsEngineComposed()) {
+		fflush(stdout);
+		_exit(0);
+	}
 }

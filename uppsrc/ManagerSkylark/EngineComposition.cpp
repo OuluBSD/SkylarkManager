@@ -1,13 +1,5 @@
 #include "EngineComposition.h"
-#include <PrivateHubWorkspace/PrivateHubSite.h>
-#include <Science/ScienceSite.h>
-#include <Science/ScienceService.h>
-
 NAMESPACE_UPP
-
-static PrivateHubWorkspaceBackend *s_privatehub = NULL;
-static ScienceCorpus              *s_science = NULL;
-static WebGrants                  *s_grants = NULL;
 
 EngineComposition EngineComposition::Defaults()
 {
@@ -17,7 +9,7 @@ EngineComposition EngineComposition::Defaults()
 	return cfg;
 }
 
-void ComposeEngineSites(WebEngineHost& host, const String& site_dir, const EngineComposition& cfg)
+void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir, const EngineComposition& cfg)
 {
 	String engine_root = AppendFileName(site_dir, "engine");
 	RealizeDirectory(engine_root);
@@ -26,8 +18,9 @@ void ComposeEngineSites(WebEngineHost& host, const String& site_dir, const Engin
 	RealizeDirectory(ph_root);
 	EngineSite& ph = TheWebEngine().AddSite("privatehub", "PrivateHub",
 		Format("http://127.0.0.1:%d", cfg.privatehub_port), ph_root);
-	s_privatehub = new PrivateHubWorkspaceBackend(cfg.privatehub_workspace, ph_root);
-	InstallPrivateHubSite(ph, *s_privatehub);
+	owned.privatehub.Create(cfg.privatehub_workspace, ph_root);
+	InstallPrivateHubSite(ph, *owned.privatehub);
+	InstallSessionRoutes(ph);
 	host.BindSite(cfg.privatehub_port, "privatehub");
 
 	String sci_root = AppendFileName(engine_root, "science");
@@ -35,13 +28,39 @@ void ComposeEngineSites(WebEngineHost& host, const String& site_dir, const Engin
 	EngineSite& sci = TheWebEngine().AddSite("science", "Science",
 		Format("http://127.0.0.1:%d", cfg.science_port), sci_root);
 	// Article sidecars are written next to the records (the corpus is git-backed).
-	s_science = new ScienceCorpus(cfg.science_corpus, cfg.science_corpus);
+	owned.science.Create(cfg.science_corpus, cfg.science_corpus);
 	String grants_root = AppendFileName(engine_root, "grants");
 	RealizeDirectory(grants_root);
-	s_grants = new WebGrants("meta", grants_root);
-	InstallScienceSite(sci, *s_science, s_grants);
+	owned.grants.Create("meta", grants_root);
+	InstallScienceSite(sci, *owned.science, ~owned.grants);
+	InstallSessionRoutes(sci);
 	host.BindSite(cfg.science_port, "science");
-	TheWebEngine().Broker().Register("science", new ScienceService(*s_science));
+	// The broker takes ownership of the service it is given.
+	TheWebEngine().Broker().Register("science", new ScienceService(*owned.science));
+}
+
+bool SetPrivateHubPassword(const String& username, const String& password, String& error)
+{
+	EngineSite *site = TheWebEngine().FindSite("privatehub");
+	if(!site) {
+		error = "privatehub site is not composed";
+		return false;
+	}
+	WebAccountUser existing;
+	if(site->Accounts().FindUserByUsername(username, existing)) {
+		StoreResult r = site->Accounts().SetPassword(existing.user_id, password);
+		if(!r.ok)
+			error = r.error;
+		return r.ok;
+	}
+	String user_id;
+	bool existed = false;
+	Vector<String> roles;
+	roles.Add("member");
+	StoreResult r = site->Accounts().CreateUser(username, password, username, roles, user_id, existed);
+	if(!r.ok)
+		error = r.error;
+	return r.ok;
 }
 
 bool IsEngineGatewayHandler(const String& id)

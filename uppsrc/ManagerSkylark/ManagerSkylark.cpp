@@ -63,6 +63,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("science-port", 0, "Science engine site port (default 18212)", true, "port");
 	cla.AddArg("science-corpus", 0, "Science corpus directory (default ~/Dev/AnthologyPrivate/site/data)", true, "directory");
 	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
+	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 
 	if(!cla.Parse(args))
 		return false;
@@ -138,7 +139,31 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.science_corpus = NormalizePath(cla.GetArg("science-corpus"));
 		if(!cla.GetArg("privatehub-workspace").IsEmpty())
 			cfg.privatehub_workspace = NormalizePath(cla.GetArg("privatehub-workspace"));
-		ComposeEngineSites(*this, site_dir, cfg);
+		ComposeEngineSites(*this, engine_backends, site_dir, cfg);
+		engine_composed = true;
+
+		String ph_user = cla.GetArg("set-privatehub-user");
+		if(!ph_user.IsEmpty()) {
+			String password = GetEnv("MANAGERSKYLARK_PRIVATEHUB_PASSWORD");
+			if(password.IsEmpty()) {
+				char buffer[4096] = {};
+				if(EVP_read_pw_string(buffer, sizeof(buffer), "New PrivateHub password: ", 1) != 0) {
+					OPENSSL_cleanse(buffer, sizeof(buffer));
+					Cerr() << "Could not read the PrivateHub password securely.\n";
+					return false;
+				}
+				password = buffer;
+				OPENSSL_cleanse(buffer, sizeof(buffer));
+			}
+			String error;
+			if(!SetPrivateHubPassword(ph_user, password, error)) {
+				Cerr() << "Failed to write PrivateHub credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured PrivateHub account '" << ph_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
 	}
 
 	InitApp();

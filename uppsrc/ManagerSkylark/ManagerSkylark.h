@@ -15,6 +15,7 @@
 #include "GitHubPlatform.h"
 #include "SourceForgePlatform.h"
 #include "SystemAuth.h"
+#include "EngineComposition.h"
 
 NAMESPACE_UPP
 
@@ -29,6 +30,8 @@ public:
 
 	bool IsDemoSite() const { return demo_site; }
 	bool IsTestMode() const { return test_mode; }
+	// True when engine sites are composed; their singletons outlive main, so the process ends with _exit.
+	bool IsEngineComposed() const { return engine_composed; }
 	bool HasExplicitSiteDir() const { return custom_site_dir; }
 	String GetSiteDir() const { return site_dir; }
 
@@ -58,6 +61,8 @@ public:
 	static TreeModel       BuildProjectsTree(ManagerStore& store, const String& active_slug = "");
 
 private:
+	EngineSiteBackends engine_backends; // owns the composed sites' backends
+	bool engine_composed = false;
 	static ManagerSkylarkApp* s_instance;
 
 	V2Store      v2_store;

@@ -6,5 +6,6 @@
 #include "Request.h"
 #include "Engine.h"
 #include "Host.h"
+#include "SessionRoutes.h"
 
 #endif
