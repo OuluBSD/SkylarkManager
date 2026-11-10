@@ -1114,3 +1114,32 @@ for correct capture comparison; CI YAML parsed, not run in Actions; old
 record files keep their mode until rewritten; Windows has no 0600
 equivalent in this code. Next: WORKER-BRIEF-13.md (backlog sweep — five
 items). After that: T07 UppSkillz completes the plan.
+
+## Brief 13 — backlog sweep (five items)
+
+Each item is its own commit with the full gate run after it. Gate: fence 179/179;
+ManagerSkylark PASSED; composed 0 failed (smoke now includes the PrivateHub authoring
+checks); CompanySkylark ALL PASSED (CLANG); GCC rc 0 x3; GitHub captures identical (76
+files); claims PASSED. Every gate run used GH_BASELINE=tmp/gh/baseline_wf.
+
+- **Item 1, caller-bound grants (`df1e4b7`).** TaskFoundry scopes come from grants
+  bound to the caller, not blanket member scopes. Grants are approved by the operator
+  flags `approve-taskfoundry-grant` / `revoke-taskfoundry-grant`. Residual: MetaAccount is
+  not composed in the real process, so consent is an operator action. Planner decision needed
+  if consent should be a user action.
+- **Item 2, raw-URI accessor (`4d8d833` BazaarCore, `abca36e` SkylarkManager).**
+  `Http::GetRequestURI()` is an additive edit to BazaarCore's own Skylark package, not a
+  patch-set change. The gateway routes on the raw target, so stock routes no longer shadow.
+- **Item 3, git allowlist (`1fff8b6`).** Per-subcommand argv allowlist; unknown options
+  refused. Remote strings are single-quoted validated tokens. 85 new HostExec checks.
+- **Item 4, idempotency TTL and owner lock (`8d3b8e5`).** Records expire after 30 days
+  (`PRIVATEHUB_IDEMPOTENCY_TTL`). `owner.lock` is held exclusively for the service's life;
+  a second owner is refused and composition fails with the reason. Residual: owner lock
+  verified on POSIX only. The Windows `LockFileEx` path is written but not built or run here.
+- **Item 5, PrivateHub authoring (`caa2758`).** Member-role writes: wiki create/edit (edit
+  requires the revision it was made from), topic create, release-file register. Creates
+  refuse existing keys (409). Smoke covers the member path end to end.
+  Residual: no test for denial of a logged-in account without the member role.
+
+**Status:** Brief 13 complete pending acceptance. BACKLOG.md marks all five items done.
+Waiting for planner.
