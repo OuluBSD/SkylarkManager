@@ -37,6 +37,10 @@ void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 // PrivateHub site. Requires ComposeEngineSites to have run.
 bool SetPrivateHubPassword(const String& username, const String& password, String& error);
 
+// Creates or resets a Science account with the science-author role, which is
+// what authoring needs. Requires ComposeEngineSites to have run.
+bool SetScienceUserPassword(const String& username, const String& password, String& error);
+
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);
 

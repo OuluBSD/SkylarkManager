@@ -39,11 +39,13 @@ void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	TheWebEngine().Broker().Register("science", new ScienceService(*owned.science));
 }
 
-bool SetPrivateHubPassword(const String& username, const String& password, String& error)
+// Creates an account on a composed site, or resets its password when it exists.
+static bool SetEngineUser(const char *site_id, const String& username, const String& password,
+                          const Vector<String>& roles, String& error)
 {
-	EngineSite *site = TheWebEngine().FindSite("privatehub");
+	EngineSite *site = TheWebEngine().FindSite(site_id);
 	if(!site) {
-		error = "privatehub site is not composed";
+		error = String(site_id) + " site is not composed";
 		return false;
 	}
 	WebAccountUser existing;
@@ -55,12 +57,24 @@ bool SetPrivateHubPassword(const String& username, const String& password, Strin
 	}
 	String user_id;
 	bool existed = false;
-	Vector<String> roles;
-	roles.Add("member");
 	StoreResult r = site->Accounts().CreateUser(username, password, username, roles, user_id, existed);
 	if(!r.ok)
 		error = r.error;
 	return r.ok;
+}
+
+bool SetPrivateHubPassword(const String& username, const String& password, String& error)
+{
+	Vector<String> roles;
+	roles.Add("member");
+	return SetEngineUser("privatehub", username, password, roles, error);
+}
+
+bool SetScienceUserPassword(const String& username, const String& password, String& error)
+{
+	Vector<String> roles;
+	roles.Add(SCIENCE_AUTHOR_ROLE);
+	return SetEngineUser("science", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

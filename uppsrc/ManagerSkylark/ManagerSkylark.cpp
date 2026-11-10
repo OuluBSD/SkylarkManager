@@ -49,6 +49,24 @@ void ManagerSkylarkApp::StopServer()
 	}
 }
 
+// Password for a composed-site account: the environment variable when set,
+// otherwise a hidden prompt. The buffer is wiped in both cases.
+static bool ReadEnginePassword(const char *env, const char *prompt, String& password)
+{
+	password = GetEnv(env);
+	if(!password.IsEmpty())
+		return true;
+	char buffer[4096] = {};
+	if(EVP_read_pw_string(buffer, sizeof(buffer), prompt, 1) != 0) {
+		OPENSSL_cleanse(buffer, sizeof(buffer));
+		Cerr() << "Could not read the password securely.\n";
+		return false;
+	}
+	password = buffer;
+	OPENSSL_cleanse(buffer, sizeof(buffer));
+	return true;
+}
+
 bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 {
 	CommandLineArguments cla;
@@ -64,6 +82,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("science-corpus", 0, "Science corpus directory (default ~/Dev/AnthologyPrivate/site/data)", true, "directory");
 	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
+	cla.AddArg("set-science-user", 0, "Create/update a Science author account with hidden prompt (or MANAGERSKYLARK_SCIENCE_PASSWORD)", true, "username");
 
 	if(!cla.Parse(args))
 		return false;
@@ -144,23 +163,30 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 
 		String ph_user = cla.GetArg("set-privatehub-user");
 		if(!ph_user.IsEmpty()) {
-			String password = GetEnv("MANAGERSKYLARK_PRIVATEHUB_PASSWORD");
-			if(password.IsEmpty()) {
-				char buffer[4096] = {};
-				if(EVP_read_pw_string(buffer, sizeof(buffer), "New PrivateHub password: ", 1) != 0) {
-					OPENSSL_cleanse(buffer, sizeof(buffer));
-					Cerr() << "Could not read the PrivateHub password securely.\n";
-					return false;
-				}
-				password = buffer;
-				OPENSSL_cleanse(buffer, sizeof(buffer));
-			}
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_PRIVATEHUB_PASSWORD", "New PrivateHub password: ", password))
+				return false;
 			String error;
 			if(!SetPrivateHubPassword(ph_user, password, error)) {
 				Cerr() << "Failed to write PrivateHub credentials: " << error << "\n";
 				return false;
 			}
 			Cout() << "Configured PrivateHub account '" << ph_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String sci_user = cla.GetArg("set-science-user");
+		if(!sci_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_SCIENCE_PASSWORD", "New Science password: ", password))
+				return false;
+			String error;
+			if(!SetScienceUserPassword(sci_user, password, error)) {
+				Cerr() << "Failed to write Science credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured Science author account '" << sci_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

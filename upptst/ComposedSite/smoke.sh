@@ -1,9 +1,15 @@
 #!/bin/sh
-# Real-process fence for the composed engine sites (brief 11A step 4).
+# Real-process fence for the composed engine sites (briefs 11A step 4, 11B step 0).
 # Starts the ManagerSkylark binary with PrivateHub and Science composed on
 # temporary ports, against isolated temporary data, and checks that each
-# site is fenced from the stock app and from the other site.
-# Usage: smoke.sh <ManagerSkylark binary>. Exit 0 when every check passes.
+# site is fenced from the stock app and from the other site, and that a
+# Science author can write an article through the composed site.
+#
+# Usage: sh upptst/ComposedSite/smoke.sh <ManagerSkylark binary>
+#   e.g. sh upptst/ComposedSite/smoke.sh \
+#        bin/CLANG-Blitz-Clang-Debug-Debug_Full-Linux-Mt-Posix-Shared/ManagerSkylark
+# The binary path is required ($1); the Mt config directory holds the build.
+# Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
 MAIN=18220; PH_PORT=18221; SC_PORT=18222
@@ -24,10 +30,12 @@ mkdir -p "$T/corpus" "$T/ws/acme/widget" || exit 1
 # One public paper, so the science author route has a paper to check auth on.
 printf '%s' '{"id":"2612.00002","kind":"paper","title":"Smoke paper","status":"draft","abstract":"Fixture.","envelope":{"schema_id":"skylark/paper","schema_version":"1","workspace_id":"science","stable_id":"2612.00002","record_kind":"paper","revision":"1","visibility":"public","provenance_ref":""}}' > "$T/corpus/2612.00002.json"
 
-# Provision the PrivateHub account, then start the composed server.
+# Provision the PrivateHub and Science author accounts, then start the server.
 MANAGERSKYLARK_PRIVATEHUB_PASSWORD=pw-ph "$BIN" --site-dir "$T" --privatehub-workspace "$T/ws" \
 	--set-privatehub-user dev >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision PrivateHub account"; else fail "provision PrivateHub account"; fi
+MANAGERSKYLARK_SCIENCE_PASSWORD=pw-sci "$BIN" --site-dir "$T" --set-science-user author >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision Science author account"; else fail "provision Science author account"; fi
 
 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT --science-port $SC_PORT \
 	--science-corpus "$T/corpus" --privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
@@ -87,6 +95,28 @@ check "privatehub issue create without csrf is refused" 403 \
 # Science login with an unknown account is refused.
 check "science login with unknown account is refused" 401 \
 	"$SC_URL/session/login" -H "Origin: $SC_URL" -H "Accept: application/json" --data "username=nobody&password=x"
+
+# Science authoring in the real process: the author logs in on the Science
+# site, then writes an article through the composed route.
+curl -s -c "$T/sc.jar" -o "$T/sc_login" -H "Origin: $SC_URL" -H "Accept: application/json" \
+	--data "username=author&password=pw-sci" "$SC_URL/session/login"
+sc_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sc_login")
+if [ -n "$sc_csrf" ]; then pass "science author login returns a csrf token"; else fail "science author login returns a csrf token"; fi
+good='{"expected_paper_revision":"1","article":{"title":"Authored","nodes":[{"id":"s1","type":"section","heading":"Intro"},{"id":"p1","type":"paragraph","text":"Authored text."}]}}'
+stale='{"expected_paper_revision":"99","article":{"title":"Authored","nodes":[{"id":"s1","type":"section","heading":"Intro"}]}}'
+write() {
+	curl -s -o "$T/body" -w '%{http_code}' -b "$T/sc.jar" -H "Origin: $SC_URL" \
+		-H "x-wf-csrf: $sc_csrf" -H "Content-Type: application/json" --data "$1" \
+		"$SC_URL/api/papers/2612.00002/article"
+}
+got=$(write "$good")
+if [ "$got" = "200" ]; then pass "science author writes an article (200)"; else fail "science author writes an article (got $got, want 200)"; fi
+if [ -f "$T/corpus/2612.00002.article.json" ]; then pass "article sidecar written under the temp corpus"; else fail "article sidecar written under the temp corpus"; fi
+got=$(write "$stale")
+if [ "$got" = "409" ]; then pass "stale expected revision gets 409"; else fail "stale expected revision gets 409 (got $got, want 409)"; fi
+got=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $SC_URL" -H "Content-Type: application/json" \
+	--data "$good" "$SC_URL/api/papers/2612.00002/article")
+if [ "$got" = "403" ]; then pass "article write without a session is refused"; else fail "article write without a session is refused (got $got, want 403)"; fi
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null
