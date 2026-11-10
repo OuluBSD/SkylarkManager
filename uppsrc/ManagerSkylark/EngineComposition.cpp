@@ -9,7 +9,28 @@ EngineComposition EngineComposition::Defaults()
 	return cfg;
 }
 
-void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir, const EngineComposition& cfg)
+// The Company module, as the broker sees it. The host owns the adapter; the
+// module owns the store. The host never reaches the store, only Handle().
+class CompanyBrokerSite : public IBrokerService {
+public:
+	explicit CompanyBrokerSite(CompanyComposedModule& module) : module(module) {}
+
+	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override {
+		CompanyBrokerResult r = module.Handle(call.op, ctx.scopes, ctx.caller_id, call.payload);
+		BrokerResult out;
+		out.ok = r.ok;
+		out.status = r.status;
+		out.payload = r.payload;
+		out.error = r.error;
+		return out;
+	}
+
+private:
+	CompanyComposedModule& module;
+};
+
+bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
+                        const EngineComposition& cfg, String& error)
 {
 	String engine_root = AppendFileName(site_dir, "engine");
 	RealizeDirectory(engine_root);
@@ -22,6 +43,9 @@ void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallPrivateHubSite(ph, *owned.privatehub);
 	InstallSessionRoutes(ph);
 	host.BindSite(cfg.privatehub_port, "privatehub");
+	String ph_broker_root = AppendFileName(ph_root, "broker");
+	RealizeDirectory(ph_broker_root);
+	RegisterPrivateHubService(TheWebEngine().Broker(), "privatehub", *owned.privatehub, ph_broker_root);
 
 	String sci_root = AppendFileName(engine_root, "science");
 	RealizeDirectory(sci_root);
@@ -37,6 +61,24 @@ void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	host.BindSite(cfg.science_port, "science");
 	// The broker takes ownership of the service it is given.
 	TheWebEngine().Broker().Register("science", new ScienceService(*owned.science));
+
+	// Company: the module owns its store under its own root. The host only
+	// registers the broker surface, so Company data is reached through the broker.
+	String company_root = cfg.company_root.IsEmpty() ? AppendFileName(engine_root, "company") : cfg.company_root;
+	owned.company.Create();
+	if(!owned.company->Open(company_root, cfg.company_repos, error))
+		return false;
+	TheWebEngine().Broker().Register("company", new CompanyBrokerSite(*owned.company));
+
+	String tf_root = AppendFileName(engine_root, "taskfoundry");
+	RealizeDirectory(tf_root);
+	EngineSite& tf = TheWebEngine().AddSite("taskfoundry", "TaskFoundry",
+		Format("http://127.0.0.1:%d", cfg.taskfoundry_port), tf_root);
+	owned.taskfoundry.Create(TheWebEngine().Broker(), tf_root);
+	InstallTaskFoundrySite(tf, *owned.taskfoundry);
+	InstallSessionRoutes(tf);
+	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
+	return true;
 }
 
 // Creates an account on a composed site, or resets its password when it exists.
@@ -75,6 +117,13 @@ bool SetScienceUserPassword(const String& username, const String& password, Stri
 	Vector<String> roles;
 	roles.Add(SCIENCE_AUTHOR_ROLE);
 	return SetEngineUser("science", username, password, roles, error);
+}
+
+bool SetTaskFoundryPassword(const String& username, const String& password, String& error)
+{
+	Vector<String> roles;
+	roles.Add("member");
+	return SetEngineUser("taskfoundry", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

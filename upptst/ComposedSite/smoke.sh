@@ -1,9 +1,11 @@
 #!/bin/sh
-# Real-process fence for the composed engine sites (briefs 11A step 4, 11B step 0).
-# Starts the ManagerSkylark binary with PrivateHub and Science composed on
-# temporary ports, against isolated temporary data, and checks that each
-# site is fenced from the stock app and from the other site, and that a
-# Science author can write an article through the composed site.
+# Real-process fence for the composed engine sites (briefs 11A step 4, 11B steps 0 and 4).
+# Starts the ManagerSkylark binary with PrivateHub, Science and TaskFoundry composed on
+# temporary ports, with the Company module composed under a temporary root. Checks that
+# each site is fenced from the stock app and from the other sites, that a Science author
+# can write an article, and that a TaskFoundry round trip runs candidate -> proposal ->
+# Science and PrivateHub evidence -> validate -> submit -> Company proposal id, with a
+# repeat submit returning the same submission.
 #
 # Usage: sh upptst/ComposedSite/smoke.sh <ManagerSkylark binary>
 #   e.g. sh upptst/ComposedSite/smoke.sh \
@@ -12,10 +14,11 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
+TF_URL=http://127.0.0.1:$TF_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -27,6 +30,13 @@ check() {
 	if [ "$got" = "$want" ]; then pass "$name"; else fail "$name (got $got, want $want)"; fi
 }
 mkdir -p "$T/corpus" "$T/ws/acme/widget" || exit 1
+# The workspace repo is a real git checkout, so PrivateHub evidence can resolve its branch.
+if git -C "$T/ws/acme/widget" init -q && \
+   git -C "$T/ws/acme/widget" -c user.name=smoke -c user.email=smoke@example.invalid commit -q --allow-empty -m smoke; then
+	pass "workspace repo is a git checkout"
+else
+	fail "workspace repo is a git checkout"
+fi
 # One public paper, so the science author route has a paper to check auth on.
 printf '%s' '{"id":"2612.00002","kind":"paper","title":"Smoke paper","status":"draft","abstract":"Fixture.","envelope":{"schema_id":"skylark/paper","schema_version":"1","workspace_id":"science","stable_id":"2612.00002","record_kind":"paper","revision":"1","visibility":"public","provenance_ref":""}}' > "$T/corpus/2612.00002.json"
 
@@ -36,14 +46,19 @@ MANAGERSKYLARK_PRIVATEHUB_PASSWORD=pw-ph "$BIN" --site-dir "$T" --privatehub-wor
 if [ $? -eq 0 ]; then pass "provision PrivateHub account"; else fail "provision PrivateHub account"; fi
 MANAGERSKYLARK_SCIENCE_PASSWORD=pw-sci "$BIN" --site-dir "$T" --set-science-user author >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Science author account"; else fail "provision Science author account"; fi
+MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos acme/widget \
+	--set-taskfoundry-user tfdev >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision TaskFoundry account"; else fail "provision TaskFoundry account"; fi
 
 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT --science-port $SC_PORT \
+	--taskfoundry-port $TF_PORT --company-root "$T/company" --company-repos acme/widget \
 	--science-corpus "$T/corpus" --privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
 pid=$!
 ready=0
 for i in $(seq 1 40); do
 	if [ "$(curl -s -o /dev/null -w '%{http_code}' $PH_URL/session/login)" = "200" ] && \
-	   [ "$(curl -s -o /dev/null -w '%{http_code}' $SC_URL/)" != "000" ]; then ready=1; break; fi
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $SC_URL/)" != "000" ] && \
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ]; then ready=1; break; fi
 	sleep 0.25
 done
 if [ $ready -ne 1 ]; then
@@ -51,7 +66,7 @@ if [ $ready -ne 1 ]; then
 	kill $pid 2>/dev/null
 	exit 1
 fi
-pass "composed server up on $MAIN, $PH_PORT, $SC_PORT"
+pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT"
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"
@@ -117,6 +132,59 @@ if [ "$got" = "409" ]; then pass "stale expected revision gets 409"; else fail "
 got=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $SC_URL" -H "Content-Type: application/json" \
 	--data "$good" "$SC_URL/api/papers/2612.00002/article")
 if [ "$got" = "403" ]; then pass "article write without a session is refused"; else fail "article write without a session is refused (got $got, want 403)"; fi
+
+# TaskFoundry round trip in the real process. The article written above gives
+# paper 2612.00002 the node p1. Every write carries the site's CSRF token.
+curl -s -c "$T/tf.jar" -o "$T/tf_login" -H "Origin: $TF_URL" -H "Accept: application/json" \
+	--data "username=tfdev&password=pw-tf" "$TF_URL/session/login"
+tf_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/tf_login")
+if [ -n "$tf_csrf" ]; then pass "taskfoundry login returns a csrf token"; else fail "taskfoundry login returns a csrf token"; fi
+check "taskfoundry board anonymous redirects" 302 "$TF_URL/"
+check "taskfoundry board after login" 200 "$TF_URL/" -b "$T/tf.jar"
+
+# post_form <path> <form data>: prints "<status> <redirect url>".
+post_form() {
+	curl -s -o "$T/tf_body" -w '%{http_code} %{redirect_url}' -b "$T/tf.jar" \
+		-H "Origin: $TF_URL" -H "x-wf-csrf: $tf_csrf" --data "$2" "$TF_URL/$1"
+}
+
+r=$(post_form "candidates/create" "title=Round+trip&summary=Smoke&paper_id=2612.00002")
+code=${r%% *}; loc=${r#* }; cand=${loc##*/}
+if [ "$code" = "302" ] && [ "${cand#cand_}" != "$cand" ]; then pass "taskfoundry candidate created from a Science paper"; else fail "taskfoundry candidate created from a Science paper ($r)"; fi
+
+r=$(post_form "candidates/$cand/propose" "")
+code=${r%% *}; loc=${r#* }; prop=${loc##*/}
+if [ "$code" = "302" ] && [ "${prop#prop_}" != "$prop" ]; then pass "taskfoundry proposal starts from the candidate"; else fail "taskfoundry proposal starts from the candidate ($r)"; fi
+
+r=$(post_form "proposals/$prop/evidence" "kind=science&ref=2612.00002&node_id=p1")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry attaches Science evidence through the broker"; else fail "taskfoundry attaches Science evidence through the broker ($r)"; fi
+r=$(post_form "proposals/$prop/evidence" "kind=privatehub&ref=acme/widget")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry attaches PrivateHub evidence through the broker"; else fail "taskfoundry attaches PrivateHub evidence through the broker ($r)"; fi
+
+r=$(post_form "proposals/$prop/edit" "title=Round+trip&body=Smoke+body&repository=acme/widget&estimated_hours=2")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry proposal edited"; else fail "taskfoundry proposal edited ($r)"; fi
+
+r=$(post_form "proposals/$prop/validate" "")
+curl -s -o "$T/tf_prop" -b "$T/tf.jar" "$TF_URL/proposals/$prop"
+if [ "${r%% *}" = "302" ] && grep -q "Valid. Content hash" "$T/tf_prop"; then pass "taskfoundry proposal validates"; else fail "taskfoundry proposal validates ($r)"; fi
+
+r=$(post_form "proposals/$prop/submit" "")
+code=${r%% *}; loc=${r#* }; sub=${loc##*/}
+if [ "$code" = "302" ] && [ "${sub#sub_}" != "$sub" ]; then pass "taskfoundry submits to Company"; else fail "taskfoundry submits to Company ($r)"; fi
+curl -s -o "$T/tf_sub" -b "$T/tf.jar" "$TF_URL/submissions/$sub"
+company_id=$(grep -o 'prp_[0-9a-f]\{24\}' "$T/tf_sub" | head -1)
+if [ -n "$company_id" ]; then pass "submission names the Company proposal id ($company_id)"; else fail "submission names the Company proposal id"; fi
+if grep -q "Company status: <strong>proposed" "$T/tf_sub"; then pass "Company reports the draft as proposed"; else fail "Company reports the draft as proposed"; fi
+
+r=$(post_form "proposals/$prop/submit" "")
+code=${r%% *}; loc=${r#* }
+if [ "$code" = "302" ] && [ "${loc##*/}" = "$sub" ]; then pass "duplicate submit returns the same submission"; else fail "duplicate submit returns the same submission ($r)"; fi
+curl -s -o "$T/tf_sub2" -b "$T/tf.jar" "$TF_URL/submissions/$sub"
+if grep -q "$company_id" "$T/tf_sub2"; then pass "duplicate submit keeps the same Company proposal id"; else fail "duplicate submit keeps the same Company proposal id"; fi
+
+anon=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $TF_URL" -H "x-wf-csrf: $tf_csrf" \
+	--data "" "$TF_URL/proposals/$prop/submit")
+if [ "$anon" = "302" ]; then pass "anonymous submit is refused"; else fail "anonymous submit is refused (got $anon)"; fi
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

@@ -10,6 +10,7 @@ uses
 	WebAuth,
 	PrivateHubWorkspace,
 	TaskFoundry,
+	CompanyComposed,
 	Science,
 	WebEngine,
 	WebBroker,

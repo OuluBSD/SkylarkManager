@@ -47,17 +47,35 @@
 
 ## Composed engine sites
 
-The real server (not `--test` or `--demo-site`) composes two engine sites
-behind `WebEngineHost`, each on its own listener port:
+The real server (not `--test` or `--demo-site`) composes three engine sites
+behind `WebEngineHost`, each on its own listener port, plus the Company module:
 
 | Site | Default port | Data root | Flag |
 |---|---|---|---|
 | `privatehub` | 18211 | `<site-dir>/engine/privatehub` | `--privatehub-port`, `--privatehub-workspace` (default `~/Dev`) |
 | `science` | 18212 | `<site-dir>/engine/science`, corpus `~/Dev/AnthologyPrivate/site/data` | `--science-port`, `--science-corpus` |
+| `taskfoundry` | 18213 | `<site-dir>/engine/taskfoundry` | `--taskfoundry-port` |
+| Company module (no site) | none | `<site-dir>/engine/company` | `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
+
+**Host-compose direction only.** ManagerSkylark composes the Company module from
+`uppsrc/CompanyComposed`, which opens its own store under `--company-root`. The
+host reaches Company only through the broker surface (`create-proposal-draft`,
+`get-proposal-status`) that `CompanyBrokerSite` registers as `company`. It never
+touches the Company store, config or records. CompanySkylark never depends on
+this package or on ManagerSkylark (CompanySkylark AGENTS.md rule 8).
+
+Broker services registered in the composed process: `science` (ScienceService),
+`privatehub` (PrivateHub read and write operations, including `repo.info`), and
+`company` (the Company module). TaskFoundry calls all three.
+
+Build note: ManagerSkylark links the Company packages, so its build needs the
+sibling source path: `uppbuilder -m CLANG -a ../CompanySkylark/uppsrc ManagerSkylark`.
 
 Accounts are per site. Provision them with
-`MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`
-(or a hidden prompt); the command exits after writing the account. Engine
+`MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`,
+`MANAGERSKYLARK_SCIENCE_PASSWORD=... ManagerSkylark --set-science-user NAME`
+(science-author role), or `MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=... ManagerSkylark --set-taskfoundry-user NAME`
+(or a hidden prompt); each command exits after writing the account. Engine
 listeners serve only their own site: a stock route claiming a path is answered
 404, except the home route (see `uppsrc/WebEngine/AGENTS.md`).
 
@@ -82,6 +100,12 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET /api/papers`, `GET /api/papers/{id}` | science | Paper JSON |
 | `GET /api/papers/{id}/article` | science | Structured article JSON |
 | `POST /api/papers/{id}/article` | science | Save article; `expected_paper_revision` gives 409 on drift; sidecar write is atomic |
+| `GET /` | taskfoundry | Board: candidates and proposals (login required) |
+| `POST /candidates/create` | taskfoundry | Candidate from a Science paper (CSRF required) |
+| `GET /candidates/{id}`, `POST /candidates/{id}/propose` | taskfoundry | Candidate detail; start a proposal |
+| `GET /proposals/{id}` | taskfoundry | Proposal editor: fields, evidence, validation, submit |
+| `POST /proposals/{id}/edit`, `/evidence`, `/validate`, `/submit` | taskfoundry | Mutations (CSRF required); submit returns the same submission on repeat |
+| `GET /submissions/{id}` | taskfoundry | Submission snapshot and Company status |
 
 Authoring is caller-bound: a `x-science-grant` id authorizes a write only from
 the authenticated session of the grant's subject. The same id from another

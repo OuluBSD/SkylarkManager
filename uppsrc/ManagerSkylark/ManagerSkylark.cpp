@@ -81,6 +81,10 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("science-port", 0, "Science engine site port (default 18212)", true, "port");
 	cla.AddArg("science-corpus", 0, "Science corpus directory (default ~/Dev/AnthologyPrivate/site/data)", true, "directory");
 	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
+	cla.AddArg("taskfoundry-port", 0, "TaskFoundry engine site port (default 18213)", true, "port");
+	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
+	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
+	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("set-science-user", 0, "Create/update a Science author account with hidden prompt (or MANAGERSKYLARK_SCIENCE_PASSWORD)", true, "username");
 
@@ -158,8 +162,33 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.science_corpus = NormalizePath(cla.GetArg("science-corpus"));
 		if(!cla.GetArg("privatehub-workspace").IsEmpty())
 			cfg.privatehub_workspace = NormalizePath(cla.GetArg("privatehub-workspace"));
-		ComposeEngineSites(*this, engine_backends, site_dir, cfg);
+		if(!cla.GetArg("taskfoundry-port").IsEmpty())
+			cfg.taskfoundry_port = ScanInt(cla.GetArg("taskfoundry-port"));
+		if(!cla.GetArg("company-root").IsEmpty())
+			cfg.company_root = NormalizePath(cla.GetArg("company-root"));
+		if(!cla.GetArg("company-repos").IsEmpty())
+			cfg.company_repos = Split(cla.GetArg("company-repos"), ',', false);
+		String compose_error;
+		if(!ComposeEngineSites(*this, engine_backends, site_dir, cfg, compose_error)) {
+			Cerr() << "Engine composition failed: " << compose_error << "\n";
+			return false;
+		}
 		engine_composed = true;
+
+		String tf_user = cla.GetArg("set-taskfoundry-user");
+		if(!tf_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_TASKFOUNDRY_PASSWORD", "New TaskFoundry password: ", password))
+				return false;
+			String error;
+			if(!SetTaskFoundryPassword(tf_user, password, error)) {
+				Cerr() << "Failed to write TaskFoundry credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured TaskFoundry account '" << tf_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
 
 		String ph_user = cla.GetArg("set-privatehub-user");
 		if(!ph_user.IsEmpty()) {

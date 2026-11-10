@@ -104,7 +104,7 @@ static void Board(WebRequest& r)
 		              "paper " + Text(c, "paper_id"));
 	}
 	b << "</ul>"
-	     "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/create:POST")) << "\">"
+	     "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/create")) << "\">"
 	  << Hidden(r) <<
 	     "<input name=\"title\" placeholder=\"Candidate title\" required>"
 	     "<input name=\"paper_id\" placeholder=\"Science paper id\" required>"
@@ -146,7 +146,7 @@ static void CandidateDetail(WebRequest& r)
 	b << "<p>" << Esc(Text(res.payload, "summary")) << "</p>"
 	  << "<p>Science paper <code>" << Esc(Text(res.payload, "paper_id")) << "</code>, revision "
 	  << Esc(Text(res.payload, "paper_revision")) << "</p>"
-	  << "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/*/propose:POST", IdArgs(id))) << "\">"
+	  << "<form method=\"post\" action=\"" << Esc(r.Site().Url("candidates/*/propose", IdArgs(id))) << "\">"
 	  << Hidden(r) << "<button>Start a proposal from this candidate</button></form>";
 	Page(r, Text(res.payload, "title"), String(b));
 }
@@ -186,7 +186,7 @@ static void ProposalEditor(WebRequest& r)
 	StringBuffer b;
 	b << "<p>Status: <strong>" << Esc(Text(p, "status")) << "</strong></p>";
 
-	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/edit:POST", IdArgs(id))) << "\">" << Hidden(r)
+	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/edit", IdArgs(id))) << "\">" << Hidden(r)
 	  << "<input name=\"title\" value=\"" << Esc(Text(p, "title")) << "\" required>"
 	  << "<input name=\"repository\" value=\"" << Esc(Text(p, "repository")) << "\" placeholder=\"owner/repo\">"
 	  << "<input name=\"estimated_hours\" value=\"" << Esc(AsString((double)p.Get("estimated_hours", 0.0))) << "\">"
@@ -200,7 +200,7 @@ static void ProposalEditor(WebRequest& r)
 		b << EvidenceRow(e);
 	}
 	b << "</ul>"
-	     "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/evidence:POST", IdArgs(id))) << "\">" << Hidden(r)
+	     "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/evidence", IdArgs(id))) << "\">" << Hidden(r)
 	  << "<select name=\"kind\"><option value=\"science\">Science article node</option>"
 	     "<option value=\"privatehub\">PrivateHub repository</option></select>"
 	     "<input name=\"ref\" placeholder=\"paper id or owner/repo\" required>"
@@ -217,14 +217,14 @@ static void ProposalEditor(WebRequest& r)
 			b << "<li>" << Esc((String)msgs[i]) << "</li>";
 		b << "</ul>";
 	}
-	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/validate:POST", IdArgs(id))) << "\">" << Hidden(r)
+	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/validate", IdArgs(id))) << "\">" << Hidden(r)
 	  << "<button>Validate</button></form>";
 
 	b << "<h2>Submit to Company</h2>";
 	if(Text(p, "status") == TF_STATUS_SUBMITTED)
 		b << "<p>Submitted as <a href=\"" << Esc(r.Site().Url("submissions/*", IdArgs(Text(p, "submission_id"))))
 		  << "\">" << Esc(Text(p, "submission_id")) << "</a></p>";
-	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/submit:POST", IdArgs(id))) << "\">" << Hidden(r)
+	b << "<form method=\"post\" action=\"" << Esc(r.Site().Url("proposals/*/submit", IdArgs(id))) << "\">" << Hidden(r)
 	  << "<button>Submit</button></form>";
 	Page(r, Text(p, "title"), String(b));
 }

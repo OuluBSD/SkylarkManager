@@ -6,6 +6,9 @@
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
+#include <TaskFoundry/TaskFoundrySite.h>
+#include <CompanyComposed/CompanyComposed.h>
+#include "PrivateHubService.h"
 
 NAMESPACE_UPP
 
@@ -13,8 +16,11 @@ NAMESPACE_UPP
 struct EngineComposition {
 	int    privatehub_port = 18211;
 	int    science_port = 18212;
+	int    taskfoundry_port = 18213;
 	String privatehub_workspace; // checkouts root (default ~/Dev)
 	String science_corpus;       // flat corpus + article sidecars (default ~/Dev/AnthologyPrivate/site/data)
+	String company_root;         // Company store root (default <site_dir>/engine/company)
+	Vector<String> company_repos; // repositories Company may propose against; empty permits none
 
 	static EngineComposition Defaults();
 };
@@ -25,13 +31,17 @@ struct EngineSiteBackends {
 	One<PrivateHubWorkspaceBackend> privatehub;
 	One<ScienceCorpus>              science;
 	One<WebGrants>                  grants;
+	One<CompanyComposedModule>      company;
+	One<TaskFoundryService>         taskfoundry;
 };
 
-// Creates the PrivateHub and Science engine sites, binds their listener ports,
-// registers their broker services, and creates the grant store under
+// Creates the PrivateHub, Science and TaskFoundry engine sites, opens the
+// composed Company module, binds the listener ports, registers the broker
+// services (privatehub, science, company), and creates the grant store under
 // <site_dir>/engine. Called once, before the app runs, for the real server.
-void ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
-                        const EngineComposition& cfg);
+// Returns false, with error set, when a composed store cannot be opened.
+bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
+                        const EngineComposition& cfg, String& error);
 
 // Creates or updates a PrivateHub account (role "member") on the composed
 // PrivateHub site. Requires ComposeEngineSites to have run.
@@ -40,6 +50,10 @@ bool SetPrivateHubPassword(const String& username, const String& password, Strin
 // Creates or resets a Science account with the science-author role, which is
 // what authoring needs. Requires ComposeEngineSites to have run.
 bool SetScienceUserPassword(const String& username, const String& password, String& error);
+
+// Creates or updates a TaskFoundry account (role "member") on the composed
+// TaskFoundry site. Requires ComposeEngineSites to have run.
+bool SetTaskFoundryPassword(const String& username, const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);
