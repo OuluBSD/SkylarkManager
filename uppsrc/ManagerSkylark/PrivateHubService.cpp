@@ -1,5 +1,16 @@
 #include "PrivateHubService.h"
 
+#ifdef PLATFORM_POSIX
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <errno.h>
+#endif
+
+#ifdef PLATFORM_WIN32
+#include <windows.h>
+#endif
+
 NAMESPACE_UPP
 
 static const char *IDEMPOTENCY_COLLECTION = "broker-idempotency";
@@ -98,9 +109,94 @@ static ValueArray AsRecords(Vector<T>& items)
 	return a;
 }
 
-PrivateHubService::PrivateHubService(PrivateHubWorkspaceBackend& backend_, const String& data_root_)
-	: backend(backend_), data_root(data_root_)
+static int64 NowSeconds()
 {
+	return (int64)(GetUtcTime() - Time(1970, 1, 1));
+}
+
+DataRootOwner::DataRootOwner()
+{
+#ifdef PLATFORM_WIN32
+	handle = NULL;
+#else
+	fd = -1;
+#endif
+	held = false;
+}
+
+DataRootOwner::~DataRootOwner()
+{
+	Release();
+}
+
+bool DataRootOwner::Acquire(const String& data_root, String& error)
+{
+	Release();
+	String path = AppendFileName(data_root, "owner.lock");
+#ifdef PLATFORM_WIN32
+	HANDLE h = CreateFileW(ToSystemCharsetW(path), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+	                       FILE_ATTRIBUTE_NORMAL, NULL);
+	if(h == INVALID_HANDLE_VALUE || h == NULL) {
+		error = "cannot open owner lock: " + path;
+		return false;
+	}
+	OVERLAPPED ov;
+	memset(&ov, 0, sizeof(ov));
+	if(!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &ov)) {
+		CloseHandle(h);
+		error = "data root is owned by another process: " + data_root;
+		return false;
+	}
+	handle = h;
+#else
+	int h = open(~path, O_CREAT | O_RDWR, 0600);
+	if(h < 0) {
+		error = "cannot open owner lock: " + path + " (" + AsString(errno) + ")";
+		return false;
+	}
+	if(flock(h, LOCK_EX | LOCK_NB) != 0) {
+		close(h);
+		error = "data root is owned by another process: " + data_root;
+		return false;
+	}
+	fd = h;
+#endif
+	held = true;
+	return true;
+}
+
+void DataRootOwner::Release()
+{
+	if(!held)
+		return;
+#ifdef PLATFORM_WIN32
+	if(handle) {
+		OVERLAPPED ov;
+		memset(&ov, 0, sizeof(ov));
+		UnlockFileEx((HANDLE)handle, 0, 1, 0, &ov);
+		CloseHandle((HANDLE)handle);
+	}
+	handle = NULL;
+#else
+	if(fd >= 0) {
+		flock(fd, LOCK_UN);
+		close(fd);
+	}
+	fd = -1;
+#endif
+	held = false;
+}
+
+PrivateHubService::PrivateHubService(PrivateHubWorkspaceBackend& backend_, const String& data_root_,
+                                     int64 idempotency_ttl_seconds)
+	: backend(backend_), data_root(data_root_), ttl(idempotency_ttl_seconds)
+{
+}
+
+bool PrivateHubService::AcquireDataRoot(String& error)
+{
+	RealizeDirectory(data_root);
+	return owner.Acquire(data_root, error);
 }
 
 BrokerResult PrivateHubService::Handle(const BrokerCallContext& ctx, const BrokerCall& call)
@@ -122,28 +218,37 @@ BrokerResult PrivateHubService::Handle(const BrokerCallContext& ctx, const Broke
 
 	Mutex::Lock hold(lock);
 	bool found = false;
-	BrokerResult prior = Recorded(ctx, call, found);
+	String rev;
+	BrokerResult prior = Recorded(ctx, call, found, rev);
 	if(found)
 		return prior;
 	BrokerResult res = Execute(ctx, call);
 	if(res.ok)
-		Record(ctx, call, res);
+		Record(ctx, call, res, rev);
 	return res;
 }
 
-BrokerResult PrivateHubService::Recorded(const BrokerCallContext& ctx, const BrokerCall& call, bool& found)
+BrokerResult PrivateHubService::Recorded(const BrokerCallContext& ctx, const BrokerCall& call, bool& found, String& rev)
 {
 	found = false;
+	rev.Clear();
 	IRecordCollection& coll = TheStoreManager().JsonCollection("privatehub", data_root, IDEMPOTENCY_COLLECTION);
-	String json, rev;
-	if(!coll.Get(IdempotencyId(ctx, call), json, rev).ok)
+	String json;
+	if(!coll.Get(IdempotencyId(ctx, call), json, rev).ok) {
+		rev.Clear();
 		return BrokerResult();
+	}
 	BrokerResult res;
 	try {
 		Value v = ParseJSON(json);
 		if(!v.Is<ValueMap>())
 			return Reply(500, "corrupt idempotency record");
 		ValueMap rec = (ValueMap)v;
+		// A record older than the TTL is expired: the write runs again and overwrites
+		// it. Records written before the TTL existed carry no timestamp and do not expire.
+		Value at = rec.Get("recorded_unix", Value());
+		if(IsNumber(at) && NowSeconds() - (int64)at >= ttl)
+			return BrokerResult();
 		res = Done((ValueMap)rec.Get("payload"));
 	}
 	catch(Exc& e) {
@@ -153,13 +258,15 @@ BrokerResult PrivateHubService::Recorded(const BrokerCallContext& ctx, const Bro
 	return res;
 }
 
-void PrivateHubService::Record(const BrokerCallContext& ctx, const BrokerCall& call, const BrokerResult& res)
+void PrivateHubService::Record(const BrokerCallContext& ctx, const BrokerCall& call, const BrokerResult& res,
+                               const String& rev)
 {
 	ValueMap rec;
 	rec.Add("payload", res.payload);
+	rec.Add("recorded_unix", NowSeconds());
 	IRecordCollection& coll = TheStoreManager().JsonCollection("privatehub", data_root, IDEMPOTENCY_COLLECTION);
 	String new_rev;
-	coll.Put(IdempotencyId(ctx, call), AsJSON(Value(rec)), String(), new_rev);
+	coll.Put(IdempotencyId(ctx, call), AsJSON(Value(rec)), rev, new_rev);
 }
 
 BrokerResult PrivateHubService::Execute(const BrokerCallContext& ctx, const BrokerCall& call)
@@ -269,10 +376,17 @@ BrokerResult PrivateHubService::Execute(const BrokerCallContext& ctx, const Brok
 	return FromForge(fr, out);
 }
 
-void RegisterPrivateHubService(WebBroker& broker, const String& site_id,
-                               PrivateHubWorkspaceBackend& backend, const String& data_root)
+bool RegisterPrivateHubService(WebBroker& broker, const String& site_id,
+                               PrivateHubWorkspaceBackend& backend, const String& data_root,
+                               String& error, int64 idempotency_ttl_seconds)
 {
-	broker.Register(site_id, new PrivateHubService(backend, data_root));
+	PrivateHubService *svc = new PrivateHubService(backend, data_root, idempotency_ttl_seconds);
+	if(!svc->AcquireDataRoot(error)) {
+		delete svc;
+		return false;
+	}
+	broker.Register(site_id, svc);
+	return true;
 }
 
 END_UPP_NAMESPACE

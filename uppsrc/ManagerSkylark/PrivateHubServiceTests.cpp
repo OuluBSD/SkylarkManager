@@ -64,7 +64,9 @@ bool RunPrivateHubServiceSelfTests(const String& scratch_dir)
 
 	PrivateHubWorkspaceBackend backend(ws, data);
 	WebBroker broker;
-	RegisterPrivateHubService(broker, PH_SITE, backend, data);
+	String register_error;
+	ok &= PhExpect(RegisterPrivateHubService(broker, PH_SITE, backend, data, register_error),
+	   "service registers on a fresh data root");
 
 	// Gates: unknown op, scopes, caller, and idempotency key are all checked before any work.
 	BrokerResult r = Call(broker, "alice", Scopes(true, true), "issue.delete", Payload(NULL, ""), "k-x");
@@ -192,6 +194,27 @@ bool RunPrivateHubServiceSelfTests(const String& scratch_dir)
 	call.payload = Payload(NULL, "");
 	r = broker.Call(ctx, call);
 	ok &= PhExpect(!r.ok, "a call to an unregistered site id is refused");
+	// Single owner: a second owner of the same data root in this process is refused.
+	WebBroker rival;
+	String owner_error;
+	ok &= PhExpect(!RegisterPrivateHubService(rival, PH_SITE, backend, data, owner_error) &&
+	   owner_error.Find("owned by another process") >= 0,
+	   "a second owner of the same data root is refused");
+
+	// Expiry: with a zero TTL a recorded result is expired at once, so the key runs
+	// the write again and gets a new issue.
+	String ttl_data = AppendFileName(scratch_dir, "privatehub-data-ttl");
+	RealizeDirectory(ttl_data);
+	WebBroker expiring;
+	ok &= PhExpect(RegisterPrivateHubService(expiring, PH_SITE, backend, ttl_data, owner_error, 0),
+	   "a zero-TTL service registers on its own data root");
+	BrokerResult first = Call(expiring, "alice", Scopes(true, true), "issue.create", Payload("title", "Expiring"), "k-ttl-1");
+	BrokerResult second = Call(expiring, "alice", Scopes(true, true), "issue.create", Payload("title", "Expiring"), "k-ttl-1");
+	ok &= PhExpect(first.ok && second.ok &&
+	   AsString(((ValueMap)first.payload.Get("issue")).Get("issue_id")) !=
+	   AsString(((ValueMap)second.payload.Get("issue")).Get("issue_id")),
+	   "an expired idempotency key runs the write again");
+
 	return ok;
 }
 

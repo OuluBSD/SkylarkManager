@@ -45,7 +45,12 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	host.BindSite(cfg.privatehub_port, "privatehub");
 	String ph_broker_root = AppendFileName(ph_root, "broker");
 	RealizeDirectory(ph_broker_root);
-	RegisterPrivateHubService(TheWebEngine().Broker(), "privatehub", *owned.privatehub, ph_broker_root);
+	String ph_owner_error;
+	if(!RegisterPrivateHubService(TheWebEngine().Broker(), "privatehub", *owned.privatehub, ph_broker_root,
+	                              ph_owner_error)) {
+		error = ph_owner_error;
+		return false;
+	}
 
 	String sci_root = AppendFileName(engine_root, "science");
 	RealizeDirectory(sci_root);
