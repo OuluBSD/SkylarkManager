@@ -1,0 +1,122 @@
+{
+  "id": "science-authoring",
+  "title": "Science author writes an article tree; an anonymous write is refused; a stale revision is refused",
+  "sites": [
+    "science"
+  ],
+  "seed": {
+    "papers": [
+      {
+        "id": "2612.00002",
+        "kind": "paper",
+        "title": "Smoke paper",
+        "status": "draft",
+        "abstract": "Fixture.",
+        "envelope": {
+          "schema_id": "skylark/paper",
+          "schema_version": "1",
+          "workspace_id": "science",
+          "stable_id": "2612.00002",
+          "record_kind": "paper",
+          "revision": "1",
+          "visibility": "public",
+          "provenance_ref": ""
+        }
+      }
+    ]
+  },
+  "agents": {
+    "author": {
+      "user": "author",
+      "role": "science-author",
+      "instructions": "You are author, a Science author. Sign in to science, write the article tree of paper 2612.00002 at revision 1, and read it back. Say each milestone on AgentIPC with @scenario-oversight."
+    },
+    "anon": {
+      "user": null,
+      "role": "anonymous",
+      "instructions": "You are not signed in. Try to write the article and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+    }
+  },
+  "provision": {
+    "science": [
+      {
+        "user": "author"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "author-login",
+      "as": "author",
+      "login": "science"
+    },
+    {
+      "id": "anon-write-refused",
+      "as": "anon",
+      "describe": "an anonymous session cannot write an article (role negative)",
+      "run": [
+        "science",
+        "article-write",
+        "2612.00002",
+        "1",
+        "{\"title\": \"Authored\", \"nodes\": [{\"id\": \"s1\", \"type\": \"section\", \"heading\": \"Intro\"}, {\"id\": \"p1\", \"type\": \"paragraph\", \"text\": \"Authored text.\"}]}"
+      ],
+      "expect": {
+        "rc": 1
+      },
+      "announce": "@scenario-oversight anonymous article write refused"
+    },
+    {
+      "id": "author-write",
+      "as": "author",
+      "describe": "the author writes the article tree at the current revision",
+      "run": [
+        "science",
+        "article-write",
+        "2612.00002",
+        "1",
+        "{\"title\": \"Authored\", \"nodes\": [{\"id\": \"s1\", \"type\": \"section\", \"heading\": \"Intro\"}, {\"id\": \"p1\", \"type\": \"paragraph\", \"text\": \"Authored text.\"}]}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight article written for 2612.00002"
+    },
+    {
+      "id": "author-read-back",
+      "as": "author",
+      "describe": "the author reads the article back",
+      "run": [
+        "science",
+        "article-get",
+        "2612.00002"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "Authored text."
+        ]
+      },
+      "announce": "@scenario-oversight article read back"
+    },
+    {
+      "id": "author-stale-refused",
+      "as": "author",
+      "describe": "a write against a stale revision is refused",
+      "run": [
+        "science",
+        "article-write",
+        "2612.00002",
+        "99",
+        "{\"title\": \"Authored\", \"nodes\": [{\"id\": \"s1\", \"type\": \"section\", \"heading\": \"Intro\"}, {\"id\": \"p1\", \"type\": \"paragraph\", \"text\": \"Authored text.\"}]}"
+      ],
+      "expect": {
+        "rc": 1
+      },
+      "announce": "@scenario-oversight stale revision refused"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "id": "privatehub-issues",
+  "title": "Contributor opens an issue and comments; a viewer without the member role is refused",
+  "sites": [
+    "privatehub"
+  ],
+  "agents": {
+    "dev": {
+      "user": "dev",
+      "role": "member",
+      "instructions": "You are dev, a PrivateHub member. Sign in to privatehub, open one issue on acme/widget, then comment on it. Say each milestone on AgentIPC with @scenario-oversight."
+    },
+    "viewer": {
+      "user": "viewer",
+      "role": "viewer",
+      "instructions": "You are viewer, a PrivateHub account without the member role. Try to create a wiki page on acme/widget and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+    }
+  },
+  "provision": {
+    "privatehub": [
+      {
+        "user": "dev",
+        "role": "member"
+      },
+      {
+        "user": "viewer",
+        "role": "viewer"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "dev-login",
+      "as": "dev",
+      "login": "privatehub"
+    },
+    {
+      "id": "viewer-login",
+      "as": "viewer",
+      "login": "privatehub"
+    },
+    {
+      "id": "dev-open-issue",
+      "as": "dev",
+      "describe": "member opens an issue and the runner captures its number",
+      "run": [
+        "privatehub",
+        "issue-create",
+        "owner=acme",
+        "repo=widget",
+        "title=Scenario issue",
+        "body=Opened by the privatehub-issues scenario"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "capture": {
+        "name": "issue",
+        "pattern": "issues/([^/\"\\s]+)"
+      },
+      "announce": "@scenario-oversight issue opened on acme/widget"
+    },
+    {
+      "id": "dev-comment",
+      "as": "dev",
+      "describe": "member comments on the captured issue",
+      "run": [
+        "privatehub",
+        "issue-comment",
+        "owner=acme",
+        "repo=widget",
+        "number={issue}",
+        "body=Scenario comment"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight comment added on acme/widget"
+    },
+    {
+      "id": "viewer-wiki-refused",
+      "as": "viewer",
+      "describe": "a viewer without the member role cannot create a wiki page (role negative)",
+      "run": [
+        "privatehub",
+        "wiki-create",
+        "owner=acme",
+        "repo=widget",
+        "slug=scenario",
+        "title=Scenario page",
+        "body=text"
+      ],
+      "expect": {
+        "rc": 1,
+        "not_contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight wiki create refused for viewer"
+    }
+  ]
+}

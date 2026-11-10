@@ -155,6 +155,8 @@ bool SiteCliBuildRequest(const ValueMap& command, const Vector<String>& words,
 					body.Add(names[i], (int64)StrInt64(value[i]));
 				else if(types[i] == "number")
 					body.Add(names[i], StrDbl(value[i]));
+				else if(value[i].StartsWith("{") || value[i].StartsWith("["))
+					body.Add(names[i], ParseJSON(value[i]));  // a nested tree, e.g. a Science article
 				else
 					body.Add(names[i], value[i]);
 			}
@@ -237,6 +239,7 @@ static void JarSet(VectorMap<String, String>& jar, const String& site, const Str
 struct SiteCliReply {
 	int    status = 0;
 	String body;
+	String location;    // redirect target of a 3xx reply, empty otherwise
 	String set_cookie;
 };
 
@@ -271,6 +274,7 @@ static bool Send(const String& method, const String& url, const String& body, co
 	}
 	reply.status = http.GetStatusCode();
 	reply.body = http.GetContent();
+	reply.location = http.GetHeader("location");
 	reply.set_cookie = http.GetHeader("set-cookie");
 	return true;
 }
@@ -579,6 +583,16 @@ static int RunManifestCommand(const SiteCliOptions& opts, const Vector<String>& 
 	         JarGet(jar, words[0], "cookie_value"), JarGet(jar, words[0], "csrf"), reply, err))
 		return CommandFailed(err);
 	Trace(opts, req.method, url, req.body, reply);
+	// Browser-style routes answer a successful write with a redirect; report its target.
+	if(reply.status >= 300 && reply.status < 400 && reply.location.GetCount()) {
+		// A redirect to the login page is a refusal, not a success.
+		if(reply.location.Find("/session/login") >= 0) {
+			Cerr() << "error: not signed in (the site redirected to its login page)\n";
+			return 1;
+		}
+		Cout() << "redirect: " << reply.location << "\n";
+		return 0;
+	}
 	PrintReply(opts, reply.body);
 	return reply.status >= 200 && reply.status < 300 ? 0 : 1;
 }

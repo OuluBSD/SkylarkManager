@@ -1,0 +1,297 @@
+{
+  "id": "taskfoundry-submit",
+  "title": "Candidate to Company proposal: no grant refused, request and approve, evidence, validate, submit, duplicate submit keeps the id",
+  "sites": [
+    "privatehub",
+    "science",
+    "taskfoundry"
+  ],
+  "seed": {
+    "papers": [
+      {
+        "id": "2612.00002",
+        "kind": "paper",
+        "title": "Smoke paper",
+        "status": "draft",
+        "abstract": "Fixture.",
+        "envelope": {
+          "schema_id": "skylark/paper",
+          "schema_version": "1",
+          "workspace_id": "science",
+          "stable_id": "2612.00002",
+          "record_kind": "paper",
+          "revision": "1",
+          "visibility": "public",
+          "provenance_ref": ""
+        }
+      }
+    ]
+  },
+  "agents": {
+    "tfdev": {
+      "user": "tfdev",
+      "role": "session account",
+      "instructions": "You are tfdev, a TaskFoundry account. Request a grant, wait for the operator to approve it, make a candidate from paper 2612.00002, propose, attach Science and PrivateHub evidence, validate, and submit. Say each milestone on AgentIPC with @scenario-oversight."
+    },
+    "anon": {
+      "user": null,
+      "role": "anonymous",
+      "instructions": "You are not signed in. Try to submit a proposal and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+    },
+    "author": {
+      "user": "author",
+      "role": "science-author",
+      "instructions": "You are author, a Science author. Write the article tree of paper 2612.00002 so TaskFoundry can cite it. Say the write on AgentIPC with @scenario-oversight."
+    }
+  },
+  "provision": {
+    "taskfoundry": [
+      {
+        "user": "tfdev"
+      }
+    ],
+    "science": [
+      {
+        "user": "author"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "tf-login",
+      "as": "tfdev",
+      "login": "taskfoundry"
+    },
+    {
+      "id": "author-login",
+      "as": "author",
+      "login": "science"
+    },
+    {
+      "id": "article-write",
+      "as": "author",
+      "describe": "the Science author writes the paper's article tree (TaskFoundry evidence needs it)",
+      "run": [
+        "science",
+        "article-write",
+        "2612.00002",
+        "1",
+        "{\"title\": \"Authored\", \"nodes\": [{\"id\": \"s1\", \"type\": \"section\", \"heading\": \"Intro\"}, {\"id\": \"p1\", \"type\": \"paragraph\", \"text\": \"Authored text.\"}]}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight article written for 2612.00002"
+    },
+    {
+      "id": "no-grant-refused",
+      "as": "tfdev",
+      "describe": "a write without an approved grant is refused",
+      "run": [
+        "taskfoundry",
+        "candidate-create",
+        "title=Early",
+        "summary=x",
+        "paper_id=2612.00002"
+      ],
+      "expect": {
+        "rc": 1
+      }
+    },
+    {
+      "id": "grant-request",
+      "as": "tfdev",
+      "describe": "the session requests a grant",
+      "run": [
+        "taskfoundry",
+        "grant-request"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "redirect:"
+        ]
+      }
+    },
+    {
+      "id": "grant-list",
+      "as": "tfdev",
+      "describe": "the requested grant is listed and its id captured",
+      "run": [
+        "taskfoundry",
+        "grants-list"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "requested"
+        ]
+      },
+      "capture": {
+        "name": "grant",
+        "pattern": "(wag_[A-Za-z0-9_-]+)"
+      }
+    },
+    {
+      "id": "operator-approve",
+      "approve_grant": "{grant}"
+    },
+    {
+      "id": "candidate-create",
+      "as": "tfdev",
+      "describe": "a candidate is created from the Science paper",
+      "run": [
+        "taskfoundry",
+        "candidate-create",
+        "title=Round trip",
+        "summary=Smoke",
+        "paper_id=2612.00002"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "redirect:"
+        ]
+      },
+      "capture": {
+        "name": "cand",
+        "pattern": "candidates/(cand_[A-Za-z0-9_-]+)"
+      },
+      "announce": "@scenario-oversight candidate created from paper 2612.00002"
+    },
+    {
+      "id": "propose",
+      "as": "tfdev",
+      "describe": "the candidate becomes a proposal",
+      "run": [
+        "taskfoundry",
+        "candidate-propose",
+        "{cand}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "redirect:"
+        ]
+      },
+      "capture": {
+        "name": "prop",
+        "pattern": "proposals/(prop_[A-Za-z0-9_-]+)"
+      }
+    },
+    {
+      "id": "science-evidence",
+      "as": "tfdev",
+      "describe": "Science evidence is attached through the broker",
+      "run": [
+        "taskfoundry",
+        "proposal-evidence",
+        "{prop}",
+        "kind=science",
+        "ref=2612.00002",
+        "node_id=p1"
+      ],
+      "expect": {
+        "rc": 0
+      }
+    },
+    {
+      "id": "privatehub-evidence",
+      "as": "tfdev",
+      "describe": "PrivateHub evidence is attached through the broker",
+      "run": [
+        "taskfoundry",
+        "proposal-evidence",
+        "{prop}",
+        "kind=privatehub",
+        "ref=acme/widget"
+      ],
+      "expect": {
+        "rc": 0
+      }
+    },
+    {
+      "id": "edit",
+      "as": "tfdev",
+      "describe": "the proposal is edited",
+      "run": [
+        "taskfoundry",
+        "proposal-edit",
+        "{prop}",
+        "title=Round trip",
+        "body=Smoke body",
+        "repository=acme/widget",
+        "estimated_hours=2"
+      ],
+      "expect": {
+        "rc": 0
+      }
+    },
+    {
+      "id": "validate",
+      "as": "tfdev",
+      "describe": "the proposal validates",
+      "run": [
+        "taskfoundry",
+        "proposal-validate",
+        "{prop}"
+      ],
+      "expect": {
+        "rc": 0
+      }
+    },
+    {
+      "id": "submit",
+      "as": "tfdev",
+      "describe": "the proposal is submitted and the submission captured",
+      "run": [
+        "taskfoundry",
+        "proposal-submit",
+        "{prop}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "redirect:"
+        ]
+      },
+      "capture": {
+        "name": "sub",
+        "pattern": "submissions/(sub_[A-Za-z0-9_-]+)"
+      },
+      "announce": "@scenario-oversight proposal submitted to Company"
+    },
+    {
+      "id": "duplicate-submit",
+      "as": "tfdev",
+      "describe": "a repeat submit returns the same submission",
+      "run": [
+        "taskfoundry",
+        "proposal-submit",
+        "{prop}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "{sub}"
+        ]
+      }
+    },
+    {
+      "id": "anon-submit-refused",
+      "as": "anon",
+      "describe": "an anonymous submit is refused (role negative)",
+      "run": [
+        "taskfoundry",
+        "proposal-submit",
+        "{prop}"
+      ],
+      "expect": {
+        "rc": 1
+      }
+    }
+  ]
+}

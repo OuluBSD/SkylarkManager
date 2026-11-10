@@ -418,6 +418,8 @@ void InstallTaskFoundrySite(EngineSite& site, TaskFoundryService& service, WebGr
 	rt.Add("submissions/*", SubmissionStatus);
 
 	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("grants-list", "GET", "grants", "session account",
+	                                        "html", "List my TaskFoundry grants and their state", {}));
 	cm.Add(site.id, site.title, HttpCommand("grant-request", "POST", "grants/request", "session account",
 	                                        "html", "Ask for a grant to use TaskFoundry", {}));
 	cm.Add(site.id, site.title, HttpCommand("candidate-create", "POST", "candidates/create", "session account",

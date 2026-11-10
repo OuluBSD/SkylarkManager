@@ -1,0 +1,121 @@
+{
+  "blocked": "The stock app has no session-login descriptor: its sign-in is the host form (login/submit) or a bearer token (api/auth/login), and SiteCli can only keep a composed session cookie. Needs a SiteCli bearer or a stock session-login route before this runs.",
+  "id": "github-pr-flow",
+  "title": "Signed-in user opens and merges a pull request on the emulated GitHub; anonymous and merged-PR writes are refused",
+  "sites": [
+    "github"
+  ],
+  "agents": {
+    "contrib": {
+      "user": "contrib",
+      "role": "host session",
+      "instructions": "You are contrib, a signed-in host account. Open a pull request from feature/scenario into master on SeppoPakonen/demo-repo, then merge it. Say each milestone on AgentIPC with @scenario-oversight."
+    },
+    "anon": {
+      "user": null,
+      "role": "anonymous",
+      "instructions": "You are not signed in. Try to merge pull request 1 and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+    }
+  },
+  "provision": {
+    "github": [
+      {
+        "user": "contrib"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "contrib-login",
+      "as": "contrib",
+      "login": "github"
+    },
+    {
+      "id": "anon-merge-refused",
+      "as": "anon",
+      "describe": "an anonymous session cannot merge a pull request (role negative)",
+      "run": [
+        "github",
+        "pull-merge",
+        "SeppoPakonen",
+        "demo-repo",
+        "number=1"
+      ],
+      "expect": {
+        "rc": 1
+      },
+      "announce": "@scenario-oversight anonymous merge refused"
+    },
+    {
+      "id": "pulls-list",
+      "as": "contrib",
+      "describe": "the open pull requests are listed",
+      "run": [
+        "github",
+        "pulls-list",
+        "SeppoPakonen",
+        "demo-repo"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "Add parity"
+        ]
+      }
+    },
+    {
+      "id": "pull-create",
+      "as": "contrib",
+      "describe": "the contributor opens a pull request from a feature branch",
+      "run": [
+        "github",
+        "pull-create",
+        "SeppoPakonen",
+        "demo-repo",
+        "title=Scenario PR",
+        "body=From the github-pr-flow scenario",
+        "head=feature/scenario",
+        "base=master"
+      ],
+      "expect": {
+        "rc": 0
+      },
+      "capture": {
+        "name": "pr",
+        "pattern": "\"number\": (\\d+)"
+      },
+      "announce": "@scenario-oversight pull request opened on SeppoPakonen/demo-repo"
+    },
+    {
+      "id": "pull-merge",
+      "as": "contrib",
+      "describe": "the contributor merges the pull request it opened",
+      "run": [
+        "github",
+        "pull-merge",
+        "SeppoPakonen",
+        "demo-repo",
+        "number={pr}"
+      ],
+      "expect": {
+        "rc": 0
+      },
+      "announce": "@scenario-oversight pull request merged"
+    },
+    {
+      "id": "merged-again-refused",
+      "as": "contrib",
+      "describe": "merging an already merged pull request is refused",
+      "run": [
+        "github",
+        "pull-merge",
+        "SeppoPakonen",
+        "demo-repo",
+        "number={pr}"
+      ],
+      "expect": {
+        "rc": 1
+      }
+    }
+  ]
+}
