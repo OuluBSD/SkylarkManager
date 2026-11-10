@@ -233,6 +233,14 @@ static void JarSet(VectorMap<String, String>& jar, const String& site, const Str
 	jar.GetAdd(site + "\t" + field) = value;
 }
 
+// The bearer token for a request: --bearer <file> wins, else the token the jar kept at login.
+static String BearerFor(const SiteCliOptions& opts, const VectorMap<String, String>& jar, const String& site)
+{
+	if(opts.bearer_file.GetCount())
+		return TrimBoth(LoadFile(opts.bearer_file));
+	return JarGet(jar, site, "bearer");
+}
+
 // ---------------------------------------------------------------------------
 // HTTP: one request, no redirects, the site's own cookie and CSRF token.
 
@@ -252,7 +260,7 @@ static String Base(const String& url)
 }
 
 static bool Send(const String& method, const String& url, const String& body, const String& content_type,
-                 const String& cookie_name, const String& cookie_value, const String& csrf,
+                 const String& cookie_name, const String& cookie_value, const String& csrf, const String& bearer,
                  SiteCliReply& reply, String& err)
 {
 	HttpRequest http(url);
@@ -261,6 +269,8 @@ static bool Send(const String& method, const String& url, const String& body, co
 	http.Accept("application/json");
 	if(csrf.GetCount())
 		http.AddHeaders("x-wf-csrf: " + csrf + "\r\n");
+	if(bearer.GetCount())
+		http.AddHeaders("Authorization: Bearer " + bearer + "\r\n");
 	if(cookie_name.GetCount())
 		http.Cookie(cookie_name, cookie_value);
 	if(method == "POST") {
@@ -328,7 +338,7 @@ static bool FetchManifest(const SiteCliOptions& opts, ValueMap& out, String& err
 {
 	SiteCliReply reply;
 	if(!Send("GET", Base(opts.server) + "/api/cli/manifest", String(), String(), String(), String(), String(),
-	         reply, err))
+	         String(), reply, err))
 		return false;
 	Value v = ParseJSON(reply.body);
 	if(reply.status != 200 || !v.Is<ValueMap>()) {
@@ -358,6 +368,8 @@ static void PrintUsage()
 	"  --site <section=url>   base URL of one section's own port (repeatable)\n"
 	"  --session <file>       cookie jar kept between runs (needed for login)\n"
 	"  --password-env <name>  read the login password from this variable, else prompt\n"
+	"  --bearer <file>        send this token as Authorization: Bearer (host api/ routes)\n"
+	"  --bearer-login         login through api/auth/login and keep the bearer token in the jar\n"
 	"  --toon                 print replies as TOON; preferred for AI agents (compact)\n"
 	"  --json                 print replies as JSON (default)\n"
 	"  --trace                print the last request and reply on stderr\n"
@@ -416,7 +428,7 @@ static int ManifestCommand(const SiteCliOptions& opts, const Vector<String>& wor
 	String site = words.GetCount() > 1 ? words[1] : String();
 	SiteCliReply reply;
 	String url = Base(opts.server) + "/api/cli/manifest" + (site.IsEmpty() ? String() : "/" + UrlEncodePath(site));
-	if(!Send("GET", url, String(), String(), String(), String(), String(), reply, err))
+	if(!Send("GET", url, String(), String(), String(), String(), String(), String(), reply, err))
 		return CommandFailed(err);
 	Trace(opts, "GET", url, String(), reply);
 	PrintReply(opts, reply.body);
@@ -447,12 +459,37 @@ static int LoginCommand(const SiteCliOptions& opts, const Vector<String>& words)
 	}
 	VectorMap<String, String> jar;
 	JarLoad(opts.session_file, jar);
+	if(opts.bearer_login) {
+		// Host sites without a composed session route: api/auth/login returns a bearer token.
+		ValueMap creds;
+		creds.Add("username", words[2]);
+		creds.Add("password", password);
+		String api = SiteUrl(opts, site) + "/api/auth/login";
+		SiteCliReply api_reply;
+		String api_err;
+		if(!Send("POST", api, AsJSON(creds), "application/json", String(), String(), String(), String(),
+		         api_reply, api_err))
+			return CommandFailed(api_err);
+		Trace(opts, "POST", api, "username=" + words[2] + "&password=<hidden>", api_reply);
+		ValueMap res = ParseJSON(api_reply.body);
+		if(api_reply.status != 200 || res["token"].IsNull())
+			return CommandFailed("sign-in refused (status " + IntStr(api_reply.status) + ")");
+		JarSet(jar, site, "bearer", (String)res["token"]);
+		JarSet(jar, site, "user", (String)res["username"]);
+		if(!JarSave(opts.session_file, jar))
+			return CommandFailed("cannot write " + opts.session_file);
+		ValueMap out;
+		out.Add("ok", true);
+		out.Add("user", (String)res["username"]);
+		PrintReply(opts, AsJSON(out));
+		return 0;
+	}
 	String body = "username=" + UrlEncode(words[2]) + "&password=" + UrlEncode(password);
 	String url = SiteUrl(opts, site) + "/session/login";
 	SiteCliReply reply;
 	String err;
 	if(!Send("POST", url, body, "application/x-www-form-urlencoded", JarGet(jar, site, "cookie_name"),
-	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), reply, err))
+	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), String(), reply, err))
 		return CommandFailed(err);
 	Trace(opts, "POST", url, "username=" + words[2] + "&password=<hidden>", reply);
 	PrintReply(opts, reply.body);
@@ -482,7 +519,7 @@ static int LogoutCommand(const SiteCliOptions& opts, const Vector<String>& words
 	String err;
 	String url = SiteUrl(opts, site) + "/session/logout";
 	if(!Send("POST", url, String(), "application/x-www-form-urlencoded", JarGet(jar, site, "cookie_name"),
-	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), reply, err))
+	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), String(), reply, err))
 		return CommandFailed(err);
 	Trace(opts, "POST", url, String(), reply);
 	PrintReply(opts, reply.body);
@@ -505,7 +542,7 @@ static int WhoamiCommand(const SiteCliOptions& opts, const Vector<String>& words
 	String err;
 	String url = SiteUrl(opts, site) + "/session/whoami";
 	if(!Send("GET", url, String(), String(), JarGet(jar, site, "cookie_name"),
-	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), reply, err))
+	         JarGet(jar, site, "cookie_value"), JarGet(jar, site, "csrf"), BearerFor(opts, jar, site), reply, err))
 		return CommandFailed(err);
 	Trace(opts, "GET", url, String(), reply);
 	PrintReply(opts, reply.body);
@@ -580,7 +617,7 @@ static int RunManifestCommand(const SiteCliOptions& opts, const Vector<String>& 
 	String url = SiteUrl(opts, words[0]) + "/" + req.url_path;
 	SiteCliReply reply;
 	if(!Send(req.method, url, req.body, req.content_type, JarGet(jar, words[0], "cookie_name"),
-	         JarGet(jar, words[0], "cookie_value"), JarGet(jar, words[0], "csrf"), reply, err))
+	         JarGet(jar, words[0], "cookie_value"), JarGet(jar, words[0], "csrf"), BearerFor(opts, jar, words[0]), reply, err))
 		return CommandFailed(err);
 	Trace(opts, req.method, url, req.body, reply);
 	// Browser-style routes answer a successful write with a redirect; report its target.
@@ -594,7 +631,10 @@ static int RunManifestCommand(const SiteCliOptions& opts, const Vector<String>& 
 		return 0;
 	}
 	PrintReply(opts, reply.body);
-	return reply.status >= 200 && reply.status < 300 ? 0 : 1;
+	// Some host routes answer 200 with {"status": "error"}; that is a refusal too.
+	Value v = ParseJSON(reply.body);
+	bool refused = v.Is<ValueMap>() && (String)ValueMap(v)["status"] == "error";
+	return reply.status >= 200 && reply.status < 300 && !refused ? 0 : 1;
 }
 
 static int Dispatch(const SiteCliOptions& opts, const Vector<String>& words)
@@ -687,6 +727,10 @@ CONSOLE_APP_MAIN
 			opts.session_file = args[++i];
 		else if(a == "--password-env" && has_value)
 			opts.password_env = args[++i];
+		else if(a == "--bearer" && has_value)
+			opts.bearer_file = args[++i];
+		else if(a == "--bearer-login")
+			opts.bearer_login = true;
 		else if(a == "--toon")
 			opts.toon = true;
 		else if(a == "--json")

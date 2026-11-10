@@ -17,6 +17,8 @@ struct SiteCliOptions {
 	String                    password_env;  // login password from this variable instead of a prompt
 	bool                      toon = false;  // print the reply as TOON (for AI agents)
 	bool                      trace = false; // print the last request and reply on stderr
+	String                    bearer_file;   // token file sent as Authorization: Bearer
+	bool                      bearer_login = false; // login uses api/auth/login and keeps the token in the jar
 };
 
 // One HTTP request, built from a manifest descriptor and the typed words.

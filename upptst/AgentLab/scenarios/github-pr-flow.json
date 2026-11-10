@@ -1,5 +1,4 @@
 {
-  "blocked": "The stock app has no session-login descriptor: its sign-in is the host form (login/submit) or a bearer token (api/auth/login), and SiteCli can only keep a composed session cookie. Needs a SiteCli bearer or a stock session-login route before this runs.",
   "id": "github-pr-flow",
   "title": "Signed-in user opens and merges a pull request on the emulated GitHub; anonymous and merged-PR writes are refused",
   "sites": [
@@ -9,12 +8,14 @@
     "contrib": {
       "user": "contrib",
       "role": "host session",
-      "instructions": "You are contrib, a signed-in host account. Open a pull request from feature/scenario into master on SeppoPakonen/demo-repo, then merge it. Say each milestone on AgentIPC with @scenario-oversight."
+      "instructions": "You are contrib, a signed-in host account. Open a pull request from feature/scenario into master on SeppoPakonen/demo-repo, then merge it. Say each milestone on AgentIPC with @scenario-oversight.",
+      "announcer": "a5"
     },
     "anon": {
       "user": null,
       "role": "anonymous",
-      "instructions": "You are not signed in. Try to merge pull request 1 and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+      "instructions": "You are not signed in. Try to merge pull request 1 and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight.",
+      "announcer": "a4"
     }
   },
   "provision": {
@@ -28,7 +29,8 @@
     {
       "id": "contrib-login",
       "as": "contrib",
-      "login": "github"
+      "login": "github",
+      "bearer": true
     },
     {
       "id": "anon-merge-refused",
@@ -45,6 +47,23 @@
         "rc": 1
       },
       "announce": "@scenario-oversight anonymous merge refused"
+    },
+    {
+      "id": "no-token-read-refused",
+      "as": "anon",
+      "describe": "a read of an auth-required host route without a token is refused",
+      "run": [
+        "github",
+        "pulls-list",
+        "SeppoPakonen",
+        "demo-repo"
+      ],
+      "expect": {
+        "rc": 1,
+        "contains": [
+          "authentication_required"
+        ]
+      }
     },
     {
       "id": "pulls-list",
@@ -101,6 +120,24 @@
         "rc": 0
       },
       "announce": "@scenario-oversight pull request merged"
+    },
+    {
+      "id": "pr-merged-state",
+      "as": "contrib",
+      "describe": "the merged pull request is reported as merged, not open",
+      "run": [
+        "github",
+        "pull-detail",
+        "SeppoPakonen",
+        "demo-repo",
+        "number={pr}"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "MERGED"
+        ]
+      }
     },
     {
       "id": "merged-again-refused",

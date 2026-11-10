@@ -31,17 +31,20 @@
     "tfdev": {
       "user": "tfdev",
       "role": "session account",
-      "instructions": "You are tfdev, a TaskFoundry account. Request a grant, wait for the operator to approve it, make a candidate from paper 2612.00002, propose, attach Science and PrivateHub evidence, validate, and submit. Say each milestone on AgentIPC with @scenario-oversight."
+      "instructions": "You are tfdev, a TaskFoundry account. Request a grant, wait for the operator to approve it, make a candidate from paper 2612.00002, propose, attach Science and PrivateHub evidence, validate, and submit. Say each milestone on AgentIPC with @scenario-oversight.",
+      "announcer": "a5"
     },
     "anon": {
       "user": null,
       "role": "anonymous",
-      "instructions": "You are not signed in. Try to submit a proposal and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+      "instructions": "You are not signed in. Try to submit a proposal and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight.",
+      "announcer": "a4"
     },
     "author": {
       "user": "author",
       "role": "science-author",
-      "instructions": "You are author, a Science author. Write the article tree of paper 2612.00002 so TaskFoundry can cite it. Say the write on AgentIPC with @scenario-oversight."
+      "instructions": "You are author, a Science author. Write the article tree of paper 2612.00002 so TaskFoundry can cite it. Say the write on AgentIPC with @scenario-oversight.",
+      "announcer": "a3"
     }
   },
   "provision": {

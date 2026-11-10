@@ -17,12 +17,16 @@ import glob
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+AGENTIPC = [os.path.expanduser("~/.venvs/agentipc/bin/python"), "/home/sblo/bin/agentipc"]
+AGENTIPC_HOME = os.path.expanduser("~/.agentipc-skylark")
+PW_ENV = "AGENTLAB_ANN_PW"
 SITE_ORDER = ["privatehub", "science", "taskfoundry"]
 STOCK_SECTIONS = ["github"]  # served by the main port, no composed port of their own
 
@@ -52,6 +56,48 @@ def wait_up(site_cli, server, sites, timeout=20.0):
             return True
         time.sleep(0.25)
     return False
+
+
+def ipc(args, env=None):
+    """One agentipc call; returns (rc, combined output)."""
+    p = subprocess.run(AGENTIPC + args, capture_output=True, text=True, timeout=60,
+                       env=env or dict(os.environ))
+    return p.returncode, p.stdout + p.stderr
+
+
+def setup_announcers(ids):
+    """Creates one AgentIPC account per announcer id on the skylark home. Refuses ids that already
+    exist (their passwords are unknown here). Returns {id: password}."""
+    rc, out = ipc(["--home", AGENTIPC_HOME, "account", "list"])
+    if rc != 0:
+        raise RuntimeError("account list failed: " + out)
+    existing = set(out.split())
+    passwords = {}
+    for aid in ids:
+        if aid in existing:
+            raise RuntimeError("announcer account %s already exists; remove it first" % aid)
+        pw = secrets.token_hex(16)
+        env = dict(os.environ, **{PW_ENV: pw})
+        rc, out = ipc(["--home", AGENTIPC_HOME, "account", "add", aid, "--password-env", PW_ENV], env)
+        if rc != 0:
+            raise RuntimeError("account add %s failed: %s" % (aid, out))
+        passwords[aid] = pw
+    return passwords
+
+
+def remove_announcers(ids):
+    for aid in ids:
+        ipc(["--home", AGENTIPC_HOME, "account", "remove", aid])
+
+
+def announce(aid, pw, channel, body):
+    """Posts one milestone as the announcer's own AgentIPC identity. Returns True on success."""
+    env = dict(os.environ, **{PW_ENV: pw})
+    rc, out = ipc(["vs", "--direct", "127.0.0.1:7440", "--server", "skylark", "--user", aid,
+                   "--password-env", PW_ENV, "say", channel, body], env)
+    if rc != 0:
+        print("FAIL announce %s: %s" % (aid, out.strip()))
+    return rc == 0
 
 
 def seed(scenario, tmp):
@@ -127,7 +173,7 @@ def check(results, label, ok, detail=""):
     print(line)
 
 
-def run_scenario(path, binary, site_cli, port_base, announce):
+def run_scenario(path, binary, site_cli, port_base, channel, expected):
     with open(path, encoding="utf-8") as f:
         scenario = json.load(f)
     sites_used = scenario["sites"]
@@ -141,6 +187,14 @@ def run_scenario(path, binary, site_cli, port_base, announce):
         if name in STOCK_SECTIONS:
             sites[name] = main_url
     results = []
+    # Each agent with an announcer id posts its milestones as that AgentIPC identity.
+    announcers = {a: spec["announcer"] for a, spec in scenario["agents"].items() if spec.get("announcer")}
+    ann_ids = sorted(set(announcers.values()))
+    # The oversight client needs the full expected list before the first post, so it comes from the
+    # scenario definition, not from what happened to pass.
+    for step in scenario["steps"]:
+        if "announce" in step and announcers.get(step.get("as")):
+            expected.append({"sender": announcers[step["as"]], "body": step["announce"]})
 
     with tempfile.TemporaryDirectory(prefix="agentlab-") as tmp:
         site_dir = os.path.join(tmp, "site")
@@ -148,6 +202,7 @@ def run_scenario(path, binary, site_cli, port_base, announce):
         jars = {a: os.path.join(tmp, "jar-%s.txt" % a) for a in scenario["agents"]}
         workspace, corpus = seed(scenario, tmp)
         provision(binary, site_dir, workspace, scenario)
+        passwords = setup_announcers(ann_ids)
 
         server = subprocess.Popen(server_args(binary, site_dir, ports, workspace, corpus, company_root),
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -162,8 +217,9 @@ def run_scenario(path, binary, site_cli, port_base, announce):
                 if "login" in step:
                     user = scenario["agents"][agent]["user"]
                     os.environ["AGENTLAB_PW"] = password_for(user)
+                    flags = ["--bearer-login"] if step.get("bearer") else []
                     rc, out = run_cli(site_cli, main_url, sites, jars[agent],
-                                      ["--password-env", "AGENTLAB_PW", "login", step["login"], user])
+                                      flags + ["--password-env", "AGENTLAB_PW", "login", step["login"], user])
                     check(results, "%s: %s signs in" % (sid, agent), rc == 0, out)
                     continue
                 if "approve_grant" in step:
@@ -191,14 +247,17 @@ def run_scenario(path, binary, site_cli, port_base, announce):
                 check(results, "%s: %s" % (sid, step.get("describe", "")), ok,
                       "rc %d, output: %s" % (rc, out))
                 if ok and "announce" in step:
-                    line = "ANNOUNCE %s: %s" % (agent, step["announce"])
-                    print(line)
-                    if announce:
-                        with open(announce, "a", encoding="utf-8") as f:
-                            f.write(line + "\n")
+                    body = step["announce"]
+                    aid = announcers.get(agent)
+                    if aid:
+                        posted = announce(aid, passwords[aid], channel, body)
+                        check(results, "%s: %s posts the milestone" % (sid, aid), posted)
+                    else:
+                        print("ANNOUNCE %s: %s" % (agent, body))
         finally:
             server.terminate()
             server.wait(timeout=10)
+            remove_announcers(ann_ids)
 
     passed = sum(1 for _, ok in results if ok)
     print("scenario %s: %s (%d/%d)" % (scenario["id"], "PASS" if passed == len(results) else "FAIL",
@@ -212,7 +271,8 @@ def main():
     ap.add_argument("--site-cli", required=True, help="SiteCli binary (skylarkctl)")
     ap.add_argument("--scenario", action="append", help="scenario JSON; repeatable; default all")
     ap.add_argument("--port-base", type=int, default=18240)
-    ap.add_argument("--announce", help="append ANNOUNCE lines to this file for the oversight client")
+    ap.add_argument("--channel", default="AGENTLAB", help="AgentIPC channel the announcers post to")
+    ap.add_argument("--expected-out", help="write the expected {sender, body} list for oversight.py")
     args = ap.parse_args()
 
     scenarios = args.scenario or sorted(glob.glob(os.path.join(HERE, "scenarios", "*.json")))
@@ -221,10 +281,14 @@ def main():
         return 2
     rc = 0
     base = args.port_base
+    expected = []
     for path in scenarios:
         # Each scenario gets its own block of ports, so one run cannot hold another's ports.
-        rc |= run_scenario(path, args.binary, args.site_cli, base, args.announce)
+        rc |= run_scenario(path, args.binary, args.site_cli, base, args.channel, expected)
         base += 10
+    if args.expected_out:
+        with open(args.expected_out, "w", encoding="utf-8") as f:
+            json.dump(expected, f, indent=2)
     return rc
 
 

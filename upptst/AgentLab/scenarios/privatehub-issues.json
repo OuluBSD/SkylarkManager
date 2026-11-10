@@ -8,12 +8,14 @@
     "dev": {
       "user": "dev",
       "role": "member",
-      "instructions": "You are dev, a PrivateHub member. Sign in to privatehub, open one issue on acme/widget, then comment on it. Say each milestone on AgentIPC with @scenario-oversight."
+      "instructions": "You are dev, a PrivateHub member. Sign in to privatehub, open one issue on acme/widget, then comment on it. Say each milestone on AgentIPC with @scenario-oversight.",
+      "announcer": "a1"
     },
     "viewer": {
       "user": "viewer",
       "role": "viewer",
-      "instructions": "You are viewer, a PrivateHub account without the member role. Try to create a wiki page on acme/widget and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+      "instructions": "You are viewer, a PrivateHub account without the member role. Try to create a wiki page on acme/widget and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight.",
+      "announcer": "a2"
     }
   },
   "provision": {

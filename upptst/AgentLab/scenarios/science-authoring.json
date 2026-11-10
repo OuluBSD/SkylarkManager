@@ -29,12 +29,14 @@
     "author": {
       "user": "author",
       "role": "science-author",
-      "instructions": "You are author, a Science author. Sign in to science, write the article tree of paper 2612.00002 at revision 1, and read it back. Say each milestone on AgentIPC with @scenario-oversight."
+      "instructions": "You are author, a Science author. Sign in to science, write the article tree of paper 2612.00002 at revision 1, and read it back. Say each milestone on AgentIPC with @scenario-oversight.",
+      "announcer": "a3"
     },
     "anon": {
       "user": null,
       "role": "anonymous",
-      "instructions": "You are not signed in. Try to write the article and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight."
+      "instructions": "You are not signed in. Try to write the article and expect a refusal. Say the refusal on AgentIPC with @scenario-oversight.",
+      "announcer": "a4"
     }
   },
   "provision": {
