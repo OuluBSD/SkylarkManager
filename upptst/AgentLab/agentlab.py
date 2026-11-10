@@ -173,7 +173,15 @@ def check(results, label, ok, detail=""):
     print(line)
 
 
-def run_scenario(path, binary, site_cli, port_base, channel, expected):
+def expected_for(scenario):
+    """The {sender, body} milestones the oversight client must see, from the scenario definition
+    (not from what happened to pass), so the client can start before the first post."""
+    announcers = {a: spec["announcer"] for a, spec in scenario["agents"].items() if spec.get("announcer")}
+    return [{"sender": announcers[step["as"]], "body": step["announce"]}
+            for step in scenario["steps"] if "announce" in step and announcers.get(step.get("as"))]
+
+
+def run_scenario(path, binary, site_cli, port_base, channel):
     with open(path, encoding="utf-8") as f:
         scenario = json.load(f)
     sites_used = scenario["sites"]
@@ -190,11 +198,6 @@ def run_scenario(path, binary, site_cli, port_base, channel, expected):
     # Each agent with an announcer id posts its milestones as that AgentIPC identity.
     announcers = {a: spec["announcer"] for a, spec in scenario["agents"].items() if spec.get("announcer")}
     ann_ids = sorted(set(announcers.values()))
-    # The oversight client needs the full expected list before the first post, so it comes from the
-    # scenario definition, not from what happened to pass.
-    for step in scenario["steps"]:
-        if "announce" in step and announcers.get(step.get("as")):
-            expected.append({"sender": announcers[step["as"]], "body": step["announce"]})
 
     with tempfile.TemporaryDirectory(prefix="agentlab-") as tmp:
         site_dir = os.path.join(tmp, "site")
@@ -283,12 +286,15 @@ def main():
     base = args.port_base
     expected = []
     for path in scenarios:
-        # Each scenario gets its own block of ports, so one run cannot hold another's ports.
-        rc |= run_scenario(path, args.binary, args.site_cli, base, args.channel, expected)
-        base += 10
+        with open(path, encoding="utf-8") as f:
+            expected += expected_for(json.load(f))
     if args.expected_out:
         with open(args.expected_out, "w", encoding="utf-8") as f:
             json.dump(expected, f, indent=2)
+    for path in scenarios:
+        # Each scenario gets its own block of ports, so one run cannot hold another's ports.
+        rc |= run_scenario(path, args.binary, args.site_cli, base, args.channel)
+        base += 10
     return rc
 
 
