@@ -45,6 +45,50 @@
 | `GET /api/releases` | JSON list of v2 releases |
 | `POST /api/sweagent/run` | Execute SweAgent task and return trajectory |
 
+## Composed engine sites
+
+The real server (not `--test` or `--demo-site`) composes two engine sites
+behind `WebEngineHost`, each on its own listener port:
+
+| Site | Default port | Data root | Flag |
+|---|---|---|---|
+| `privatehub` | 18211 | `<site-dir>/engine/privatehub` | `--privatehub-port`, `--privatehub-workspace` (default `~/Dev`) |
+| `science` | 18212 | `<site-dir>/engine/science`, corpus `~/Dev/AnthologyPrivate/site/data` | `--science-port`, `--science-corpus` |
+
+Accounts are per site. Provision them with
+`MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`
+(or a hidden prompt); the command exits after writing the account. Engine
+listeners serve only their own site: a stock route claiming a path is answered
+404, except the home route (see `uppsrc/WebEngine/AGENTS.md`).
+
+| Route | Site | Description |
+|---|---|---|
+| `GET /` | privatehub | Workspace overview (login required) |
+| `GET /session/login` | privatehub, science | Sign-in form |
+| `POST /session/login` | privatehub, science | Sign in (JSON for API callers, redirect for forms) |
+| `POST /session/logout` | privatehub, science | Sign out |
+| `GET /privatehub/{org}/{repo}` | privatehub | Project overview |
+| `GET /privatehub/{org}/{repo}/issues` | privatehub | Issue list and create form |
+| `POST /privatehub/{org}/{repo}/issues/create` | privatehub | Create issue (CSRF required) |
+| `GET /privatehub/{org}/{repo}/issues/{id}` | privatehub | Issue detail and comments |
+| `POST /privatehub/{org}/{repo}/issues/{id}/comment` | privatehub | Add comment (CSRF required) |
+| `GET /privatehub/{org}/{repo}/wiki[/{slug}]` | privatehub | Wiki list and page |
+| `GET /privatehub/{org}/{repo}/discussions[/{slug}]` | privatehub | Discussion topics and posts |
+| `POST /privatehub/{org}/{repo}/discussions/{slug}/post` | privatehub | Post to a topic (CSRF required) |
+| `GET /privatehub/{org}/{repo}/files[/{name}]` | privatehub | Release files; the source URL is shown as text, never linked |
+| `GET /` | science | Science home |
+| `GET /papers`, `GET /papers/{id}` | science | Paper list and detail |
+| `GET /papers/{id}/author` | science | Authoring form (science-author role or caller-bound grant) |
+| `GET /api/papers`, `GET /api/papers/{id}` | science | Paper JSON |
+| `GET /api/papers/{id}/article` | science | Structured article JSON |
+| `POST /api/papers/{id}/article` | science | Save article; `expected_paper_revision` gives 409 on drift; sidecar write is atomic |
+
+Authoring is caller-bound: a `x-science-grant` id authorizes a write only from
+the authenticated session of the grant's subject. The same id from another
+session, or with no session, gets 403.
+
+The stock routes are unchanged on the main port, and still require login.
+
 ## GitHub views and witz templates
 
 The GitHub repo views render from witz templates in `templates/` (T02 brief 09
