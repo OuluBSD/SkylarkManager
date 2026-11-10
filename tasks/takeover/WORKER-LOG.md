@@ -1143,3 +1143,22 @@ files); claims PASSED. Every gate run used GH_BASELINE=tmp/gh/baseline_wf.
 
 **Status:** Brief 13 complete pending acceptance. BACKLOG.md marks all five items done.
 Waiting for planner.
+
+## Planner entry — 2026-11-10 (takeover agent)
+
+**CODE PLAN COMPLETE.** Brief 13 (backlog sweep) accepted. Planner
+re-verified: BazaarCore 4d8d833 adds Http::GetRequestURI (Http.h:126) and
+the gateway consumes it (WebEngine.cpp:119 — stock routes no longer
+shadow); all five item commits as reported; fence 179/179, Manager PASSED
+(CLANG+GCC), composed smoke 61/61 rc 0, Company ALL PASSED + GCC rc 0; tree
+clean at edf135f.
+
+Residual decisions: (1) grant consent stays operator-CLI interim
+(approve-taskfoundry-grant); user-facing consent requires composing
+MetaAccount into the host — recorded in BACKLOG.md. (2) Windows LockFileEx
+runtime validation: recorded — compile-only coverage until a Windows runner
+can execute; POSIX is the supported path. (3) The missing logged-in-without-
+member-role denial test folds into Brief 14 step 0. Stale WebAuth/sidebar
+plan file correctly ignored.
+Next: WORKER-BRIEF-14.md — T07 UppSkillz (final plan item) + the step-0
+micro-fixes.
