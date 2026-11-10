@@ -307,6 +307,19 @@ void InstallScienceSite(EngineSite& site, ScienceCorpus& corpus, WebGrants *gran
 	rt.Add("api/papers/*/article", ScienceApiArticle);
 	rt.Add("api/papers/*/article:POST", ScienceApiArticleWrite);
 	rt.Add("papers/*/author", SciencePaperAuthorPage);
+
+	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("papers-list", "GET", "api/papers", "public",
+	                                        "json", "List papers in the corpus", {}));
+	cm.Add(site.id, site.title, HttpCommand("paper-get", "GET", "api/papers/*", "public",
+	                                        "json", "Read one paper's metadata", {"id:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("article-get", "GET", "api/papers/*/article", "public",
+	                                        "json", "Read one paper's article tree", {"id:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("article-write", "POST", "api/papers/*/article",
+	                                        "science-author role or science.author grant", "json",
+	                                        "Replace the article tree when the expected revision matches",
+	                                        {"id:string:required", "expected_paper_revision:string:required",
+	                                         "article:text:required"}));
 }
 
 END_UPP_NAMESPACE

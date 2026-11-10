@@ -608,6 +608,36 @@ void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend
 	rt.Add("privatehub/*/*/files", FileList);
 	rt.Add("privatehub/*/*/files/register:POST", FileRegister);
 	rt.Add("privatehub/*/*/files/*", FileDetail);
+
+	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("issue-create", "POST", "privatehub/*/*/issues/create",
+	                                        "signed-in user", "html", "Open an issue",
+	                                        {"owner:string:required", "repo:string:required", "title:string:required",
+	                                         "body:text"}));
+	cm.Add(site.id, site.title, HttpCommand("issue-comment", "POST", "privatehub/*/*/issues/*/comment",
+	                                        "signed-in user", "html", "Comment on an issue",
+	                                        {"owner:string:required", "repo:string:required", "number:string:required",
+	                                         "body:text:required"}));
+	cm.Add(site.id, site.title, HttpCommand("wiki-create", "POST", "privatehub/*/*/wiki/create",
+	                                        "member role", "html", "Create a wiki page",
+	                                        {"owner:string:required", "repo:string:required", "slug:string:required",
+	                                         "title:string", "body:text"}));
+	cm.Add(site.id, site.title, HttpCommand("wiki-save", "POST", "privatehub/*/*/wiki/*/save",
+	                                        "member role", "html", "Save a wiki page when the revision matches",
+	                                        {"owner:string:required", "repo:string:required", "slug:string:required",
+	                                         "expected_revision:string:required", "title:string", "body:text"}));
+	cm.Add(site.id, site.title, HttpCommand("topic-create", "POST", "privatehub/*/*/discussions/create",
+	                                        "member role", "html", "Start a discussion topic",
+	                                        {"owner:string:required", "repo:string:required", "slug:string:required",
+	                                         "title:string:required", "forum:string"}));
+	cm.Add(site.id, site.title, HttpCommand("topic-post", "POST", "privatehub/*/*/discussions/*/post",
+	                                        "signed-in user", "html", "Post in a discussion topic",
+	                                        {"owner:string:required", "repo:string:required", "topic:string:required",
+	                                         "body:text:required"}));
+	cm.Add(site.id, site.title, HttpCommand("file-register", "POST", "privatehub/*/*/files/register",
+	                                        "member role", "html", "Register a release file",
+	                                        {"owner:string:required", "repo:string:required", "name:string:required",
+	                                         "release:string", "url:string", "size_bytes:int"}));
 }
 
 END_UPP_NAMESPACE

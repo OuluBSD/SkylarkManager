@@ -416,6 +416,26 @@ void InstallTaskFoundrySite(EngineSite& site, TaskFoundryService& service, WebGr
 	rt.Add("proposals/*/validate:POST", ProposalValidate);
 	rt.Add("proposals/*/submit:POST", ProposalSubmit);
 	rt.Add("submissions/*", SubmissionStatus);
+
+	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("grant-request", "POST", "grants/request", "session account",
+	                                        "html", "Ask for a grant to use TaskFoundry", {}));
+	cm.Add(site.id, site.title, HttpCommand("candidate-create", "POST", "candidates/create", "session account",
+	                                        "html", "Create a candidate from a title, summary and paper",
+	                                        {"title:string:required", "summary:text", "paper_id:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("candidate-propose", "POST", "candidates/*/propose", "session account",
+	                                        "html", "Turn a candidate into a proposal", {"id:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("proposal-edit", "POST", "proposals/*/edit", "session account",
+	                                        "html", "Edit a proposal's title, body, repository and hours",
+	                                        {"id:string:required", "title:string", "body:text",
+	                                         "repository:string", "estimated_hours:number"}));
+	cm.Add(site.id, site.title, HttpCommand("proposal-evidence", "POST", "proposals/*/evidence", "session account",
+	                                        "html", "Attach evidence to a proposal",
+	                                        {"id:string:required", "kind:string", "ref:string", "node_id:string"}));
+	cm.Add(site.id, site.title, HttpCommand("proposal-validate", "POST", "proposals/*/validate", "session account",
+	                                        "html", "Validate a proposal before submission", {"id:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("proposal-submit", "POST", "proposals/*/submit", "session account",
+	                                        "html", "Submit a validated proposal", {"id:string:required"}));
 }
 
 END_UPP_NAMESPACE
