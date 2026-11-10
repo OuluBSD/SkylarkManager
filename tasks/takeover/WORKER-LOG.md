@@ -1050,3 +1050,54 @@ DECISIONS on the worker's questions:
    accordingly (checkout CompanySkylark + -a flags).
 Next: WORKER-BRIEF-12.md (T05 Company security gaps + T06 CI updates).
 Remaining plan after 12: T07 UppSkillz + backlog sweep (Brief 13).
+
+### Brief 12 — T05 Company gaps + T06 CI, backlog record
+
+Commits: `c05f546` (SkylarkManager CI), `c2be122` (CompanySkylark CI), `ca69fa6`
+(CompanySkylark T05 fixes), `3d7a277` (SkylarkManager backlog record).
+
+**Step 1 — CI (`c05f546`, `c2be122`).**
+- ManagerSkylark POSIX and MSVC jobs check out CompanySkylark and build with
+  `-a ../CompanySkylark/uppsrc` (MSVC: `"%GITHUB_WORKSPACE%\CompanySkylark\uppsrc"`).
+  The WebEngineTests and example targets do not reference the Company packages
+  (grep), so their steps are unchanged.
+- CompanySkylark already had POSIX build+test (ubuntu clang, ubuntu gcc, macOS)
+  and an MSVC build. Its Windows job also ran `--test`; the brief says tests run
+  on POSIX, so that step is now compile-only.
+- Both workflow files parse as YAML. Not run in GitHub Actions here.
+- Gate: fence 179/179; ManagerSkylark PASSED; composed 0 failed; CompanySkylark
+  ALL PASSED (CLANG); GCC rc 0 for all three targets; GitHub captures identical
+  (76 files) against `tmp/gh/baseline_wf`.
+- Gate note: the first run compared against the default baseline (`tmp/gh/baseline`,
+  66 files) because `GH_BASELINE` was not set, and reported 2 files different. The
+  same capture is identical to `baseline_wf`. Later gates set `GH_BASELINE`.
+
+**Step 2 — T05 Company gaps (`ca69fa6`).**
+- `platform_version`: `JsonStore` validates it on load, update, and append. Platform
+  v2 collections (`platform_commands`, `review_dispatches`, `review_attempts`,
+  `review_evidence`, `platform_trials`, `trial_results`, `platform_artifacts`) must
+  carry it, no newer than `PLATFORM_SCHEMA_VERSION`. A document missing it is
+  quarantined; there is no migration. Writes stamp it on platform collections.
+- Record temp files are created 0600 (`WriteAtomic`), so records are not group or
+  world readable regardless of umask. Windows relies on directory ACLs.
+- `secret.key`: new `JsonStore::EnsureFile` creates it under the in-process mutex
+  and the file lock, writes a temp file, fsyncs, and renames. Eight concurrent first
+  starts create one secret (`make` runs once), and all read it. An existing
+  `secret.key` is tightened to 0600.
+- ID generator: the code emits `<prefix>_<32 lowercase hex>` (16 random bytes). The
+  header said 16 hex characters, so the doc was corrected. No code change.
+- `--test`: 17 new checks in `RunStoreTests` cover each fix (220 checks total, all
+  pass on CLANG).
+- Known limits: existing record files keep their old mode until rewritten. Windows
+  has no equivalent of 0600 here.
+- Gate: fence 179/179; ManagerSkylark PASSED; composed 0 failed; CompanySkylark ALL
+  PASSED (CLANG); GCC rc 0 x3; GitHub captures identical (76 files); claims PASSED.
+
+**Step 3 — backlog record (`3d7a277`).** `tasks/takeover/BACKLOG.md` records five
+items with sources, no work scheduled: caller-bound grants replacing TaskFoundry's
+blanket scopes; raw-URI accessor on `Http` (BazaarCore additive patch); git-subcommand
+allowlist tightening; idempotency-store expiry and multi-process mutex (ManagerSkylark
+store; the Company store already takes the file lock); PrivateHub wiki/topic/release
+authoring UI.
+
+**Status:** T05 and T06 complete pending acceptance. Waiting for planner.
