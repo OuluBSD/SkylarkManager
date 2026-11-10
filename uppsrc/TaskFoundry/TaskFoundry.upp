@@ -4,6 +4,7 @@ uses
 	Core,
 	WebBroker,
 	WebStorage,
+	WebAccounts,
 	WebEngine;
 
 file

@@ -96,7 +96,7 @@ String TaskFoundryContentHash(const ValueMap& proposal)
 	return SHA256String(canonical);
 }
 
-Vector<String> TaskFoundryMemberScopes()
+Vector<String> TaskFoundryGrantableScopes()
 {
 	Vector<String> s;
 	s.Add(TF_SCOPE_WRITE);
@@ -104,6 +104,16 @@ Vector<String> TaskFoundryMemberScopes()
 	s.Add(TF_SCOPE_PRIVATEHUB_READ);
 	s.Add(TF_SCOPE_COMPANY_WRITE);
 	s.Add(TF_SCOPE_COMPANY_READ);
+	return s;
+}
+
+Vector<String> TaskFoundryScopesOf(const Vector<String>& granted)
+{
+	Vector<String> allowed = TaskFoundryGrantableScopes();
+	Vector<String> s;
+	for(const String& g : granted)
+		if(FindIndex(allowed, g) >= 0 && FindIndex(s, g) < 0)
+			s.Add(g);
 	return s;
 }
 

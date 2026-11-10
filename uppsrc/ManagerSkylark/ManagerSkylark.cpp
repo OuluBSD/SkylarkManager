@@ -84,6 +84,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("taskfoundry-port", 0, "TaskFoundry engine site port (default 18213)", true, "port");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
+	cla.AddArg("approve-taskfoundry-grant", 0, "Approve a requested TaskFoundry grant by id (wag_...) and exit", true, "grant-id");
+	cla.AddArg("revoke-taskfoundry-grant", 0, "Revoke an active TaskFoundry grant by id and exit", true, "grant-id");
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("set-science-user", 0, "Create/update a Science author account with hidden prompt (or MANAGERSKYLARK_SCIENCE_PASSWORD)", true, "username");
@@ -150,6 +152,31 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 		custom_port = ScanInt(p_str);
 		if(custom_port > 0 && custom_port < 65536)
 			port = custom_port;
+	}
+
+	// Grant decisions read and write the grant store directly, so they run while
+	// the server is up. Composition would bind the engine ports, so it is skipped.
+	String grant_approve = cla.GetArg("approve-taskfoundry-grant");
+	String grant_revoke = cla.GetArg("revoke-taskfoundry-grant");
+	if(!grant_approve.IsEmpty() || !grant_revoke.IsEmpty()) {
+		bool approve = !grant_approve.IsEmpty();
+		String gid = approve ? grant_approve : grant_revoke;
+		String grants_root = AppendFileName(AppendFileName(site_dir, "engine"), "grants");
+		RealizeDirectory(grants_root);
+		WebGrants grants("meta", grants_root);
+		WebAccountGrant g;
+		if(!grants.GetGrant(gid, g) || g.client_site != TASKFOUNDRY_SITE_ID) {
+			Cerr() << "No TaskFoundry grant " << gid << " in " << grants_root << "\n";
+			return false;
+		}
+		StoreResult st = approve ? grants.Decide(gid, true) : grants.Revoke(gid);
+		if(!st) {
+			Cerr() << "Grant " << gid << " not changed: " << st.error << "\n";
+			return false;
+		}
+		Cout() << (approve ? "Approved" : "Revoked") << " TaskFoundry grant " << gid << "\n";
+		fflush(stdout);
+		_exit(0);
 	}
 
 	if(!test_mode && !demo_site) {

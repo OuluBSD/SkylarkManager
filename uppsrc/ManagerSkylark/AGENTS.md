@@ -106,6 +106,13 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET /proposals/{id}` | taskfoundry | Proposal editor: fields, evidence, validation, submit |
 | `POST /proposals/{id}/edit`, `/evidence`, `/validate`, `/submit` | taskfoundry | Mutations (CSRF required); submit returns the same submission on repeat |
 | `GET /submissions/{id}` | taskfoundry | Submission snapshot and Company status |
+| `GET /grants`, `POST /grants/request` | taskfoundry | Caller's TaskFoundry grants; request one (session only) |
+
+TaskFoundry access needs an approved grant bound to the signed-in user. The
+operator approves or revokes a grant by id with
+`ManagerSkylark --site-dir DIR --approve-taskfoundry-grant wag_ID` or
+`--revoke-taskfoundry-grant wag_ID`. Both run without composing the engine, so
+they work while the server runs.
 
 Authoring is caller-bound: a `x-science-grant` id authorizes a write only from
 the authenticated session of the grant's subject. The same id from another

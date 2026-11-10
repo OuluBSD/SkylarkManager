@@ -82,8 +82,13 @@ private:
 // Canonical content hash of a proposal's submittable fields and evidence.
 String TaskFoundryContentHash(const ValueMap& proposal);
 
-// Scopes a signed-in member holds. Interim policy: grants replace this later.
-Vector<String> TaskFoundryMemberScopes();
+// Scopes a TaskFoundry grant may carry. A signed-in user holds only the scopes
+// of an approved grant bound to their session (the site applies it). science.author
+// is never grantable: TaskFoundry reads Science and never writes it.
+Vector<String> TaskFoundryGrantableScopes();
+
+// The part of `granted` that TaskFoundry accepts: at most the grantable set.
+Vector<String> TaskFoundryScopesOf(const Vector<String>& granted);
 
 // Synthetic checks for the service, run from the --test suite. scratch_dir is a
 // temp directory the checks may create and delete.

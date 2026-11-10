@@ -140,13 +140,31 @@ curl -s -c "$T/tf.jar" -o "$T/tf_login" -H "Origin: $TF_URL" -H "Accept: applica
 tf_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/tf_login")
 if [ -n "$tf_csrf" ]; then pass "taskfoundry login returns a csrf token"; else fail "taskfoundry login returns a csrf token"; fi
 check "taskfoundry board anonymous redirects" 302 "$TF_URL/"
-check "taskfoundry board after login" 200 "$TF_URL/" -b "$T/tf.jar"
-
 # post_form <path> <form data>: prints "<status> <redirect url>".
 post_form() {
 	curl -s -o "$T/tf_body" -w '%{http_code} %{redirect_url}' -b "$T/tf.jar" \
 		-H "Origin: $TF_URL" -H "x-wf-csrf: $tf_csrf" --data "$2" "$TF_URL/$1"
 }
+
+# Access needs an approved grant bound to this session. Without one, pages go to
+# the grants page and writes are refused with 403.
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$T/tf.jar" "$TF_URL/")
+case "$loc" in
+*/grants) pass "taskfoundry board without a grant redirects to the grants page" ;;
+*) fail "taskfoundry board without a grant redirects to the grants page (got '$loc')" ;;
+esac
+r=$(post_form "candidates/create" "title=Early&summary=x&paper_id=2612.00002")
+if [ "${r%% *}" = "403" ]; then pass "taskfoundry write without a grant is refused (403)"; else fail "taskfoundry write without a grant is refused (got $r)"; fi
+
+# Request a grant from the session, have the operator approve it, then use the site.
+r=$(post_form "grants/request" "")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry grant requested from the session"; else fail "taskfoundry grant requested from the session ($r)"; fi
+curl -s -o "$T/tf_grants" -b "$T/tf.jar" "$TF_URL/grants"
+gid=$(grep -o 'wag_[A-Za-z0-9_-]*' "$T/tf_grants" | head -1)
+if [ -n "$gid" ] && grep -q "requested" "$T/tf_grants"; then pass "requested grant is listed on the grants page"; else fail "requested grant is listed on the grants page"; fi
+"$BIN" --site-dir "$T" --approve-taskfoundry-grant "$gid" >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "operator approves the grant with the CLI"; else fail "operator approves the grant with the CLI"; fi
+check "taskfoundry board with an approved grant" 200 "$TF_URL/" -b "$T/tf.jar"
 
 r=$(post_form "candidates/create" "title=Round+trip&summary=Smoke&paper_id=2612.00002")
 code=${r%% *}; loc=${r#* }; cand=${loc##*/}
@@ -185,6 +203,17 @@ if grep -q "$company_id" "$T/tf_sub2"; then pass "duplicate submit keeps the sam
 anon=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $TF_URL" -H "x-wf-csrf: $tf_csrf" \
 	--data "" "$TF_URL/proposals/$prop/submit")
 if [ "$anon" = "302" ]; then pass "anonymous submit is refused"; else fail "anonymous submit is refused (got $anon)"; fi
+
+# The grant is revocable: once revoked, the same session is refused again.
+"$BIN" --site-dir "$T" --revoke-taskfoundry-grant "$gid" >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "operator revokes the grant with the CLI"; else fail "operator revokes the grant with the CLI"; fi
+r=$(post_form "candidates/create" "title=After+revoke&summary=x&paper_id=2612.00002")
+if [ "${r%% *}" = "403" ]; then pass "taskfoundry write after revoke is refused (403)"; else fail "taskfoundry write after revoke is refused (got $r)"; fi
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$T/tf.jar" "$TF_URL/")
+case "$loc" in
+*/grants) pass "taskfoundry board after revoke redirects to the grants page" ;;
+*) fail "taskfoundry board after revoke redirects to the grants page (got '$loc')" ;;
+esac
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

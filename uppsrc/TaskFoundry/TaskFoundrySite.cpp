@@ -44,17 +44,39 @@ static String Text(const ValueMap& m, const char *key)
 	return (String)m.Get(key, "");
 }
 
+// Grants are consent records held by the meta grant store and bound to their
+// subject user. Only an approved grant for this site, owned by the caller's
+// session, gives the caller any TaskFoundry scope.
+static WebGrants *s_grants = NULL;
+
+static bool ActiveGrant(const String& user_id, WebAccountGrant& out)
+{
+	if(!s_grants)
+		return false;
+	Vector<WebAccountGrant> list;
+	s_grants->ListForSubject(user_id, "granted", list);
+	for(const WebAccountGrant& g : list)
+		if(g.client_site == TASKFOUNDRY_SITE_ID && g.IsActive() &&
+		   (IsNull(g.expires_at) || g.expires_at > GetSysTime())) {
+			out = g;
+			return true;
+		}
+	return false;
+}
+
 static TfActor Actor(WebRequest& r)
 {
 	TfActor a;
 	a.user_id = r.User().user_id;
 	a.username = r.User().username;
-	a.scopes = TaskFoundryMemberScopes();
+	WebAccountGrant g;
+	if(ActiveGrant(a.user_id, g))
+		a.scopes = TaskFoundryScopesOf(g.scopes);
 	return a;
 }
 
 // Returns false, after redirecting to the site login, for anonymous callers.
-static bool RequireUser(WebRequest& r)
+static bool RequireLogin(WebRequest& r)
 {
 	if(r.HasUser())
 		return true;
@@ -76,6 +98,26 @@ static void Failed(WebRequest& r, const TfResult& res)
 	Page(r, "TaskFoundry", "<p>" + Esc(res.error) + "</p>");
 }
 
+// Pages and writes need a login and an approved grant. A write without a grant
+// is refused with 403; a page without one goes to the grants page.
+static bool RequireGrant(WebRequest& r)
+{
+	if(!RequireLogin(r))
+		return false;
+	WebAccountGrant g;
+	if(ActiveGrant(r.User().user_id, g))
+		return true;
+	if(r.Method() == "POST") {
+		TfResult res;
+		res.status = 403;
+		res.error = "TaskFoundry needs an approved grant; request one on the grants page";
+		Failed(r, res);
+	}
+	else
+		r.Redirect(r.Site().Url("grants"));
+	return false;
+}
+
 static String Hidden(WebRequest& r)
 {
 	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
@@ -88,7 +130,7 @@ static String ListItem(const String& href, const String& label, const String& st
 
 static void Board(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	TfResult res = Service().Board();
 	if(!res.ok) {
@@ -122,7 +164,7 @@ static void Board(WebRequest& r)
 
 static void CandidateCreate(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	TfResult res = Service().CreateCandidate(Actor(r), r.Param("title"), r.Param("summary"), r.Param("paper_id"));
 	if(!res.ok) {
@@ -134,7 +176,7 @@ static void CandidateCreate(WebRequest& r)
 
 static void CandidateDetail(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	TfResult res = Service().GetCandidate(id);
@@ -153,7 +195,7 @@ static void CandidateDetail(WebRequest& r)
 
 static void CandidatePropose(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	TfResult res = Service().CreateProposal(Actor(r), r.PathArg(0));
 	if(!res.ok) {
@@ -174,7 +216,7 @@ static String EvidenceRow(const ValueMap& e)
 
 static void ProposalEditor(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	TfResult res = Service().GetProposal(id);
@@ -231,7 +273,7 @@ static void ProposalEditor(WebRequest& r)
 
 static void ProposalEdit(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	double hours = ScanDouble(r.Param("estimated_hours"));
@@ -246,7 +288,7 @@ static void ProposalEdit(WebRequest& r)
 
 static void ProposalEvidence(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	TfResult res = Service().AttachEvidence(Actor(r), id, r.Param("kind"), r.Param("ref"), r.Param("node_id"));
@@ -259,7 +301,7 @@ static void ProposalEvidence(WebRequest& r)
 
 static void ProposalValidate(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	TfResult res = Service().Validate(Actor(r), id);
@@ -272,7 +314,7 @@ static void ProposalValidate(WebRequest& r)
 
 static void ProposalSubmit(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	TfResult res = Service().Submit(Actor(r), r.PathArg(0));
 	if(!res.ok) {
@@ -284,7 +326,7 @@ static void ProposalSubmit(WebRequest& r)
 
 static void SubmissionStatus(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
 	TfResult res = Service().Status(Actor(r), id);
@@ -301,11 +343,70 @@ static void SubmissionStatus(WebRequest& r)
 	Page(r, "Submission " + id, String(b));
 }
 
-void InstallTaskFoundrySite(EngineSite& site, TaskFoundryService& service)
+// Shows the caller's TaskFoundry grants and lets them request one. Approval is
+// made outside the site (see ManagerSkylark --decide-taskfoundry-grant).
+static void GrantPage(WebRequest& r)
+{
+	if(!RequireLogin(r))
+		return;
+	Vector<WebAccountGrant> list;
+	if(s_grants)
+		s_grants->ListForSubject(r.User().user_id, "", list);
+	StringBuffer b;
+	bool active = false;
+	b << "<table><tr><th>Grant</th><th>State</th><th>Scopes</th></tr>";
+	for(const WebAccountGrant& g : list) {
+		if(g.client_site != TASKFOUNDRY_SITE_ID)
+			continue;
+		String scopes;
+		for(const String& sc : g.scopes)
+			scopes << (scopes.IsEmpty() ? "" : ", ") << sc;
+		b << "<tr><td>" << Esc(g.grant_id) << "</td><td>" << Esc(g.state) << "</td><td>" << Esc(scopes) << "</td></tr>";
+		if(g.IsActive())
+			active = true;
+	}
+	b << "</table>";
+	if(active)
+		b << "<p>Your TaskFoundry access is active.</p>";
+	else
+		b << "<p>No approved TaskFoundry grant. Request one, and an operator approves it.</p>"
+		  << "<form method=\"post\" action=\"" << Esc(r.Site().Url("grants/request")) << "\">" << Hidden(r)
+		  << "<button type=\"submit\">Request TaskFoundry access</button></form>";
+	Page(r, "TaskFoundry access", String(b));
+}
+
+static void GrantRequest(WebRequest& r)
+{
+	if(!RequireLogin(r))
+		return;
+	TfResult res;
+	if(!s_grants) {
+		res.status = 500;
+		res.error = "grant store is not installed";
+		Failed(r, res);
+		return;
+	}
+	String grant_id;
+	bool existed = false;
+	StoreResult st = s_grants->RequestGrant(r.User().user_id, TASKFOUNDRY_SITE_ID, "taskfoundry-ui",
+	                                        TaskFoundryGrantableScopes(), grant_id, existed);
+	if(!st) {
+		res.status = 500;
+		res.error = st.error;
+		Failed(r, res);
+		return;
+	}
+	r.Redirect(r.Site().Url("grants"));
+}
+
+void InstallTaskFoundrySite(EngineSite& site, TaskFoundryService& service, WebGrants *grants)
 {
 	s_service = &service;
+	s_grants = grants;
 	SiteRouter& rt = site.Router();
 	rt.Add("", Board);
+	rt.Add("grants", GrantPage);
+	rt.Add("grants/request:POST", GrantRequest);
 	rt.Add("candidates/create:POST", CandidateCreate);
 	rt.Add("candidates/*", CandidateDetail);
 	rt.Add("candidates/*/propose:POST", CandidatePropose);

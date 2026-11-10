@@ -151,20 +151,36 @@ bool RunTaskFoundrySelfTests(const String& scratch_dir)
 		a.scopes = clone(scopes);
 		return a;
 	};
-	Vector<String> member = TaskFoundryMemberScopes();
+	// Scopes come from an approved grant (the site applies it), so the checks
+	// below use the grantable set as a granted set.
+	Vector<String> member = TaskFoundryGrantableScopes();
 	TfActor alice = make(member);
 
 	Vector<String> reader_scopes;
 	reader_scopes.Add(TF_SCOPE_SCIENCE_READ);
 	TfActor reader = make(reader_scopes);   // no write scope
 
+	bool all = true;
+
+	// A signed-in user with no approved grant holds no scopes at all.
+	TfActor ungranted = make(Vector<String>());
+	all &= Check(svc.CreateCandidate(ungranted, "Idea", "x", "2612.00002").status == 403,
+	             "taskfoundry: a user without an approved grant cannot create a candidate");
+
+	// science.author is never grantable, whatever a grant asks for.
+	Vector<String> asked;
+	asked.Add(TF_SCOPE_SCIENCE_READ);
+	asked.Add("science.author");
+	asked.Add(TF_SCOPE_WRITE);
+	Vector<String> kept = TaskFoundryScopesOf(asked);
+	all &= Check(kept.GetCount() == 2 && FindIndex(kept, String("science.author")) < 0,
+	             "taskfoundry: a grant cannot carry science.author");
+
 	Vector<String> no_company_scopes;   // can edit and validate, cannot submit
 	for(const String& s : member)
 		if(s != TF_SCOPE_COMPANY_WRITE)
 			no_company_scopes.Add(s);
 	TfActor no_company = make(no_company_scopes);
-
-	bool all = true;
 	all &= Check(svc.CreateCandidate(reader, "Idea", "x", "2612.00002").status == 403 &&
 	             !svc.CreateCandidate(reader, "Idea", "x", "2612.00002").ok,
 	             "taskfoundry: a candidate needs taskfoundry:write (403 without it)");

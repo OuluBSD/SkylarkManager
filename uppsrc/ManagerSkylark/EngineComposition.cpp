@@ -75,7 +75,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	EngineSite& tf = TheWebEngine().AddSite("taskfoundry", "TaskFoundry",
 		Format("http://127.0.0.1:%d", cfg.taskfoundry_port), tf_root);
 	owned.taskfoundry.Create(TheWebEngine().Broker(), tf_root);
-	InstallTaskFoundrySite(tf, *owned.taskfoundry);
+	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
 	InstallSessionRoutes(tf);
 	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
 	return true;
