@@ -53,6 +53,12 @@ jobs:
           repository: OuluBSD/UppBuilder
           path: UppBuilder
 
+      - name: Checkout CompanySkylark (Company composed module)
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/CompanySkylark
+          path: CompanySkylark
+
       - name: Checkout SuperIntelligence
         uses: actions/checkout@v4
         with:
@@ -115,7 +121,7 @@ jobs:
       - name: Build ManagerSkylark (${{ matrix.bm }})
         run: |
           cd SkylarkManager
-          uppbuilder ManagerSkylark -m ${{ matrix.bm }} -v
+          uppbuilder ManagerSkylark -m ${{ matrix.bm }} -a ../CompanySkylark/uppsrc -v
 
       - name: Verify ManagerSkylark Binary
         run: |
@@ -194,6 +200,12 @@ jobs:
           repository: OuluBSD/UppBuilder
           path: UppBuilder
 
+      - name: Checkout CompanySkylark (Company composed module)
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/CompanySkylark
+          path: CompanySkylark
+
       - name: Checkout SuperIntelligence
         uses: actions/checkout@v4
         with:
@@ -271,7 +283,7 @@ jobs:
         shell: cmd
         run: |
           cd SkylarkManager
-          uppbuilder.exe ManagerSkylark -m MSVS22x64 -v
+          uppbuilder.exe ManagerSkylark -m MSVS22x64 -a "%GITHUB_WORKSPACE%\CompanySkylark\uppsrc" -v
 
       - name: Verify ManagerSkylark Binary
         shell: cmd
