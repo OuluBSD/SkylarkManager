@@ -36,16 +36,6 @@ runner uses the local defaults. The CI node's channel `SKYLARK-MANAGER` is seede
 Not yet verified live: the CI job has not run on GitHub. Its node config (authority, allow list
 on 127.0.0.1) follows the AgentIPC example config and is unproven until a CI run.
 
-Local status (last run, 2026-11-11): `privatehub-issues` 12/12, `taskfoundry-submit` 23/23,
-`financials-view` 5/5. `channels-view` fails 2/3 locally: the `channels` account's password is not
-in this environment, so the channel read gets `bad-login`. Fixing that needs the account password;
-recreating the shared account needs approval.
-
-Blocked, parked in `scenarios/blocked/`: `github-pr-flow`. The stock app signs in with a host
-form or a bearer token, and SiteCli has no bearer support and no stock `session/login` route, so
-the scenario cannot log in through SiteCli. The role negative (contributor cannot merge) also needs
-a second account role on the stock site, which it does not have. Direct push to the project repo
-is not a SiteCli operation and is not asserted.
-
-Not yet: announcers with their own AgentIPC identities (the runner prints and optionally
-writes `ANNOUNCE` lines only).
+Local status (2026-11-11): `privatehub-issues` 12/12, `taskfoundry-submit` 23/23, `financials-view`
+5/5 (S2 run), and `channels-view` 4/4 (S1 run with the documented channels identity password, set via
+`MANAGERSKYLARK_AGENTIPC_PASSWORD`). The `channels` account is not recreated.
