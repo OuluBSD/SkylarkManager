@@ -46,6 +46,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.privatehub.Create(cfg.privatehub_workspace, ph_root);
 	InstallPrivateHubSite(ph, *owned.privatehub);
 	InstallSessionRoutes(ph);
+	InstallCommandConsole(ph);
 	host.BindSite(cfg.privatehub_port, "privatehub");
 	String ph_broker_root = AppendFileName(ph_root, "broker");
 	RealizeDirectory(ph_broker_root);
@@ -70,6 +71,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.meta_port), meta_root);
 	InstallMetaAccountSite(meta, *owned.grants);
 	InstallSessionRoutes(meta);
+	InstallCommandConsole(meta);
 	RegisterMetaAccountService("meta", meta.Accounts(), *owned.grants);
 	host.BindSite(cfg.meta_port, "meta");
 
@@ -81,6 +83,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.science.Create(cfg.science_corpus, cfg.science_corpus);
 	InstallScienceSite(sci, *owned.science, ~owned.grants);
 	InstallSessionRoutes(sci);
+	InstallCommandConsole(sci);
 	host.BindSite(cfg.science_port, "science");
 	// The broker takes ownership of the service it is given.
 	TheWebEngine().Broker().Register("science", new ScienceService(*owned.science));
@@ -100,6 +103,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.taskfoundry.Create(TheWebEngine().Broker(), tf_root);
 	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
 	InstallSessionRoutes(tf);
+	InstallCommandConsole(tf);
 	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
 
 	// The channels site: the read-only frontend over the AgentIPC node. It
@@ -125,6 +129,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.channels_port), ch_root);
 	InstallChannelsSite(ch, ipc);
 	InstallSessionRoutes(ch);
+	InstallCommandConsole(ch);
 	host.BindSite(cfg.channels_port, "channels");
 
 	// The financials site: the read-only window over the Company money flows,
@@ -135,6 +140,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.financials_port), fin_root);
 	InstallFinancialsSite(fin);
 	InstallSessionRoutes(fin);
+	InstallCommandConsole(fin);
 	host.BindSite(cfg.financials_port, "financials");
 	RegisterComposedBrokerCommands();
 	return true;

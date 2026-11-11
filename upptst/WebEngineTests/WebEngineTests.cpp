@@ -17,6 +17,7 @@
 #include <WebBroker/WebBroker.h>
 #include <Channels/ChannelsSite.h>
 #include <Financials/FinancialsSite.h>
+#include <WebEngine/CommandConsole.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -561,6 +562,7 @@ static void SetupSites()
 	Vector<String> ph_no_roles;
 	ph.Accounts().CreateUser("member", "pw-member", "Member", ph_member_roles, uid, existed);
 	ph.Accounts().CreateUser("viewer", "pw-viewer", "Viewer", ph_no_roles, uid, existed);
+	InstallCommandConsole(ph);
 
 	// TaskFoundry site (task 009: linked-consent round trip through the meta site).
 	String tf_root = AppendFileName(s_root, "taskfoundry");
@@ -570,6 +572,7 @@ static void SetupSites()
 		Format("http://127.0.0.1:%d", TASKFOUNDRY_PORT), tf_root);
 	InstallTaskFoundrySite(tf, *s_tf_service, s_meta_grants);
 	InstallSessionRoutes(tf);
+	InstallCommandConsole(tf);
 	tf.Accounts().CreateUser("tfdev", "pw-tf", "Tfdev", ph_no_roles, uid, existed);
 
 	// A second meta identity, for the not-your-grant negative.
@@ -2079,6 +2082,17 @@ CONSOLE_APP_MAIN
 			Check(rin5.status == 200 && rin5.body.Find("bulk-209") >= 0,
 			      "the inbox still serves after a bulk write");
 		}
+
+		// The per-site command console (task 019): the TaskFoundry site has
+		// wildcard-free POST commands, so its console renders runnable forms.
+		HttpReply rcc = HttpCall("GET", TASKFOUNDRY_PORT, "/console", tf_h, "");
+		Check(rcc.status == 200 && rcc.body.Find("grants/request") >= 0
+		      && rcc.body.Find("candidates/create") >= 0,
+		      "the console renders the site's commands for a signed-in user");
+		Check(rcc.body.Find("__wf_csrf__") >= 0,
+		      "a runnable command form carries the CSRF hidden field");
+		Check(rcc.body.Find("use skylarkctl") >= 0,
+		      "wildcard-path commands stay documentation rows");
 	}
 
 	// --- Channels read-only frontend over an argv shim (task 012) ---

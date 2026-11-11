@@ -24,6 +24,8 @@ file
 	WebEngine.cpp,
 	SessionRoutes.h,
 	SessionRoutes.cpp,
+	CommandConsole.h,
+	CommandConsole.cpp,
 	Host readonly separator,
 	Host.h,
 	Host.cpp;

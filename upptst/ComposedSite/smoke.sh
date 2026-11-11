@@ -370,6 +370,15 @@ if grep -q "No ledger entries yet" "$T/body"; then pass "financials ledger shows
 check "financials contracts empty state" 200 "$FIN_URL/contracts" -b "$T/fin.jar"
 if grep -q "No contracts yet" "$T/body"; then pass "financials contracts shows the empty state"; else fail "financials contracts shows the empty state"; fi
 
+# The command console (task 019): the meta site's console renders its
+# commands for the signed-in identity.
+check "meta console for the signed-in identity" 200 "$META_URL/console" -b "$T/meta.jar"
+if grep -q "consent/decide" "$T/body" && grep -q "__wf_csrf__" "$T/body"; then
+	pass "the meta console renders a runnable consent form"
+else
+	fail "the meta console renders a runnable consent form"
+fi
+
 # The operator CLI stays as a documented fallback: a fresh request can be
 # approved and revoked out of band.
 r=$(post_form "grants/request" "meta_user=tfmeta&meta_password=pw-meta")

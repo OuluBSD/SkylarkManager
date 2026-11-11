@@ -126,6 +126,7 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET /consent`, `POST /consent/decide` | meta | Consent grants of the signed-in identity; decide (approve/deny/revoke) as the subject |
 | `GET /inbox`, `POST /inbox/read-all` | meta | The identity inbox (consent and client-site lifecycle events); read-only for the subject, CSRF on the mutation |
 | `GET /financials`, `GET /ledger`, `GET /contracts` | financials | The Company money flows read-only through the broker; ledger rows and contracts need the finance role |
+| `GET /console` | composed sites | The per-site command console: the site's manifest commands as links and CSRF-bearing forms; the routes stay the authority (see `uppsrc/WebEngine/AGENTS.md`) |
 | `GET /overview` | channels | The AgentIPC node's channels and their last activity (read-only) |
 | `GET /channels/{server}/{chan}` | channels | A channel's recent messages through the argv-only client (read-only) |
 

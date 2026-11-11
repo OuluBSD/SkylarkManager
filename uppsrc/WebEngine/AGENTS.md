@@ -68,3 +68,13 @@ namespace, and route tree.
   BazaarCore Skylark hooks; WP1 enforces equivalent protection via
   exact-origin checks and does not patch Skylark.
 - Remote (TCP) broker transport is an explicit stub.
+
+## Command console
+
+`CommandConsole.{h,cpp}` provides `InstallCommandConsole(EngineSite&)`: a
+`GET /console` page that renders the site's manifest commands as links and
+CSRF-bearing forms. **It adds no authority**: the forms post to the real
+routes, whose own session, role, CSRF and origin fences stay the gate. Only
+http commands with wildcard-free paths render as runnable forms; wildcard
+paths and broker commands are documentation rows ("use skylarkctl"). Sites
+opt in by calling the installer.

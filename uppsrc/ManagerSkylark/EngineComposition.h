@@ -3,6 +3,7 @@
 
 #include <Core/Core.h>
 #include <WebEngine/Host.h>
+#include <WebEngine/CommandConsole.h>
 #include <Channels/ChannelsSite.h>
 #include <Financials/FinancialsSite.h>
 #include <MetaAccount/MetaAccountSite.h>
