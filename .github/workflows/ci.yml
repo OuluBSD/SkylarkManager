@@ -172,6 +172,156 @@ jobs:
           cd SkylarkManager
           ./bin/WebEngineTests
 
+      - name: Build SiteCli (${{ matrix.bm }})
+        run: |
+          cd SkylarkManager
+          uppbuilder SiteCli -m ${{ matrix.bm }} -a ../CompanySkylark/uppsrc -v
+
+      - name: Verify SiteCli Binary
+        run: |
+          test -f SkylarkManager/bin/SiteCli
+          ls -lh SkylarkManager/bin/SiteCli
+          file SkylarkManager/bin/SiteCli
+
+  agentlab:
+    name: AgentLab scenarios (ubuntu-latest - clang++)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SkylarkManager
+        uses: actions/checkout@v4
+        with:
+          path: SkylarkManager
+
+      - name: Checkout BazaarCore
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/BazaarCore
+          path: BazaarCore
+
+      - name: Checkout UppBootstrap
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/UppBootstrap
+          path: UppBootstrap
+
+      - name: Checkout UppBuilder
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/UppBuilder
+          path: UppBuilder
+
+      - name: Checkout CompanySkylark (Company composed module)
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/CompanySkylark
+          path: CompanySkylark
+
+      - name: Checkout SuperIntelligence
+        uses: actions/checkout@v4
+        with:
+          repository: OuluBSD/SuperIntelligence
+          path: SuperIntelligence
+
+      - name: Checkout AgentIPC (client and node, stdlib Python)
+        uses: actions/checkout@v4
+        with:
+          repository: OuluLinux/AgentIPC
+          path: AgentIPC
+
+      - name: Checkout Upstream U++ (ultimatepp)
+        uses: actions/checkout@v4
+        with:
+          repository: ultimatepp/ultimatepp
+          path: ultimatepp
+          sparse-checkout: |
+            mkumk_blitz.cpp
+            Makefile
+            uppsrc/**
+          sparse-checkout-cone-mode: false
+
+      - name: Install System Dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make clang g++ libbz2-dev libexpat1-dev libfontconfig1-dev libfreetype-dev liblz4-dev liblzma-dev libpcre2-dev libpng-dev libjpeg-dev libssl-dev libx11-dev libxcb1-dev libxxhash-dev libzstd-dev zlib1g-dev libgtk-3-dev libnotify-dev
+
+      - name: Bootstrap umk with UppBootstrap
+        env:
+          CXX: clang++
+        run: |
+          cd UppBootstrap
+          chmod +x ./bootstrap.sh
+          ./bootstrap.sh --upp-root "$GITHUB_WORKSPACE/ultimatepp" --verbose
+          echo "$GITHUB_WORKSPACE/ultimatepp/bin" >> "$GITHUB_PATH"
+
+      - name: Bootstrap UppBuilder
+        env:
+          CXX: clang++
+        run: |
+          cd UppBuilder
+          chmod +x ./bootstrap.sh
+          ./bootstrap.sh
+          echo "$GITHUB_WORKSPACE/UppBuilder" >> "$GITHUB_PATH"
+
+      - name: Materialize Patched BazaarCore Assembly
+        run: |
+          cd BazaarCore
+          uppbuilder --apply-patches --upstream "$GITHUB_WORKSPACE/ultimatepp/uppsrc" --applied-patches "$GITHUB_WORKSPACE/BazaarCore/patched-uppsrc" -v
+
+      - name: Build ManagerSkylark and SiteCli (CLANG)
+        run: |
+          cd SkylarkManager
+          uppbuilder ManagerSkylark -m CLANG -a ../CompanySkylark/uppsrc -v
+          uppbuilder SiteCli -m CLANG -a ../CompanySkylark/uppsrc -v
+          test -f bin/ManagerSkylark
+          test -f bin/SiteCli
+
+      - name: Prepare AgentIPC node (plain server, CI home)
+        run: |
+          H="$RUNNER_TEMP/agentipc-ci"
+          mkdir -p "$H"
+          PW=$(openssl rand -hex 24)
+          echo "MANAGERSKYLARK_AGENTIPC_PASSWORD=$PW" >> "$GITHUB_ENV"
+          export MANAGERSKYLARK_AGENTIPC_PASSWORD="$PW"
+          cat > "$H/config.json" <<'JSON'
+          {"node": "ci-authority", "authority": "ci-authority", "control_port": 7421, "listen": 7440,
+           "allow": ["127.0.0.1"], "peers": [], "shell": {"enabled": false, "users": []}, "targets": []}
+          JSON
+          AG="python3 $GITHUB_WORKSPACE/AgentIPC/bin/agentipc --home $H"
+          $AG account add channels --password-env MANAGERSKYLARK_AGENTIPC_PASSWORD
+          $AG server create skylark
+          nohup python3 "$GITHUB_WORKSPACE/AgentIPC/bin/agentipc" --home "$H" node run > "$H/node.log" 2>&1 &
+          echo $! > "$H/node.pid"
+          for i in $(seq 60); do
+            if (echo > /dev/tcp/127.0.0.1/7440) 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          (echo > /dev/tcp/127.0.0.1/7440) 2>/dev/null || { cat "$H/node.log"; exit 1; }
+          python3 "$GITHUB_WORKSPACE/AgentIPC/bin/agentipc" vs --direct 127.0.0.1:7440 --server skylark --user channels --password-env MANAGERSKYLARK_AGENTIPC_PASSWORD say SKYLARK-MANAGER "ci seed"
+
+      - name: Run AgentLab scenarios (CI node)
+        env:
+          AGENTLAB_AGENTIPC_PYTHON: python3
+          AGENTLAB_AGENTIPC_CLIENT: ${{ github.workspace }}/AgentIPC/bin/agentipc
+          AGENTLAB_AGENTIPC_HOME: ${{ runner.temp }}/agentipc-ci
+        run: |
+          cd SkylarkManager
+          python3 upptst/AgentLab/agentlab.py --binary bin/ManagerSkylark --site-cli bin/SiteCli \
+            --scenario upptst/AgentLab/scenarios/privatehub-issues.json \
+            --scenario upptst/AgentLab/scenarios/taskfoundry-submit.json \
+            --scenario upptst/AgentLab/scenarios/channels-view.json \
+            --scenario upptst/AgentLab/scenarios/financials-view.json | tee agentlab.log
+          for s in privatehub-issues taskfoundry-submit channels-view financials-view; do
+            grep -q "^scenario $s: PASS" agentlab.log || { echo "missing PASS for $s"; exit 1; }
+          done
+
+      - name: Stop AgentIPC node
+        if: always()
+        run: |
+          H="$RUNNER_TEMP/agentipc-ci"
+          if [ -f "$H/node.pid" ]; then kill "$(cat "$H/node.pid")" 2>/dev/null || true; fi
+          cat "$H/node.log" 2>/dev/null || true
+
   build-windows:
     name: Windows (windows-latest - MSVC)
     runs-on: windows-latest

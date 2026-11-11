@@ -30,3 +30,14 @@ Small, mostly independent items. Do them opportunistically.
 - CI runs: ManagerSkylark build+test, CompanySkylark build+test,
   WebEngineTests build on all platforms + run on POSIX (and Windows after
   item 2).
+
+## CI now runs (task 023)
+
+- `build-posix`: ManagerSkylark, GuiExample, WebShowcase, WebEngineTests, the fence, and now
+  `SiteCli` (CLANG, GCC, macOS) with a binary check.
+- `agentlab` (ubuntu, clang++): builds ManagerSkylark and SiteCli, starts a plain AgentIPC node on a
+  CI home (port 7440), runs four AgentLab scenarios (`privatehub-issues`, `taskfoundry-submit`,
+  `channels-view`, `financials-view`), and requires a PASS line for each.
+- Not in CI: `github-pr-flow` (parked), Windows SiteCli (optional, not added).
+- Unproven until a GitHub run: the node config and the AgentIPC `server create` order.
+

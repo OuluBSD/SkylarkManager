@@ -24,8 +24,10 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-AGENTIPC = [os.path.expanduser("~/.venvs/agentipc/bin/python"), "/home/sblo/bin/agentipc"]
-AGENTIPC_HOME = os.path.expanduser("~/.agentipc-skylark")
+# CI sets these to its own interpreter, client and node home; locally the defaults apply.
+AGENTIPC = [os.environ.get("AGENTLAB_AGENTIPC_PYTHON", os.path.expanduser("~/.venvs/agentipc/bin/python")),
+            os.environ.get("AGENTLAB_AGENTIPC_CLIENT", os.path.expanduser("~/bin/agentipc"))]
+AGENTIPC_HOME = os.path.expanduser(os.environ.get("AGENTLAB_AGENTIPC_HOME", "~/.agentipc-skylark"))
 PW_ENV = "AGENTLAB_ANN_PW"
 SITE_ORDER = ["privatehub", "science", "taskfoundry", "meta", "channels", "financials"]
 STOCK_SECTIONS = ["github"]  # served by the main port, no composed port of their own
@@ -170,6 +172,8 @@ def server_args(binary, site_dir, ports, workspace, corpus, company_root):
         args += ["--financials-port", str(ports["financials"])]
     if "channels" in ports:
         args += ["--channels-port", str(ports["channels"])]
+        if os.environ.get("AGENTLAB_AGENTIPC_CLIENT"):
+            args += ["--agentipc-python", AGENTIPC[0], "--agentipc-client", AGENTIPC[1]]
     return args
 
 

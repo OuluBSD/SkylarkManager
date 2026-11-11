@@ -27,8 +27,19 @@ AgentIPC.
 
 ## Status
 
-Passing (run by default): `privatehub-issues` (5/5), `science-authoring` (5/5),
-`taskfoundry-submit` (16/16, with a grant the operator approves through the ManagerSkylark CLI).
+Run in CI (`agentlab` job in `.github/workflows/ci.yml`, plain AgentIPC node on a CI home):
+`privatehub-issues`, `taskfoundry-submit`, `channels-view`, `financials-view`. The CI job sets
+`AGENTLAB_AGENTIPC_PYTHON`, `AGENTLAB_AGENTIPC_CLIENT` and `AGENTLAB_AGENTIPC_HOME`; unset, the
+runner uses the local defaults. The CI node's channel `SKYLARK-MANAGER` is seeded by the job, and
+`MANAGERSKYLARK_AGENTIPC_PASSWORD` is the `channels` account password.
+
+Not yet verified live: the CI job has not run on GitHub. Its node config (authority, allow list
+on 127.0.0.1) follows the AgentIPC example config and is unproven until a CI run.
+
+Local status (last run, 2026-11-11): `privatehub-issues` 12/12, `taskfoundry-submit` 23/23,
+`financials-view` 5/5. `channels-view` fails 2/3 locally: the `channels` account's password is not
+in this environment, so the channel read gets `bad-login`. Fixing that needs the account password;
+recreating the shared account needs approval.
 
 Blocked, parked in `scenarios/blocked/`: `github-pr-flow`. The stock app signs in with a host
 form or a bearer token, and SiteCli has no bearer support and no stock `session/login` route, so
