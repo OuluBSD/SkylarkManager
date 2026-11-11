@@ -29,6 +29,8 @@ case "$*" in
 	*"pr diff 1 -R SeppoPakonen/demo-repo"*)
 		echo 'diff --git a/README.md b/README.md'
 		echo '+added line' ;;
+	*"repo create SeppoPakonen/new-repo --private"*)
+		echo 'https://github.com/SeppoPakonen/new-repo' ;;
 	*"repo list SeppoPakonen --limit 100 --json"*)
 		echo '[{"name":"demo-repo","description":"Fixture repo","isPrivate":false,"pushedAt":"2026-11-03T09:15:00Z","stargazerCount":3,"forkCount":1,"primaryLanguage":{"name":"C++"},"url":"https://github.com/SeppoPakonen/demo-repo"},{"name":"second-repo","description":"","isPrivate":true,"pushedAt":"2026-11-04T08:00:00Z","stargazerCount":0,"forkCount":0,"primaryLanguage":null,"url":"https://github.com/SeppoPakonen/second-repo"}]' ;;
 	*"repos/SeppoPakonen/demo-repo/actions/runs?per_page=15"*)
@@ -57,6 +59,9 @@ static bool RunSharedContract(GitHubForgeBackend& b, const char *label)
 		return ContractFail(label, "issue list does not match the fixture");
 	if(b.ListIssues("bad slug", issues).ok)
 		return ContractFail(label, "invalid repository slug accepted");
+	ForgeRepo unnamed;
+	if(b.CreateRepository("SeppoPakonen", "bad name", true, unnamed).ok)
+		return ContractFail(label, "invalid repository name accepted for creation");
 
 	ForgeIssue one;
 	r = b.GetIssue(kContractProject, "1", one);
@@ -187,12 +192,22 @@ bool GitHubPlatformService::RunGitHubBackendContractTests(const String& scratch_
 	if(!RunSharedContract(connector, "gh connector"))
 		return false;
 	Cout() << "ok    shared GitHub contract holds for the gh connector\n";
+	ForgeRepo created;
+	ForgeResult cr = connector.CreateRepository("SeppoPakonen", "new-repo", true, created);
+	if(!cr.ok || created.name != "new-repo" || created.owner != "SeppoPakonen" || !created.is_private ||
+	   cr.provenance != ForgeProvenance::Remote)
+		return ContractFail("gh connector", "private repository creation did not succeed through gh");
+	Cout() << "ok    gh connector creates a private repository through gh\n";
 
 	String store = AppendFileName(scratch_dir, "contract-store");
 	GitHubEmulatedBackend emulated(store);
 	if(!RunSharedContract(emulated, "emulated"))
 		return false;
 	Cout() << "ok    shared GitHub contract holds for the emulated backend\n";
+	ForgeRepo refused;
+	if(emulated.CreateRepository("SeppoPakonen", "new-repo", true, refused).ok)
+		return ContractFail("emulated", "the emulation claimed to create a remote repository");
+	Cout() << "ok    the emulated backend refuses repository creation\n";
 
 	if(!RunEmulatedWriteTests(store))
 		return false;

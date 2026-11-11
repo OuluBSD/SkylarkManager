@@ -46,6 +46,9 @@ public:
 	virtual ForgeResult SetPullRequestState(const String& project, const String& pr_id, bool open, ForgePullRequest& out) = 0;
 	virtual ForgeResult MergePullRequest(const String& project, const String& pr_id, String& message) = 0;
 	virtual ForgeResult ListRepos(const String& owner, Vector<ForgeRepo>& out) = 0;
+	// Creates a repository under owner. The emulation never creates remote repositories
+	// and reports that as a failure; there is no fake success.
+	virtual ForgeResult CreateRepository(const String& owner, const String& name, bool is_private, ForgeRepo& out) = 0;
 	virtual ForgeResult ListRuns(const String& project, int limit, Vector<ForgeRun>& out) = 0;
 
 	static bool IsValidRepoSlug(const String& slug);

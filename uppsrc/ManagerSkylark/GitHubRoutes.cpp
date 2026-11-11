@@ -2,6 +2,7 @@
 #include "GitHubPlatform.h"
 #include "SystemAuth.h"
 #include "AgentPlatform.h"
+#include <GitHubForge/GitHubForge.h>
 
 NAMESPACE_UPP
 
@@ -232,6 +233,36 @@ SKYLARK(ApiGitHubLivePRDetail, "api/gh/pull/*/*/*")
 	int number = ScanInt(http[2]);
 	ValueMap detail = GitHubPlatformService::GetLivePullRequestDetail(owner, repo, number);
 	http.ContentType("application/json") << AsJSON(detail);
+}
+
+// Creates a repository on the configured GitHub implementation. Creating a
+// repository is administrative: only an admin session may call it.
+SKYLARK(ApiCreateRepository, "api/gh/repos/create:POST_RAW")
+{
+	if(!SystemAuthService::GetCurrentSession(http).is_admin) {
+		http.Content("application/json; charset=utf-8", "{\"error\":\"admin_required\"}");
+		http.Response(403, "Forbidden");
+		return;
+	}
+	Value json = ParseJSON(http.GetRequestContent());
+	String owner = json["owner"];
+	String name = json["name"];
+	String visibility = json["visibility"];
+
+	ValueMap out;
+	out.Set("repository", owner + "/" + name);
+	if(visibility != "public" && visibility != "private") {
+		out.Set("status", "error");
+		out.Set("message", "visibility must be public or private");
+		http.ContentType("application/json") << AsJSON(out);
+		return;
+	}
+	One<GitHubForgeBackend> backend = GitHubForgeBackend::Create();
+	ForgeRepo repo;
+	ForgeResult res = backend->CreateRepository(owner, name, visibility == "private", repo);
+	out.Set("status", res.ok ? String("ok") : String("error"));
+	out.Set("message", res.ok ? String() : res.error);
+	http.ContentType("application/json") << AsJSON(out);
 }
 
 SKYLARK(ApiSaveWorkflow, "api/gh/workflows/save:POST_RAW")

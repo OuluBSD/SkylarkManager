@@ -106,6 +106,9 @@ void RegisterGitHubCommands()
 	cm.Add(site, title, HttpCommand("pull-comment", "POST", "api/gh/pulls/*/comment", host_auth, "json",
 	                                "Comment on a pull request", {"owner:string:required", "repo:string:required",
 	                                                              "number:int:required", "body:text:required"}));
+	cm.Add(site, title, HttpCommand("repo-create", "POST", "api/gh/repos/create", "admin session", "json",
+	                                "Create a GitHub repository (gh connector only; the emulation refuses)",
+	                                {"owner:string:required", "name:string:required", "visibility:string:required"}));
 	cm.Add(site, title, HttpCommand("workflow-save", "POST", "api/gh/workflows/save", host_auth, "json",
 	                                "Save a workflow file", {"owner:string:required", "repo:string:required",
 	                                                         "filename:string:required", "content:text:required"}));

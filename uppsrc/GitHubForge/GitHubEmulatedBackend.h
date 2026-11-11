@@ -36,6 +36,7 @@ public:
 	ForgeResult SetPullRequestState(const String& project, const String& pr_id, bool open, ForgePullRequest& out) override;
 	ForgeResult MergePullRequest(const String& project, const String& pr_id, String& message) override;
 	ForgeResult ListRepos(const String& owner, Vector<ForgeRepo>& out) override;
+	ForgeResult CreateRepository(const String& owner, const String& name, bool is_private, ForgeRepo& out) override;
 	ForgeResult ListRuns(const String& project, int limit, Vector<ForgeRun>& out) override;
 
 	static String StoreFileName() { return "github-emulated.json"; }

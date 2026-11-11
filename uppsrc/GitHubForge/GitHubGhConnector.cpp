@@ -406,6 +406,21 @@ ForgeResult GitHubGhConnector::MergePullRequest(const String& project, const Str
 	return Ok("merge-pull", project, ForgeProvenance::Remote);
 }
 
+ForgeResult GitHubGhConnector::CreateRepository(const String& owner, const String& name, bool is_private, ForgeRepo& out)
+{
+	out = ForgeRepo();
+	String slug = owner + "/" + name;
+	if(!IsValidRepoSlug(slug))
+		return Failed("create-repo", slug, "invalid repository name");
+	GhOutcome gh = GhRun({"repo", "create", slug, is_private ? "--private" : "--public"});
+	if(!gh.ok)
+		return GhFail("create-repo", slug, gh);
+	out.owner = owner;
+	out.name = name;
+	out.is_private = is_private;
+	return Ok("create-repo", slug, ForgeProvenance::Remote);
+}
+
 ForgeResult GitHubGhConnector::ListRepos(const String& owner, Vector<ForgeRepo>& out)
 {
 	out.Clear();

@@ -719,6 +719,15 @@ ForgeResult GitHubEmulatedBackend::MergePullRequest(const String& project, const
 	return Ok("merge-pull", project, ForgeProvenance::LocalPersistent);
 }
 
+ForgeResult GitHubEmulatedBackend::CreateRepository(const String& owner, const String& name, bool is_private, ForgeRepo& out)
+{
+	out = ForgeRepo();
+	String slug = owner + "/" + name;
+	if(!IsValidRepoSlug(slug))
+		return Failed("create-repo", slug, "invalid repository name");
+	return Failed("create-repo", slug, "the emulation does not create remote repositories; configure the gh connector");
+}
+
 ForgeResult GitHubEmulatedBackend::ListRepos(const String& owner, Vector<ForgeRepo>& out)
 {
 	out.Clear();

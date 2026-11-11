@@ -147,6 +147,35 @@ session, or with no session, gets 403.
 
 The stock routes are unchanged on the main port, and still require login.
 
+## GitHub host routes and roles
+
+Enforcement, as the code does it today (task 022, item 3):
+
+- The central filter `SystemAuthService::AuthorizeRequest` is the only gate for every `api/gh`
+  route. It refuses anonymous callers (401 `authentication_required`) and lets any signed-in
+  session through. The stock host has one account type, so there are no repo roles on these
+  routes; "contributor cannot merge" stays deferred (see `BACKLOG.md`).
+- A session flag, `is_admin`, exists on `UserSession`. Only `POST /api/gh/repos/create` checks it
+  (403 `admin_required`). No existing route changed behavior.
+
+| Route | Method | Required host role | Enforcement |
+|---|---|---|---|
+| `/api/gh/repos/*` | GET | signed in | central filter |
+| `/api/gh/repos/create` | POST | admin | route check (`is_admin`) |
+| `/api/gh/issues/*/*` | GET | signed in | central filter |
+| `/api/gh/issues/*/create`, `/comment`, `/toggle` | POST | signed in | central filter |
+| `/api/gh/pulls/*/*` | GET | signed in | central filter |
+| `/api/gh/pulls/*/create`, `/merge`, `/close`, `/comment` | POST | signed in | central filter |
+| `/api/gh/pull/*/*/*` | GET | signed in | central filter |
+| `/api/gh/issue/*/*/*` | GET | signed in | central filter |
+| `/api/gh/actions/*/*` | GET | signed in | central filter |
+| `/api/gh/actions/trigger` | POST | signed in | central filter; starts a local build |
+| `/api/gh/workflows/save` | POST | signed in | central filter; writes a workflow file to disk |
+| `/api/gh/tpp/preview` | GET | signed in | central filter |
+
+Residual: the file-writing and build-starting routes (`workflows/save`, `actions/trigger`) are
+signed-in only. Narrowing them to admin changes behavior, so it waits for a planner decision.
+
 ## GitHub views and witz templates
 
 The GitHub repo views render from witz templates in `templates/` (T02 brief 09

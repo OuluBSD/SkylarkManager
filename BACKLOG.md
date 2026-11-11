@@ -2,6 +2,18 @@
 
 Deferred work with the reason it is deferred. Newest entries first.
 
+## Forge repository creation: done (task 022)
+
+`GitHubForgeBackend::CreateRepository` runs `gh repo create` on the gh connector only, with
+`POST /api/gh/repos/create` (admin session). The emulation refuses creation; there is no fake
+success. The contract suite covers invalid names and both implementations.
+
+## GitHub host routes: role matrix documented, roles deferred (task 022)
+
+The role of each `api/gh` route is now written in `uppsrc/ManagerSkylark/AGENTS.md`. Only repo
+creation checks a role. Repo roles (PR-only, merge rights) still belong with the Company project
+and repo model. Narrowing `workflows/save` and `actions/trigger` to admin needs a planner decision.
+
 ## GitHub host routes: project-scoped role matrix
 
 The stock host (`ManagerSkylark`) has one account type on its GitHub routes, so
