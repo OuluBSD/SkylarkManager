@@ -16,6 +16,7 @@ uses
 	Science,
 	MetaAccount,
 	Channels,
+	Financials,
 	WebEngine,
 	WebBroker,
 	GitHubForge,

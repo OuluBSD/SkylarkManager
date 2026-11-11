@@ -17,13 +17,14 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225; FIN_PORT=18226
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
 TF_URL=http://127.0.0.1:$TF_PORT
 META_URL=http://127.0.0.1:$META_PORT
 CH_URL=http://127.0.0.1:$CH_PORT
+FIN_URL=http://127.0.0.1:$FIN_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -76,9 +77,13 @@ MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfme
 if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
 MANAGERSKYLARK_CHANNELS_PASSWORD=pw-chan "$BIN" --site-dir "$T" --set-channels-user cviewer >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Channels account"; fi
+MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fin "$BIN" --site-dir "$T" --financials-role finance \
+	--set-financials-user ffin >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision Financials finance account"; else fail "provision Financials finance account"; fi
 
 MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
 	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
+	--financials-port $FIN_PORT \
 	--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
 	--company-root "$T/company" --company-repos acme/widget --science-corpus "$T/corpus" \
 	--privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
@@ -88,8 +93,10 @@ for i in $(seq 1 40); do
 	if [ "$(curl -s -o /dev/null -w '%{http_code}' $PH_URL/session/login)" = "200" ] && \
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $SC_URL/)" != "000" ] && \
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ] && \
-	   [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ] && \
-	   [ "$(curl -s -o /dev/null -w '%{http_code}' $CH_URL/)" != "000" ]; then ready=1; break; fi
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ] && \
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $CH_URL/)" != "000" ] && \
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $FIN_URL/)" != "000" ]; then ready=1; break; fi
+
 	sleep 0.25
 done
 if [ $ready -ne 1 ]; then
@@ -97,7 +104,7 @@ if [ $ready -ne 1 ]; then
 	kill $pid 2>/dev/null
 	exit 1
 fi
-pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT"
+pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT, $FIN_PORT"
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"
@@ -106,7 +113,7 @@ check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.
 check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
 man=$(cat "$T/body")
-for site in privatehub science taskfoundry meta channels company github; do
+for site in privatehub science taskfoundry meta channels financials company github; do
 	if printf '%s' "$man" | grep -q "\"id\": *\"$site\""; then pass "manifest lists $site"; else fail "manifest lists $site"; fi
 done
 for path in 'api/papers' 'api/papers/\*/article' 'session/login' 'privatehub/\*/\*/issues/create' \
@@ -351,6 +358,17 @@ if grep -q "&lt;b&gt;raw&lt;/b&gt;" "$T/body" && ! grep -q "<b>raw</b>" "$T/body
 else
 	fail "channels bodies render escaped"
 fi
+
+# The Financials site (task 016): the real, freshly seeded Company store has
+# an empty ledger, so the finance viewer renders the empty states end to end.
+check "financials summary anonymous redirects" 302 "$FIN_URL/financials"
+curl -s -c "$T/fin.jar" -o "$T/fin_login" -H "Origin: $FIN_URL" -H "Accept: application/json" \
+	--data "username=ffin&password=pw-fin" "$FIN_URL/session/login"
+check "financials summary for the finance role" 200 "$FIN_URL/financials" -b "$T/fin.jar"
+check "financials ledger empty state" 200 "$FIN_URL/ledger" -b "$T/fin.jar"
+if grep -q "No ledger entries yet" "$T/body"; then pass "financials ledger shows the empty state"; else fail "financials ledger shows the empty state"; fi
+check "financials contracts empty state" 200 "$FIN_URL/contracts" -b "$T/fin.jar"
+if grep -q "No contracts yet" "$T/body"; then pass "financials contracts shows the empty state"; else fail "financials contracts shows the empty state"; fi
 
 # The operator CLI stays as a documented fallback: a fresh request can be
 # approved and revoked out of band.

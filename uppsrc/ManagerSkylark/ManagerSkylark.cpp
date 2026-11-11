@@ -92,6 +92,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("agentipc-python", 0, "Python running the agentipc client (default ~/.venvs/agentipc/bin/python)", true, "path");
 	cla.AddArg("agentipc-client", 0, "agentipc client script (default ~/OuluLinux/AgentIPC/bin/agentipc)", true, "path");
 	cla.AddArg("agentipc-home", 0, "AgentIPC node home (default ~/.agentipc-skylark)", true, "directory");
+	cla.AddArg("financials-port", 0, "Financials engine site port (default 18216)", true, "port");
+	cla.AddArg("financials-role", 0, "Role for --set-financials-user (default viewer; finance sees ledger rows and contracts)", true, "role");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
 	cla.AddArg("approve-taskfoundry-grant", 0, "Approve a requested TaskFoundry grant by id (wag_...) and exit", true, "grant-id");
@@ -99,6 +101,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-meta-user", 0, "Create/update a MetaAccount account with hidden prompt (or MANAGERSKYLARK_META_PASSWORD)", true, "username");
 	cla.AddArg("set-channels-user", 0, "Create/update a Channels account with hidden prompt (or MANAGERSKYLARK_CHANNELS_PASSWORD)", true, "username");
+	cla.AddArg("set-financials-user", 0, "Create/update a Financials account with hidden prompt (or MANAGERSKYLARK_FINANCIALS_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("privatehub-role", 0, "Role for --set-privatehub-user (default member; only member may author)", true, "role");
 	cla.AddArg("github-backend", 0, "GitHub backend: gh (argv-only gh CLI, default) or emulated (local file-backed emulation, no network)", true, "gh|emulated");
@@ -221,6 +224,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.meta_port = ScanInt(cla.GetArg("meta-port"));
 		if(!cla.GetArg("channels-port").IsEmpty())
 			cfg.channels_port = ScanInt(cla.GetArg("channels-port"));
+		if(!cla.GetArg("financials-port").IsEmpty())
+			cfg.financials_port = ScanInt(cla.GetArg("financials-port"));
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
 			cfg.agentipc_direct = cla.GetArg("agentipc-direct");
 		if(!cla.GetArg("agentipc-server").IsEmpty())
@@ -255,6 +260,21 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			}
 			Cout() << "Configured TaskFoundry account '" << tf_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String fin_user = cla.GetArg("set-financials-user");
+		if(!fin_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_FINANCIALS_PASSWORD", "New Financials password: ", password))
+				return false;
+			String error;
+			if(!SetFinancialsPassword(fin_user, cla.GetArg("financials-role"), password, error)) {
+				Cerr() << "Failed to write Financials credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured Financials account '" << fin_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

@@ -126,6 +126,16 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallChannelsSite(ch, ipc);
 	InstallSessionRoutes(ch);
 	host.BindSite(cfg.channels_port, "channels");
+
+	// The financials site: the read-only window over the Company money flows,
+	// through the broker only. Roles: viewer (aggregates) and finance (rows).
+	String fin_root = AppendFileName(engine_root, "financials");
+	RealizeDirectory(fin_root);
+	EngineSite& fin = TheWebEngine().AddSite("financials", "Financials",
+		Format("http://127.0.0.1:%d", cfg.financials_port), fin_root);
+	InstallFinancialsSite(fin);
+	InstallSessionRoutes(fin);
+	host.BindSite(cfg.financials_port, "financials");
 	RegisterComposedBrokerCommands();
 	return true;
 }
@@ -185,6 +195,15 @@ bool SetChannelsPassword(const String& username, const String& password, String&
 {
 	Vector<String> roles;
 	return SetEngineUser("channels", username, password, roles, error);
+}
+
+bool SetFinancialsPassword(const String& username, const String& role,
+                           const String& password, String& error)
+{
+	Vector<String> roles;
+	if(!role.IsEmpty())
+		roles.Add(role);
+	return SetEngineUser("financials", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

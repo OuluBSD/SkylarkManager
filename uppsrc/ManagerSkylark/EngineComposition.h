@@ -4,6 +4,7 @@
 #include <Core/Core.h>
 #include <WebEngine/Host.h>
 #include <Channels/ChannelsSite.h>
+#include <Financials/FinancialsSite.h>
 #include <MetaAccount/MetaAccountSite.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <Science/ScienceSite.h>
@@ -21,6 +22,7 @@ struct EngineComposition {
 	int    taskfoundry_port = 18213;
 	int    meta_port = 18214;
 	int    channels_port = 18215;
+	int    financials_port = 18216;
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the
 	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
 	String agentipc_direct = "127.0.0.1:7440";
@@ -78,6 +80,11 @@ bool SetMetaAccountPassword(const String& username, const String& password, Stri
 // Creates or updates a Channels viewer account on the composed channels site
 // (read-only frontend). Requires ComposeEngineSites to have run.
 bool SetChannelsPassword(const String& username, const String& password, String& error);
+
+// Creates or updates a Financials account (role "viewer", or "finance" via
+// the financials role flag). Requires ComposeEngineSites to have run.
+bool SetFinancialsPassword(const String& username, const String& role,
+                           const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);

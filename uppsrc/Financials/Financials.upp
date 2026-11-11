@@ -1,0 +1,14 @@
+description "Financials webapp: read-only manager-portal view over the Company broker surface\377";
+
+uses
+	Core,
+	Skylark,
+	WebStorage,
+	WebAccounts,
+	WebEngine,
+	WebBroker;
+
+file
+	AGENTS.md,
+	FinancialsSite.h,
+	FinancialsSite.cpp;

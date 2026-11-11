@@ -15,7 +15,8 @@ uses
 	PrivateHubWorkspace,
 	Science,
 	TaskFoundry,
-	Channels;
+	Channels,
+	Financials;
 
 file
 	AGENTS.md,

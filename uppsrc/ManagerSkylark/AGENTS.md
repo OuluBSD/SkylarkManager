@@ -57,6 +57,7 @@ behind `WebEngineHost`, each on its own listener port, plus the Company module:
 | `taskfoundry` | 18213 | `<site-dir>/engine/taskfoundry` | `--taskfoundry-port` |
 | `meta` | 18214 | `<site-dir>/engine/meta` | `--meta-port` |
 | `channels` | 18215 | `<site-dir>/engine/channels` | `--channels-port`, `--agentipc-*` (see `uppsrc/Channels/AGENTS.md`) |
+| `financials` | 18216 | `<site-dir>/engine/financials` | `--financials-port`, `--set-financials-user`, `--financials-role` (see `uppsrc/Financials/AGENTS.md`) |
 | Company module (no site) | none | `<site-dir>/engine/company` | `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
 
 **Host-compose direction only.** ManagerSkylark composes the Company module from
@@ -68,8 +69,11 @@ this package or on ManagerSkylark (CompanySkylark AGENTS.md rule 8).
 
 Broker services registered in the composed process: `science` (ScienceService),
 `privatehub` (PrivateHub read and write operations, including `repo.info`),
-`company` (the Company module), and `meta` (MetaAccountService: authenticate,
-request-consent, check-grant, revoke-grant). TaskFoundry calls all of them; the
+`company` (the Company module: proposal draft/status and the read-only
+financial surface — ledger-summary, ledger-recent, ledger-balances,
+contracts-list), and `meta` (MetaAccountService: authenticate,
+request-consent, check-grant, revoke-grant, notify). TaskFoundry and the
+Financials site call them; the
 meta site owns the shared grant store under `<site-dir>/engine/grants`.
 
 Build note: ManagerSkylark links the Company packages, so its build needs the
@@ -121,6 +125,7 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `POST /totp/begin`, `/totp/confirm`, `/totp/disable` | meta | Enroll or disable the TOTP second factor |
 | `GET /consent`, `POST /consent/decide` | meta | Consent grants of the signed-in identity; decide (approve/deny/revoke) as the subject |
 | `GET /inbox`, `POST /inbox/read-all` | meta | The identity inbox (consent and client-site lifecycle events); read-only for the subject, CSRF on the mutation |
+| `GET /financials`, `GET /ledger`, `GET /contracts` | financials | The Company money flows read-only through the broker; ledger rows and contracts need the finance role |
 | `GET /overview` | channels | The AgentIPC node's channels and their last activity (read-only) |
 | `GET /channels/{server}/{chan}` | channels | A channel's recent messages through the argv-only client (read-only) |
 

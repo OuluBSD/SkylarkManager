@@ -14,7 +14,9 @@
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <TaskFoundry/TaskFoundrySite.h>
+#include <WebBroker/WebBroker.h>
 #include <Channels/ChannelsSite.h>
+#include <Financials/FinancialsSite.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -39,6 +41,7 @@ static const int SCIENCE_PORT = 18204;
 static const int PRIVATEHUB_PORT = 18205;
 static const int TASKFOUNDRY_PORT = 18206;
 static const int CHANNELS_PORT = 18207;
+static const int FINANCIALS_PORT = 18208;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -390,6 +393,101 @@ static ScienceCorpus *s_sci_corpus = NULL;
 static PrivateHubWorkspaceBackend *s_ph_backend = NULL;
 static TaskFoundryService *s_tf_service = NULL;
 
+// The canned Company stand-in: the Financials site (and any fence broker
+// caller) reads through this instead of the real module. Scope checks mirror
+// the real CompanyBroker. A COMPANY_SHIM_FAIL environment flag fails every
+// call, to exercise the site's failure page.
+class FakeCompanyService : public IBrokerService {
+public:
+	static bool HasScope(const Vector<String>& scopes, const char *scope) {
+		for(const String& s : scopes)
+			if(s == scope)
+				return true;
+		return false;
+	}
+
+	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override {
+		BrokerResult r;
+		if(!GetEnv("COMPANY_SHIM_FAIL").IsEmpty()) {
+			r.status = 503;
+			r.error = "company shim failure";
+			return r;
+		}
+		bool admin = HasScope(ctx.scopes, "admin");
+		if(call.op == "ledger-summary") {
+			if(!HasScope(ctx.scopes, "ledger:read")) {
+				r.status = 403;
+				r.error = "missing scope ledger:read";
+				return r;
+			}
+			r.ok = true;
+			r.status = 200;
+			r.payload.Add("credit_total", 500);
+			r.payload.Add("debit_total", 120);
+			r.payload.Add("correction_total", 0);
+			r.payload.Add("entry_count", 2);
+			r.payload.Add("newest_entry_at", "2026-11-11 05:00:00");
+			return r;
+		}
+		if(call.op == "ledger-recent") {
+			if(!HasScope(ctx.scopes, "ledger:read")) {
+				r.status = 403;
+				r.error = "missing scope ledger:read";
+				return r;
+			}
+			if(!((String)call.payload.Get("subject_user_id", "")).IsEmpty() && !admin) {
+				r.status = 403;
+				r.error = "a subject filter needs the admin scope";
+				return r;
+			}
+			ValueArray rows;
+			ValueMap row;
+			row.Add("seq", 2);
+			row.Add("type", "credit");
+			row.Add("amount", 500);
+			if(admin)
+				row.Add("user_id", "wau_fakeuser");
+			row.Add("reason", "fixed <bug> & shipped");
+			row.Add("created_at", "2026-11-11 05:00:00");
+			rows.Add(row);
+			r.ok = true;
+			r.status = 200;
+			r.payload.Add("entries", rows);
+			r.payload.Add("total", 2);
+			return r;
+		}
+		if(call.op == "ledger-balances" || call.op == "contracts-list") {
+			if(!admin) {
+				r.status = 403;
+				r.error = "missing scope admin";
+				return r;
+			}
+			ValueArray rows;
+			ValueMap row;
+			if(call.op == "ledger-balances") {
+				row.Add("user_id", "wau_fakeuser");
+				row.Add("balance", 380);
+			}
+			else {
+				row.Add("id", "ctr_fake");
+				row.Add("title", "Fake <contract>");
+				row.Add("status", "active");
+				row.Add("currency", "CR");
+				row.Add("amount", 1000.0);
+				row.Add("client_user_id", "wau_client");
+			}
+			rows.Add(row);
+			r.ok = true;
+			r.status = 200;
+			r.payload.Add(call.op == "ledger-balances" ? String("balances") : String("contracts"), rows);
+			return r;
+		}
+		r.status = 404;
+		r.error = "unknown op";
+		return r;
+	}
+};
+
 static void SetupSites()
 {
 	EngineSite& alpha = TheWebEngine().AddSite("alpha", "Alpha",
@@ -476,6 +574,16 @@ static void SetupSites()
 
 	// A second meta identity, for the not-your-grant negative.
 	meta.Accounts().CreateUser("eva", "pw-eva", "Eva", ph_no_roles, uid, existed);
+
+	// Financials site over the canned company stand-in (task 016).
+	EngineSite& fin = TheWebEngine().AddSite("financials", "Financials",
+		Format("http://127.0.0.1:%d", FINANCIALS_PORT), AppendFileName(s_root, "financials"));
+	InstallFinancialsSite(fin);
+	InstallSessionRoutes(fin);
+	Vector<String> fin_finance_roles;
+	fin_finance_roles.Add("finance");
+	fin.Accounts().CreateUser("fviewer", "pw-fin", "Fviewer", ph_no_roles, uid, existed);
+	fin.Accounts().CreateUser("ffin", "pw-fin2", "Ffin", fin_finance_roles, uid, existed);
 
 	// Channels site over an argv shim (task 012: read-only AgentIPC frontend).
 	String shim_path = AppendFileName(s_root, "channels-shim.sh");
@@ -1154,9 +1262,11 @@ CONSOLE_APP_MAIN
 	host.BindSite(PRIVATEHUB_PORT, "privatehub");
 	host.BindSite(TASKFOUNDRY_PORT, "taskfoundry");
 	host.BindSite(CHANNELS_PORT, "channels");
+	host.BindSite(FINANCIALS_PORT, "financials");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
+	TheWebEngine().Broker().Register("company", new FakeCompanyService());
 
 	Thread host_thread;
 	host_thread.Run(HostMain);
@@ -2040,6 +2150,75 @@ CONSOLE_APP_MAIN
 		HttpReply rcf = HttpCall("GET", CHANNELS_PORT, "/channels/skylark/AGENTLAB?fresh=1", ch_h, "");
 		setenv("AGENTIPC_SHIM_FAIL", "", 1);
 		Check(rcf.status == 503, "a failing client answers with the unavailable page");
+	}
+
+	// --- Financials read-only portal over the canned company stand-in (task 016) ---
+	{
+		String fin_origin = Format("http://127.0.0.1:%d", FINANCIALS_PORT);
+		auto FinLogin = [&](const char* user, const char* pw, String& cookie, String& csrf) {
+			VectorMap<String, String> o;
+			o.Add("Origin", fin_origin);
+			o.Add("accept", "application/json");
+			VectorMap<String, String> f;
+			f.Add("username", user);
+			f.Add("password", pw);
+			HttpReply rl = HttpCall("POST", FINANCIALS_PORT, "/session/login", o, FormEncode(f));
+			csrf = (String)ParseJSON(rl.body)["csrf"];
+			String raw;
+			cookie = "wfs_financials=" + CookieOf(rl, "wfs_financials", raw);
+			return rl.status == 200 && csrf.GetCount() > 0;
+		};
+		String view_cookie, view_csrf, fin_cookie, fin_csrf;
+		Check(FinLogin("fviewer", "pw-fin", view_cookie, view_csrf), "financials viewer login");
+		Check(FinLogin("ffin", "pw-fin2", fin_cookie, fin_csrf), "financials finance login");
+
+		VectorMap<String, String> anon_h;
+		anon_h.Add("Origin", fin_origin);
+		HttpReply rfa = HttpCall("GET", FINANCIALS_PORT, "/financials", anon_h, "");
+		Check(rfa.status == 302, "financials summary anonymous redirects");
+
+		VectorMap<String, String> view_h;
+		view_h.Add("Origin", fin_origin);
+		view_h.Add("Cookie", view_cookie);
+		VectorMap<String, String> fin_h;
+		fin_h.Add("Origin", fin_origin);
+		fin_h.Add("Cookie", fin_cookie);
+
+		HttpReply rvs = HttpCall("GET", FINANCIALS_PORT, "/financials", view_h, "");
+		Check(rvs.status == 200 && rvs.body.Find("500") >= 0, "the viewer sees the ledger summary");
+		HttpReply rvl = HttpCall("GET", FINANCIALS_PORT, "/ledger", view_h, "");
+		Check(rvl.status == 403, "the viewer is refused the ledger rows");
+		HttpReply rvc = HttpCall("GET", FINANCIALS_PORT, "/contracts", view_h, "");
+		Check(rvc.status == 403, "the viewer is refused the contracts");
+
+		HttpReply rfl = HttpCall("GET", FINANCIALS_PORT, "/ledger", fin_h, "");
+		Check(rfl.status == 200 && rfl.body.Find("fixed &lt;bug&gt; &amp; shipped") >= 0
+		      && rfl.body.Find("<bug>") < 0, "the finance role reads the ledger with escaped text");
+		HttpReply rfc = HttpCall("GET", FINANCIALS_PORT, "/contracts", fin_h, "");
+		Check(rfc.status == 200 && rfc.body.Find("Fake &lt;contract&gt;") >= 0,
+		      "the finance role reads the contracts with escaped text");
+		HttpReply rfs = HttpCall("GET", FINANCIALS_PORT, "/financials", fin_h, "");
+		Check(rfs.status == 200 && rfs.body.Find("500") >= 0, "the finance role sees the summary too");
+
+		// The module-side scope gate: a ledger:read caller without admin is
+		// refused the per-user rows even at the broker.
+		{
+			BrokerCallContext ctx;
+			ctx.from_site = "financials";
+			ctx.to_site = "company";
+			ctx.scopes.Add("ledger:read");
+			BrokerCall call;
+			call.op = "ledger-recent";
+			call.payload.Add("subject_user_id", "wau_fakeuser");
+			BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
+			Check(!res.ok, "a subject filter without the admin scope is refused at the module");
+		}
+
+		// A failing module answers with the unavailable page.
+		setenv("COMPANY_SHIM_FAIL", "1", 1);
+		HttpReply rff = HttpCall("GET", FINANCIALS_PORT, "/financials?fresh=1", fin_h, "");
+		setenv("COMPANY_SHIM_FAIL", "", 1);
+		Check(rff.status == 503, "a failing module answers with the unavailable page");
 	}
 
 	// Command manifest: the registry shape, and the session routes checked against their descriptors.

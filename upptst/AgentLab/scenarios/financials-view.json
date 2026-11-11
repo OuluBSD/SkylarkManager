@@ -1,0 +1,70 @@
+{
+  "id": "financials-view",
+  "title": "The Financials site renders the ledger summary, recent entries and contracts for the finance role (read-only, no announcer writes)",
+  "sites": [
+    "financials"
+  ],
+  "agents": {
+    "financer": {
+      "user": "ffin",
+      "role": "finance",
+      "instructions": "You are ffin, a Financials finance-role viewer. Open the summary, the ledger and the contracts views. Everything is read-only.",
+      "announcer": "a1"
+    }
+  },
+  "provision": {
+    "financials": [
+      {
+        "user": "ffin",
+        "role": "finance"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "fin-login",
+      "as": "financer",
+      "login": "financials"
+    },
+    {
+      "id": "summary",
+      "as": "financer",
+      "describe": "the ledger summary renders",
+      "run": [
+        "financials",
+        "financials-summary"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "Financials summary"
+        ]
+      }
+    },
+    {
+      "id": "ledger",
+      "as": "financer",
+      "describe": "the recent ledger entries render",
+      "run": [
+        "financials",
+        "financials-ledger"
+      ],
+      "expect": {
+        "rc": 0
+      }
+    },
+    {
+      "id": "contracts",
+      "as": "financer",
+      "describe": "the contracts render",
+      "run": [
+        "financials",
+        "financials-contracts"
+      ],
+      "expect": {
+        "rc": 0
+      },
+      "announce": "@scenario-oversight financials views rendered"
+    }
+  ]
+}

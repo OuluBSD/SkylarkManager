@@ -49,6 +49,15 @@ void RegisterComposedBrokerCommands()
 	                                            "estimated_hours:number:required"}));
 	cm.Add("company", "Company", BrokerCommand("broker-proposal-status", COMPANY_BROKER_STATUS, kBrokerAuth,
 	                                           "Read a proposal's status", {"proposal_id:string:required"}));
+	cm.Add("company", "Company", BrokerCommand("broker-ledger-summary", COMPANY_BROKER_LEDGER_SUMMARY,
+	                                           kBrokerAuth, "Ledger totals and entry count (read-only)", {}));
+	cm.Add("company", "Company", BrokerCommand("broker-ledger-recent", COMPANY_BROKER_LEDGER_RECENT,
+	                                           kBrokerAuth, "Recent ledger entries (read-only)",
+	                                           {"subject_user_id:string", "limit:int"}));
+	cm.Add("company", "Company", BrokerCommand("broker-ledger-balances", COMPANY_BROKER_LEDGER_BALANCES,
+	                                           kBrokerAuth, "Per-user ledger balances (read-only)", {}));
+	cm.Add("company", "Company", BrokerCommand("broker-contracts-list", COMPANY_BROKER_CONTRACTS_LIST,
+	                                           kBrokerAuth, "Client contracts and their statuses (read-only)", {}));
 }
 
 // Host GitHub routes: the JSON API under api/gh. These run the host's own
