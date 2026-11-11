@@ -1,15 +1,17 @@
 # Backlog (recorded, not scheduled)
 
 Items below were routed here by a worker brief. Each is recorded with its
-source so a later brief can pick it up. All five are done as of brief 13; each entry records its commit.
+source so a later brief can pick it up. Each entry records its commit when
+done. Items 6 and 8 were closed on 2026-11-11 by task 009 and task 010 of
+the planner handoff (reports/009.md, reports/010.md in ~/skylark).
 
 ## 1. Caller-bound grants replacing TaskFoundry's blanket scopes
 
-- **Status: done** (brief 13 item 1, `df1e4b7`). TaskFoundry scopes come from
-  caller-bound grants; the blanket member scopes are gone. Residual: grants are
-  approved out of band with the operator flags `approve-taskfoundry-grant` and
-  `revoke-taskfoundry-grant`. MetaAccount is not composed in the real process,
-  so consent is an operator action, not a user action in the UI.
+- **Status: done** (brief 13 item 1, `df1e4b7`; consent made user-facing by
+  task 009, `9ecc37c`, 2026-11-11). TaskFoundry scopes come from
+  caller-bound grants; the blanket member scopes are gone. Consent now runs
+  through the meta site (link, request, approve, revoke); the operator flags
+  stay as a documented fallback.
 
 - **What:** a signed-in TaskFoundry member currently gets every TaskFoundry
   scope (`TaskFoundryMemberScopes()`, `uppsrc/TaskFoundry/TaskFoundryService.h`).
@@ -89,11 +91,13 @@ source so a later brief can pick it up. All five are done as of brief 13; each e
 
 ## 6. User-facing grant consent (MetaAccount composition)
 
-- **What:** TaskFoundry grants are approved only through the operator CLI
-  (`approve-taskfoundry-grant`, `revoke-taskfoundry-grant`). MetaAccount is not
-  composed into the real host process, so a user cannot consent to a grant in the UI.
-- **Decision (planner, brief 14):** interim operator-CLI consent stays. User-facing
-  consent means composing MetaAccount into the host; that is a later decision.
+- **Status: done** (task 009, `9ecc37c`, 2026-11-11). MetaAccount is the
+  fourth composed engine site (`--meta-port`, default 18214;
+  `--set-meta-user` for provisioning). A TaskFoundry user links their meta
+  identity on the grants page; the pending request is decided by its
+  subject on the meta consent page (approve/deny/revoke). Grants record
+  `client_user_id` so caller-binding stays exact. The operator CLI stays
+  as a documented fallback. reports/009.md has the gate results.
 - **Source:** WORKER-BRIEF-13 item 1 residual; WORKER-BRIEF-14 residual decision 1.
 
 ## 7. Windows LockFileEx runtime validation
@@ -107,13 +111,11 @@ source so a later brief can pick it up. All five are done as of brief 13; each e
 
 ## 8. Login-only PrivateHub writes (issues, comments, discussion posts)
 
-- **What:** issue create, issue comment, and discussion post are still gated by login
-  only (`RequireUser`), not the member role. Item 5 gated only the authoring endpoints
-  it added (wiki, topic, release file). Under the rule that every mutation checks the
-  actor's role, these three need the same gate.
-- **Decision (planner, 2026-11-11):** gate them with the member role — viewers read,
-  members write. Consistent with item 5 and the every-mutation-checks-the-role rule.
-  Open for the next brief (small: three RequireRole checks + fence negatives).
+- **Status: done** (task 010, `8e6b7d3`, 2026-11-11). Issue create, issue
+  comment, and discussion post require the member role; viewers read.
+  Manifest text updated; viewer negatives in the fence (196→209 checks
+  include task 009's) and in the privatehub-issues scenario (12/12).
+  reports/010.md has the gate results.
 - **Source:** found while writing the viewer-denial fence (brief 14 step 0).
 
 ## 9. Stale `MT` mainconfig in CompanySkylark
