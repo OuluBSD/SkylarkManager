@@ -36,11 +36,10 @@
 ### Composed sites (engine host in ManagerSkylark)
 
 The ManagerSkylark process composes fenced engine sites on separate ports
-(`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**
-(+ the Company module via `CompanyComposed` from the private CompanySkylark
-repo). The **MetaAccount** site installer exists but is not composed yet.
-The stock host site serves the manager dashboard, GitHub/SourceForge
-webapps, host inspection, WebChat, and SweAgent.
+(`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
+**MetaAccount** (+ the Company module via `CompanyComposed` from the private
+CompanySkylark repo). The stock host site serves the manager dashboard,
+GitHub/SourceForge webapps, host inspection, WebChat, and SweAgent.
 
 ---
 

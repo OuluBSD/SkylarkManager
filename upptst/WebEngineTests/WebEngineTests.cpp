@@ -13,6 +13,7 @@
 #include <SourceForgeForge/SourceForgeForge.h>
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
+#include <TaskFoundry/TaskFoundrySite.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -35,6 +36,7 @@ static const int BETA_PORT  = 18202;
 static const int META_PORT  = 18203;
 static const int SCIENCE_PORT = 18204;
 static const int PRIVATEHUB_PORT = 18205;
+static const int TASKFOUNDRY_PORT = 18206;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -384,6 +386,7 @@ static String     s_sci_reader_uid;
 static String     s_sci_other_uid;
 static ScienceCorpus *s_sci_corpus = NULL;
 static PrivateHubWorkspaceBackend *s_ph_backend = NULL;
+static TaskFoundryService *s_tf_service = NULL;
 
 static void SetupSites()
 {
@@ -458,6 +461,19 @@ static void SetupSites()
 	Vector<String> ph_no_roles;
 	ph.Accounts().CreateUser("member", "pw-member", "Member", ph_member_roles, uid, existed);
 	ph.Accounts().CreateUser("viewer", "pw-viewer", "Viewer", ph_no_roles, uid, existed);
+
+	// TaskFoundry site (task 009: linked-consent round trip through the meta site).
+	String tf_root = AppendFileName(s_root, "taskfoundry");
+	RealizeDirectory(tf_root);
+	s_tf_service = new TaskFoundryService(TheWebEngine().Broker(), tf_root);
+	EngineSite& tf = TheWebEngine().AddSite("taskfoundry", "TaskFoundry",
+		Format("http://127.0.0.1:%d", TASKFOUNDRY_PORT), tf_root);
+	InstallTaskFoundrySite(tf, *s_tf_service, s_meta_grants);
+	InstallSessionRoutes(tf);
+	tf.Accounts().CreateUser("tfdev", "pw-tf", "Tfdev", ph_no_roles, uid, existed);
+
+	// A second meta identity, for the not-your-grant negative.
+	meta.Accounts().CreateUser("eva", "pw-eva", "Eva", ph_no_roles, uid, existed);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -1099,6 +1115,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(META_PORT, "meta");
 	host.BindSite(SCIENCE_PORT, "science");
 	host.BindSite(PRIVATEHUB_PORT, "privatehub");
+	host.BindSite(TASKFOUNDRY_PORT, "taskfoundry");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
@@ -1707,6 +1724,108 @@ CONSOLE_APP_MAIN
 		call.payload.Add("scopes", scopes);
 		BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
 		Check(res.ok && !(bool)res.payload.Get("active"), "revoked grant is inactive via check-grant");
+	}
+
+	// --- TaskFoundry linked-consent round trip (task 009): the client site's
+	// user links to a meta identity; the meta subject decides on the meta site;
+	// the grant serves only the linking user's session. ---
+	{
+		String tf_origin = Format("http://127.0.0.1:%d", TASKFOUNDRY_PORT);
+		VectorMap<String, String> tf_lo;
+		tf_lo.Add("Origin", tf_origin);
+		auto TfHeaders = [&](VectorMap<String, String>& h, const String& cookie, const String& csrf) {
+			h.Add("Origin", tf_origin);
+			if(cookie.GetCount()) h.Add("Cookie", cookie);
+			if(csrf.GetCount()) h.Add("X-WF-CSRF", csrf);
+		};
+		tf_lo.Add("accept", "application/json");
+		VectorMap<String, String> tlf;
+		tlf.Add("username", "tfdev");
+		tlf.Add("password", "pw-tf");
+		HttpReply rtl = HttpCall("POST", TASKFOUNDRY_PORT, "/session/login", tf_lo, FormEncode(tlf));
+		String tf_csrf = (String)ParseJSON(rtl.body)["csrf"];
+		String tf_raw;
+		String tf_cookie = "wfs_taskfoundry=" + CookieOf(rtl, "wfs_taskfoundry", tf_raw);
+		Check(rtl.status == 200 && tf_csrf.GetCount() > 0, "taskfoundry session login");
+
+		// Without a grant the board redirects and a write is refused.
+		VectorMap<String, String> tf_h;
+		TfHeaders(tf_h, tf_cookie, tf_csrf);
+		HttpReply rb0 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
+		Check(rb0.status == 302, "taskfoundry board without a grant redirects");
+		VectorMap<String, String> cc_f;
+		cc_f.Add("title", "Linked");
+		cc_f.Add("summary", "x");
+		cc_f.Add("paper_id", "2612.00002");
+		HttpReply rc0 = HttpCall("POST", TASKFOUNDRY_PORT, "/candidates/create", tf_h, FormEncode(cc_f));
+		Check(rc0.status == 403, "taskfoundry write without a grant is refused");
+
+		// The signed-in user links to a meta identity to request the grant.
+		VectorMap<String, String> grf;
+		grf.Add("meta_user", "mallory");
+		grf.Add("meta_password", "pw-meta");
+		grf.Add("meta_code", TotpCode(secret, TotpUnixNow()));
+		HttpReply rgr = HttpCall("POST", TASKFOUNDRY_PORT, "/grants/request", tf_h, FormEncode(grf));
+		Check(rgr.status == 302, "linked grant request accepted");
+		HttpReply rgl = HttpCall("GET", TASKFOUNDRY_PORT, "/grants", tf_h, "");
+		Check(rgl.status == 200 && rgl.body.Find("requested") >= 0, "pending linked grant is listed");
+		String wag;
+		{
+			int p = rgl.body.Find("wag_");
+			Check(p >= 0, "grant id appears on the grants page");
+			if(p >= 0) {
+				int e = p;
+				while(e < rgl.body.GetCount()) {
+					char c = rgl.body[e];
+					if(!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+					    || c == '_' || c == '-'))
+						break;
+					e++;
+				}
+				wag = rgl.body.Mid(p, e - p);
+			}
+		}
+
+		// A meta user who is not the subject cannot decide.
+		VectorMap<String, String> elf;
+		elf.Add("username", "eva");
+		elf.Add("password", "pw-eva");
+		HttpReply rel = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(elf));
+		String eva_csrf = (String)ParseJSON(rel.body)["csrf"];
+		String eva_raw;
+		String eva_cookie = "wfs_meta=" + CookieOf(rel, "wfs_meta", eva_raw);
+		VectorMap<String, String> eva_h;
+		eva_h.Add("Cookie", eva_cookie);
+		eva_h.Add("X-WF-CSRF", eva_csrf);
+		VectorMap<String, String> notmine;
+		notmine.Add("grant_id", wag);
+		notmine.Add("approve", "1");
+		HttpReply rnm = HttpCall("POST", META_PORT, "/consent/decide", eva_h, FormEncode(notmine));
+		Check(rnm.status == 403, "a meta user who is not the subject cannot decide the grant");
+
+		// The subject approves; TaskFoundry access opens.
+		VectorMap<String, String> yes_f;
+		yes_f.Add("grant_id", wag);
+		yes_f.Add("approve", "1");
+		HttpReply rap = HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(yes_f));
+		Check(JsonFlag(ParseJSON(rap.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rap.body) : ValueMap(), "ok"),
+		      "the meta subject approves the linked grant");
+		HttpReply rb1 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
+		Check(rb1.status == 200, "taskfoundry board serves with the approved linked grant");
+		HttpReply rc1 = HttpCall("POST", TASKFOUNDRY_PORT, "/candidates/create", tf_h, FormEncode(cc_f));
+		Check(rc1.status == 302, "candidate create with the approved linked grant");
+
+		// The subject revokes; access closes on the next request.
+		VectorMap<String, String> no_f;
+		no_f.Add("grant_id", wag);
+		no_f.Add("approve", "0");
+		HttpReply rrv = HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(no_f));
+		Check(JsonFlag(ParseJSON(rrv.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rrv.body) : ValueMap(), "ok"),
+		      "the meta subject revokes the linked grant");
+		HttpReply rc2 = HttpCall("POST", TASKFOUNDRY_PORT, "/candidates/create", tf_h, FormEncode(cc_f));
+		Check(rc2.status == 403, "taskfoundry write is refused after the meta revoke");
+		HttpReply rb2 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
+		Check(rb2.status == 302, "taskfoundry board redirects again after the meta revoke");
 	}
 
 	// Command manifest: the registry shape, and the session routes checked against their descriptors.

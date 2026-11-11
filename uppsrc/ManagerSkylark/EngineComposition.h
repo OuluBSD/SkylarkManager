@@ -3,6 +3,7 @@
 
 #include <Core/Core.h>
 #include <WebEngine/Host.h>
+#include <MetaAccount/MetaAccountSite.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -17,6 +18,7 @@ struct EngineComposition {
 	int    privatehub_port = 18211;
 	int    science_port = 18212;
 	int    taskfoundry_port = 18213;
+	int    meta_port = 18214;
 	String privatehub_workspace; // checkouts root (default ~/Dev)
 	String science_corpus;       // flat corpus + article sidecars (default ~/Dev/AnthologyPrivate/site/data)
 	String company_root;         // Company store root (default <site_dir>/engine/company)
@@ -35,11 +37,12 @@ struct EngineSiteBackends {
 	One<TaskFoundryService>         taskfoundry;
 };
 
-// Creates the PrivateHub, Science and TaskFoundry engine sites, opens the
-// composed Company module, binds the listener ports, registers the broker
-// services (privatehub, science, company), and creates the grant store under
-// <site_dir>/engine. Called once, before the app runs, for the real server.
-// Returns false, with error set, when a composed store cannot be opened.
+// Creates the PrivateHub, Science, TaskFoundry and MetaAccount engine sites,
+// opens the composed Company module, binds the listener ports, registers the
+// broker services (privatehub, science, company, meta), and creates the grant
+// store under <site_dir>/engine. Called once, before the app runs, for the
+// real server. Returns false, with error set, when a composed store cannot be
+// opened.
 bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
                         const EngineComposition& cfg, String& error);
 
@@ -56,6 +59,11 @@ bool SetScienceUserPassword(const String& username, const String& password, Stri
 // Creates or updates a TaskFoundry account (role "member") on the composed
 // TaskFoundry site. Requires ComposeEngineSites to have run.
 bool SetTaskFoundryPassword(const String& username, const String& password, String& error);
+
+// Creates or updates a MetaAccount account on the composed meta site (the
+// ecosystem identity a client site links to for consent).
+// Requires ComposeEngineSites to have run.
+bool SetMetaAccountPassword(const String& username, const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);

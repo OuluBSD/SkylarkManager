@@ -1,11 +1,13 @@
 #!/bin/sh
 # Real-process fence for the composed engine sites (briefs 11A step 4, 11B steps 0 and 4).
-# Starts the ManagerSkylark binary with PrivateHub, Science and TaskFoundry composed on
-# temporary ports, with the Company module composed under a temporary root. Checks that
-# each site is fenced from the stock app and from the other sites, that a Science author
-# can write an article, and that a TaskFoundry round trip runs candidate -> proposal ->
-# Science and PrivateHub evidence -> validate -> submit -> Company proposal id, with a
-# repeat submit returning the same submission.
+# Starts the ManagerSkylark binary with PrivateHub, Science, TaskFoundry and MetaAccount
+# composed on temporary ports, with the Company module composed under a temporary root.
+# Checks that each site is fenced from the stock app and from the other sites, that a
+# Science author can write an article, and that a TaskFoundry round trip runs candidate ->
+# proposal -> Science and PrivateHub evidence -> validate -> submit -> Company proposal id,
+# with a repeat submit returning the same submission. TaskFoundry access is consented on
+# the MetaAccount site (link, request, approve, revoke) and the operator CLI is kept as a
+# fallback check.
 #
 # Usage: sh upptst/ComposedSite/smoke.sh <ManagerSkylark binary>
 #   e.g. sh upptst/ComposedSite/smoke.sh \
@@ -14,11 +16,12 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
 TF_URL=http://127.0.0.1:$TF_PORT
+META_URL=http://127.0.0.1:$META_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -52,16 +55,20 @@ if [ $? -eq 0 ]; then pass "provision Science author account"; else fail "provis
 MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos acme/widget \
 	--set-taskfoundry-user tfdev >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision TaskFoundry account"; else fail "provision TaskFoundry account"; fi
+MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfmeta >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
 
 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT --science-port $SC_PORT \
-	--taskfoundry-port $TF_PORT --company-root "$T/company" --company-repos acme/widget \
-	--science-corpus "$T/corpus" --privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
+	--taskfoundry-port $TF_PORT --meta-port $META_PORT --company-root "$T/company" \
+	--company-repos acme/widget --science-corpus "$T/corpus" --privatehub-workspace "$T/ws" \
+	> "$T/server.log" 2>&1 &
 pid=$!
 ready=0
 for i in $(seq 1 40); do
 	if [ "$(curl -s -o /dev/null -w '%{http_code}' $PH_URL/session/login)" = "200" ] && \
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $SC_URL/)" != "000" ] && \
-	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ]; then ready=1; break; fi
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ] && \
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ]; then ready=1; break; fi
 	sleep 0.25
 done
 if [ $ready -ne 1 ]; then
@@ -69,7 +76,7 @@ if [ $ready -ne 1 ]; then
 	kill $pid 2>/dev/null
 	exit 1
 fi
-pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT"
+pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT"
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"
@@ -78,11 +85,12 @@ check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.
 check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
 man=$(cat "$T/body")
-for site in privatehub science taskfoundry company github; do
+for site in privatehub science taskfoundry meta company github; do
 	if printf '%s' "$man" | grep -q "\"id\": *\"$site\""; then pass "manifest lists $site"; else fail "manifest lists $site"; fi
 done
 for path in 'api/papers' 'api/papers/\*/article' 'session/login' 'privatehub/\*/\*/issues/create' \
-	'privatehub/\*/\*/files/register' 'candidates/create' 'proposals/\*/submit' 'api/gh/issues/\*/create'; do
+	'privatehub/\*/\*/files/register' 'candidates/create' 'proposals/\*/submit' 'consent/decide' \
+	'api/gh/issues/\*/create'; do
 	if printf '%s' "$man" | grep -q "\"api_path\": *\"$path\""; then pass "manifest covers $path"; else fail "manifest covers $path"; fi
 done
 check "manifest for privatehub" 200 "$MAIN_URL/api/cli/manifest/privatehub"
@@ -226,14 +234,26 @@ esac
 r=$(post_form "candidates/create" "title=Early&summary=x&paper_id=2612.00002")
 if [ "${r%% *}" = "403" ]; then pass "taskfoundry write without a grant is refused (403)"; else fail "taskfoundry write without a grant is refused (got $r)"; fi
 
-# Request a grant from the session, have the operator approve it, then use the site.
-r=$(post_form "grants/request" "")
-if [ "${r%% *}" = "302" ]; then pass "taskfoundry grant requested from the session"; else fail "taskfoundry grant requested from the session ($r)"; fi
+# Request a grant by linking the session's meta identity, approve it on the
+# MetaAccount site, then use the site.
+r=$(post_form "grants/request" "meta_user=tfmeta&meta_password=pw-meta")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry grant requested with meta credentials"; else fail "taskfoundry grant requested with meta credentials ($r)"; fi
 curl -s -o "$T/tf_grants" -b "$T/tf.jar" "$TF_URL/grants"
-gid=$(grep -o 'wag_[A-Za-z0-9_-]*' "$T/tf_grants" | head -1)
+gid=$(grep -o 'wag_[A-Za-z0-9_-]*</td><td>requested' "$T/tf_grants" | head -1 | sed 's#</td><td>requested##')
 if [ -n "$gid" ] && grep -q "requested" "$T/tf_grants"; then pass "requested grant is listed on the grants page"; else fail "requested grant is listed on the grants page"; fi
-"$BIN" --site-dir "$T" --approve-taskfoundry-grant "$gid" >/dev/null 2>&1
-if [ $? -eq 0 ]; then pass "operator approves the grant with the CLI"; else fail "operator approves the grant with the CLI"; fi
+curl -s -c "$T/meta.jar" -o "$T/meta_login" -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tfmeta&password=pw-meta" "$META_URL/session/login"
+meta_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/meta_login")
+if [ -n "$meta_csrf" ]; then pass "meta account login returns a csrf token"; else fail "meta account login returns a csrf token"; fi
+curl -s -o "$T/meta_consent" -b "$T/meta.jar" "$META_URL/consent"
+if grep -q "requested" "$T/meta_consent" && grep -q "$gid" "$T/meta_consent"; then
+	pass "pending request shows on the meta consent page"
+else
+	fail "pending request shows on the meta consent page"
+fi
+got=$(curl -s -o "$T/meta_decide" -w '%{http_code}' -b "$T/meta.jar" -H "Origin: $META_URL" \
+	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=1" "$META_URL/consent/decide")
+if [ "$got" = "200" ]; then pass "the meta user approves the grant on the meta site"; else fail "the meta user approves the grant on the meta site (got $got)"; fi
 check "taskfoundry board with an approved grant" 200 "$TF_URL/" -b "$T/tf.jar"
 
 r=$(post_form "candidates/create" "title=Round+trip&summary=Smoke&paper_id=2612.00002")
@@ -274,9 +294,10 @@ anon=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $TF_URL" -H "x-wf-csrf
 	--data "" "$TF_URL/proposals/$prop/submit")
 if [ "$anon" = "302" ]; then pass "anonymous submit is refused"; else fail "anonymous submit is refused (got $anon)"; fi
 
-# The grant is revocable: once revoked, the same session is refused again.
-"$BIN" --site-dir "$T" --revoke-taskfoundry-grant "$gid" >/dev/null 2>&1
-if [ $? -eq 0 ]; then pass "operator revokes the grant with the CLI"; else fail "operator revokes the grant with the CLI"; fi
+# The grant is revocable from the meta site; the same session is refused again.
+got=$(curl -s -o "$T/meta_revoke" -w '%{http_code}' -b "$T/meta.jar" -H "Origin: $META_URL" \
+	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=0" "$META_URL/consent/decide")
+if [ "$got" = "200" ]; then pass "the meta user revokes the grant on the meta site"; else fail "the meta user revokes the grant on the meta site (got $got)"; fi
 r=$(post_form "candidates/create" "title=After+revoke&summary=x&paper_id=2612.00002")
 if [ "${r%% *}" = "403" ]; then pass "taskfoundry write after revoke is refused (403)"; else fail "taskfoundry write after revoke is refused (got $r)"; fi
 loc=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$T/tf.jar" "$TF_URL/")
@@ -284,6 +305,19 @@ case "$loc" in
 */grants) pass "taskfoundry board after revoke redirects to the grants page" ;;
 *) fail "taskfoundry board after revoke redirects to the grants page (got '$loc')" ;;
 esac
+
+# The operator CLI stays as a documented fallback: a fresh request can be
+# approved and revoked out of band.
+r=$(post_form "grants/request" "meta_user=tfmeta&meta_password=pw-meta")
+if [ "${r%% *}" = "302" ]; then pass "taskfoundry grant re-requested after the revoke"; else fail "taskfoundry grant re-requested after the revoke ($r)"; fi
+curl -s -o "$T/tf_grants2" -b "$T/tf.jar" "$TF_URL/grants"
+gid2=$(grep -o 'wag_[A-Za-z0-9_-]*</td><td>requested' "$T/tf_grants2" | head -1 | sed 's#</td><td>requested##')
+if [ -n "$gid2" ] && [ "$gid2" != "$gid" ]; then pass "the re-request creates a fresh pending grant"; else fail "the re-request creates a fresh pending grant (gid2=$gid2)"; fi
+"$BIN" --site-dir "$T" --approve-taskfoundry-grant "$gid2" >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "operator approves the grant with the CLI (fallback)"; else fail "operator approves the grant with the CLI (fallback)"; fi
+check "taskfoundry board with an operator-approved grant" 200 "$TF_URL/" -b "$T/tf.jar"
+"$BIN" --site-dir "$T" --revoke-taskfoundry-grant "$gid2" >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "operator revokes the grant with the CLI (fallback)"; else fail "operator revokes the grant with the CLI (fallback)"; fi
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

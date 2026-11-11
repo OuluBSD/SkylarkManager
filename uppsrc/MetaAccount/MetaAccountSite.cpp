@@ -166,10 +166,11 @@ static void MetaConsentList(WebRequest& r)
 	Vector<WebAccountGrant> all;
 	Grants().ListForSubject(r.User().user_id, "", all);
 	String body;
-	body << "<table border=\"1\"><tr><th>client</th><th>scopes</th><th>state</th><th></th></tr>";
+	body << "<table border=\"1\"><tr><th>client</th><th>client user</th><th>scopes</th><th>state</th><th></th></tr>";
 	for(const WebAccountGrant& g : all) {
 		body << "<tr><td>" + g.client_site + "/" + g.client_id + "</td><td>"
-		   << Join(g.scopes, ", ") << "</td><td>" << g.state << "</td><td>";
+		   << (g.client_user_id.IsEmpty() ? String("(any session of the subject)") : g.client_user_id)
+		   << "</td><td>" << Join(g.scopes, ", ") << "</td><td>" << g.state << "</td><td>";
 		if(g.state == "requested")
 			body << HtmlForm(r.Site().Url("consent/decide:POST"), r.CsrfToken(),
 			                 "<input type=\"hidden\" name=\"grant_id\" value=\"" + g.grant_id + "\">"
@@ -230,6 +231,14 @@ void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 	rt.Add("totp/disable:POST", MetaTotpDisable);
 	rt.Add("consent", MetaConsentList);
 	rt.Add("consent/decide:POST", MetaConsentDecide);
+
+	CommandManifest& cm = TheWebEngine().Manifest();
+	cm.Add(site.id, site.title, HttpCommand("consent-list", "GET", "consent", "session account",
+	                                        "html", "List my consent grants", {}));
+	cm.Add(site.id, site.title, HttpCommand("consent-decide", "POST", "consent/decide",
+	                                        "session account (the grant's subject)", "html",
+	                                        "Approve, deny or revoke a consent grant",
+	                                        {"grant_id:string:required", "approve:string:required"}));
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +280,7 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 	}
 	if(call.op == "request-consent") {
 		String subject = call.payload.Get("subject_user_id");
+		String client_user = call.payload.Get("client_user_id");
 		String client_site = call.payload.Get("client_site");
 		String client_id = call.payload.Get("client_id");
 		Vector<String> scopes;
@@ -280,7 +290,8 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 				scopes.Add((String)s);
 		String grant_id;
 		bool existed = false;
-		StoreResult st = grants.RequestGrant(subject, client_site, client_id, scopes, grant_id, existed);
+		StoreResult st = grants.RequestGrantAs(subject, client_user, client_site, client_id,
+		                                       scopes, grant_id, existed);
 		if(!st.ok) {
 			r.status = 400;
 			r.error = st.error;

@@ -5,7 +5,7 @@ A scenario is data (scenarios/<id>.json): the sites it uses, the seed, the accou
 the agents, and an ordered list of steps. Every site interaction goes through the SiteCli binary
 (`--session` per agent), so the runner never calls a site route or reads a site store. The other
 processes it starts are the ManagerSkylark binary: once to provision accounts, once as the composed
-server, and once to approve a TaskFoundry grant (the operator's CLI step).
+server, and once for an operator CLI step (approve_grant), kept as a fallback path.
 
 Usage:
   agentlab.py --binary <ManagerSkylark> --site-cli <SiteCli> [--scenario scenarios/x.json]
@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 AGENTIPC = [os.path.expanduser("~/.venvs/agentipc/bin/python"), "/home/sblo/bin/agentipc"]
 AGENTIPC_HOME = os.path.expanduser("~/.agentipc-skylark")
 PW_ENV = "AGENTLAB_ANN_PW"
-SITE_ORDER = ["privatehub", "science", "taskfoundry"]
+SITE_ORDER = ["privatehub", "science", "taskfoundry", "meta"]
 STOCK_SECTIONS = ["github"]  # served by the main port, no composed port of their own
 
 
@@ -133,6 +133,9 @@ def provision(binary, site_dir, workspace, scenario):
             elif site == "taskfoundry":
                 env["MANAGERSKYLARK_TASKFOUNDRY_PASSWORD"] = password_for(user)
                 flags = ["--set-taskfoundry-user", user, "--company-repos", "acme/widget"]
+            elif site == "meta":
+                env["MANAGERSKYLARK_META_PASSWORD"] = password_for(user)
+                flags = ["--set-meta-user", user]
             elif site == "github":
                 env["MANAGERSKYLARK_SITE_PASSWORD"] = password_for(user)
                 flags = ["--set-site-password", user]
@@ -155,6 +158,8 @@ def server_args(binary, site_dir, ports, workspace, corpus, company_root):
     if "taskfoundry" in ports:
         args += ["--taskfoundry-port", str(ports["taskfoundry"]), "--company-root", company_root,
                  "--company-repos", "acme/widget"]
+    if "meta" in ports:
+        args += ["--meta-port", str(ports["meta"])]
     return args
 
 

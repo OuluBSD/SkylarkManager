@@ -45,19 +45,28 @@ static String SiteText(const ValueMap& m, const char *key)
 }
 
 // Grants are consent records held by the meta grant store and bound to their
-// subject user. Only an approved grant for this site, owned by the caller's
-// session, gives the caller any TaskFoundry scope.
+// subject user. A linked-consent grant names the TaskFoundry user it serves
+// (client_user_id) and its subject is the meta identity that approved it; a
+// legacy/operator grant carries an empty client_user_id and its subject is the
+// TaskFoundry user. Only an approved, unexpired grant of one of those shapes,
+// owned by the caller's session, gives the caller any TaskFoundry scope.
 static WebGrants *s_grants = NULL;
+
+static bool ServesUser(const WebAccountGrant& g, const String& user_id)
+{
+	return g.client_user_id == user_id
+	    || (g.client_user_id.IsEmpty() && g.subject_user_id == user_id);
+}
 
 static bool ActiveGrant(const String& user_id, WebAccountGrant& out)
 {
 	if(!s_grants)
 		return false;
 	Vector<WebAccountGrant> list;
-	s_grants->ListForSubject(user_id, "granted", list);
+	s_grants->ListForSite(TASKFOUNDRY_SITE_ID, "granted", list);
 	for(const WebAccountGrant& g : list)
-		if(g.client_site == TASKFOUNDRY_SITE_ID && g.IsActive() &&
-		   (IsNull(g.expires_at) || g.expires_at > GetSysTime())) {
+		if(g.IsActive() && (IsNull(g.expires_at) || g.expires_at > GetSysTime())
+		   && ServesUser(g, user_id)) {
 			out = g;
 			return true;
 		}
@@ -343,20 +352,21 @@ static void SubmissionStatus(WebRequest& r)
 	Page(r, "Submission " + id, String(b));
 }
 
-// Shows the caller's TaskFoundry grants and lets them request one. Approval is
-// made outside the site (see ManagerSkylark --decide-taskfoundry-grant).
+// Shows the caller's TaskFoundry grants and lets them request one with their
+// meta-account credentials. The pending request is decided by its subject on
+// the MetaAccount site (an operator flag stays as a fallback).
 static void GrantPage(WebRequest& r)
 {
 	if(!RequireLogin(r))
 		return;
 	Vector<WebAccountGrant> list;
 	if(s_grants)
-		s_grants->ListForSubject(r.User().user_id, "", list);
+		s_grants->ListForSite(TASKFOUNDRY_SITE_ID, "", list);
 	StringBuffer b;
 	bool active = false;
 	b << "<table><tr><th>Grant</th><th>State</th><th>Scopes</th></tr>";
 	for(const WebAccountGrant& g : list) {
-		if(g.client_site != TASKFOUNDRY_SITE_ID)
+		if(!ServesUser(g, r.User().user_id))
 			continue;
 		String scopes;
 		for(const String& sc : g.scopes)
@@ -369,8 +379,12 @@ static void GrantPage(WebRequest& r)
 	if(active)
 		b << "<p>Your TaskFoundry access is active.</p>";
 	else
-		b << "<p>No approved TaskFoundry grant. Request one, and an operator approves it.</p>"
+		b << "<p>No approved TaskFoundry grant. Sign in with your meta account to request one; "
+		     "the request is approved on the MetaAccount site (consent page).</p>"
 		  << "<form method=\"post\" action=\"" << Esc(r.Site().Url("grants/request")) << "\">" << Hidden(r)
+		  << "<input name=\"meta_user\" placeholder=\"meta username\"><br>"
+		  << "<input name=\"meta_password\" type=\"password\" placeholder=\"meta password\"><br>"
+		  << "<input name=\"meta_code\" placeholder=\"2FA code (if enrolled)\"><br>"
 		  << "<button type=\"submit\">Request TaskFoundry access</button></form>";
 	Page(r, "TaskFoundry access", String(b));
 }
@@ -386,10 +400,29 @@ static void GrantRequest(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
+	// The signed-in TaskFoundry user links to a meta identity: the meta service
+	// verifies the credentials and the grant's subject becomes that meta user.
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = "meta";
+	BrokerCall call;
+	call.op = "authenticate";
+	call.payload.Add("username", r.Param("meta_user"));
+	call.payload.Add("password", r.Param("meta_password"));
+	call.payload.Add("totp_code", r.Param("meta_code"));
+	BrokerResult auth = TheWebEngine().Broker().Call(ctx, call);
+	if(!auth.ok) {
+		res.status = auth.status == 401 ? 401 : 502;
+		res.error = "meta account sign-in failed: " + auth.error;
+		Failed(r, res);
+		return;
+	}
+	String meta_uid = (String)auth.payload.Get("user_id");
 	String grant_id;
 	bool existed = false;
-	StoreResult st = s_grants->RequestGrant(r.User().user_id, TASKFOUNDRY_SITE_ID, "taskfoundry-ui",
-	                                        TaskFoundryGrantableScopes(), grant_id, existed);
+	StoreResult st = s_grants->RequestGrantAs(meta_uid, r.User().user_id, TASKFOUNDRY_SITE_ID,
+	                                          "taskfoundry-ui", TaskFoundryGrantableScopes(),
+	                                          grant_id, existed);
 	if(!st) {
 		res.status = 500;
 		res.error = st.error;
@@ -421,7 +454,9 @@ void InstallTaskFoundrySite(EngineSite& site, TaskFoundryService& service, WebGr
 	cm.Add(site.id, site.title, HttpCommand("grants-list", "GET", "grants", "session account",
 	                                        "html", "List my TaskFoundry grants and their state", {}));
 	cm.Add(site.id, site.title, HttpCommand("grant-request", "POST", "grants/request", "session account",
-	                                        "html", "Ask for a grant to use TaskFoundry", {}));
+	                                        "html", "Ask for a grant to use TaskFoundry (meta account credentials)",
+	                                        {"meta_user:string:required", "meta_password:string:required",
+	                                         "meta_code:string"}));
 	cm.Add(site.id, site.title, HttpCommand("candidate-create", "POST", "candidates/create", "session account",
 	                                        "html", "Create a candidate from a title, summary and paper",
 	                                        {"title:string:required", "summary:text", "paper_id:string:required"}));

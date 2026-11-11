@@ -1,10 +1,11 @@
 {
   "id": "taskfoundry-submit",
-  "title": "Candidate to Company proposal: no grant refused, request and approve, evidence, validate, submit, duplicate submit keeps the id",
+  "title": "Candidate to Company proposal: no grant refused, link and request, the meta user approves on the MetaAccount site, evidence, validate, submit, duplicate submit keeps the id, revoke on the meta site closes access",
   "sites": [
     "privatehub",
     "science",
-    "taskfoundry"
+    "taskfoundry",
+    "meta"
   ],
   "seed": {
     "papers": [
@@ -31,8 +32,13 @@
     "tfdev": {
       "user": "tfdev",
       "role": "session account",
-      "instructions": "You are tfdev, a TaskFoundry account. Request a grant, wait for the operator to approve it, make a candidate from paper 2612.00002, propose, attach Science and PrivateHub evidence, validate, and submit. Say each milestone on AgentIPC with @scenario-oversight.",
+      "instructions": "You are tfdev, a TaskFoundry account. Link your meta account (tfmeta) to request a grant, wait for its approval on the MetaAccount site, make a candidate from paper 2612.00002, propose, attach Science and PrivateHub evidence, validate, and submit. Say each milestone on AgentIPC with @scenario-oversight.",
       "announcer": "a5"
+    },
+    "metaacct": {
+      "user": "tfmeta",
+      "role": "meta account",
+      "instructions": "You are tfmeta's meta identity on the MetaAccount site. Approve or revoke the TaskFoundry consent request of your linked account on the consent page. Say the decision on AgentIPC with @scenario-oversight."
     },
     "anon": {
       "user": null,
@@ -51,6 +57,11 @@
     "taskfoundry": [
       {
         "user": "tfdev"
+      }
+    ],
+    "meta": [
+      {
+        "user": "tfmeta"
       }
     ],
     "science": [
@@ -105,12 +116,14 @@
       }
     },
     {
-      "id": "grant-request",
+      "id": "link-request",
       "as": "tfdev",
-      "describe": "the session requests a grant",
+      "describe": "the session links its meta identity and requests a grant",
       "run": [
         "taskfoundry",
-        "grant-request"
+        "grant-request",
+        "meta_user=tfmeta",
+        "meta_password=pw-tfmeta"
       ],
       "expect": {
         "rc": 0,
@@ -120,12 +133,17 @@
       }
     },
     {
-      "id": "grant-list",
-      "as": "tfdev",
-      "describe": "the requested grant is listed and its id captured",
+      "id": "meta-login",
+      "as": "metaacct",
+      "login": "meta"
+    },
+    {
+      "id": "consent-list",
+      "as": "metaacct",
+      "describe": "the pending request shows on the meta consent page and its id is captured",
       "run": [
-        "taskfoundry",
-        "grants-list"
+        "meta",
+        "consent-list"
       ],
       "expect": {
         "rc": 0,
@@ -139,8 +157,22 @@
       }
     },
     {
-      "id": "operator-approve",
-      "approve_grant": "{grant}"
+      "id": "meta-approve",
+      "as": "metaacct",
+      "describe": "the meta user approves the linked grant on the consent page",
+      "run": [
+        "meta",
+        "consent-decide",
+        "grant_id={grant}",
+        "approve=1"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight grant approved on the meta site"
     },
     {
       "id": "candidate-create",
@@ -281,6 +313,39 @@
         "contains": [
           "{sub}"
         ]
+      }
+    },
+    {
+      "id": "meta-revoke",
+      "as": "metaacct",
+      "describe": "the meta user revokes the grant on the consent page",
+      "run": [
+        "meta",
+        "consent-decide",
+        "grant_id={grant}",
+        "approve=0"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight grant revoked on the meta site"
+    },
+    {
+      "id": "refused-after-revoke",
+      "as": "tfdev",
+      "describe": "a write after the meta revoke is refused",
+      "run": [
+        "taskfoundry",
+        "candidate-create",
+        "title=After+revoke",
+        "summary=x",
+        "paper_id=2612.00002"
+      ],
+      "expect": {
+        "rc": 1
       }
     },
     {

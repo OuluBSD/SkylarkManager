@@ -17,6 +17,7 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 	String subject_user_id; // meta-account user granting access
 	String client_site;     // requesting site id
 	String client_id;       // app identity within the site
+	String client_user_id;  // client-site user the grant serves (empty = legacy/operator-made)
 	Vector<String> scopes;
 	String state;           // "requested" | "granted" | "denied" | "revoked"
 	Time   requested_at;
@@ -26,7 +27,7 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 	WebAccountGrant() {}
 	WebAccountGrant(const WebAccountGrant& o)
 		: grant_id(o.grant_id), subject_user_id(o.subject_user_id)
-		, client_site(o.client_site), client_id(o.client_id)
+		, client_site(o.client_site), client_id(o.client_id), client_user_id(o.client_user_id)
 		, scopes(clone(o.scopes)), state(o.state)
 		, requested_at(o.requested_at), decided_at(o.decided_at), expires_at(o.expires_at) {}
 	WebAccountGrant& operator=(const WebAccountGrant& o) {
@@ -35,6 +36,7 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 			subject_user_id = o.subject_user_id;
 			client_site = o.client_site;
 			client_id = o.client_id;
+			client_user_id = o.client_user_id;
 			scopes = clone(o.scopes);
 			state = o.state;
 			requested_at = o.requested_at;
@@ -46,7 +48,8 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 
 	void Jsonize(JsonIO& io) {
 		io("grant_id", grant_id)("subject_user_id", subject_user_id)
-		  ("client_site", client_site)("client_id", client_id)("scopes", scopes)
+		  ("client_site", client_site)("client_id", client_id)("client_user_id", client_user_id)
+		  ("scopes", scopes)
 		  ("state", state)("requested_at", requested_at)("decided_at", decided_at)
 		  ("expires_at", expires_at);
 	}
@@ -69,11 +72,21 @@ public:
 	StoreResult RequestGrant(const String& subject_user_id, const String& client_site,
 	                         const String& client_id, const Vector<String>& scopes,
 	                         String& grant_id, bool& existed);
+	// The linked-consent shape: the record also names the client-site user the
+	// grant serves. Idempotent per (subject, client_site, client_id,
+	// client_user_id) so two client users sharing one meta identity get their
+	// own requests.
+	StoreResult RequestGrantAs(const String& subject_user_id, const String& client_user_id,
+	                           const String& client_site, const String& client_id,
+	                           const Vector<String>& scopes, String& grant_id, bool& existed);
 	bool        GetGrant(const String& grant_id, WebAccountGrant& out);
 	bool        FindActive(const String& subject_user_id, const String& client_site,
 	                       const Vector<String>& scopes, WebAccountGrant& out);
 	StoreResult ListForSubject(const String& subject_user_id, const String& state_filter,
 	                           Vector<WebAccountGrant>& out);
+	// All grants of one client site (the site filters by its own caller).
+	StoreResult ListForSite(const String& client_site, const String& state_filter,
+	                        Vector<WebAccountGrant>& out);
 	StoreResult Decide(const String& grant_id, bool approve); // requested -> granted/denied
 	StoreResult Revoke(const String& grant_id);               // granted -> revoked
 	StoreResult ExpireStale();                                // expiry sweep

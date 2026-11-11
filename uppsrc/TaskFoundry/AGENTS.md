@@ -11,7 +11,10 @@ workflow. Sibling of Science and PrivateHubWorkspace.
    call is made with the caller's scopes, and the target site checks them.
    A signed-in user holds scopes only through an approved TaskFoundry grant
    (`client_site` `taskfoundry`) in the meta grant store, bound to the user's
-   session: the grant's subject must be the session user. Without one, pages
+   session. In the linked-consent shape (standard since task 009) the grant's
+   `client_user_id` is the session user and its subject is the meta identity
+   the user linked; a legacy/operator grant carries an empty `client_user_id`
+   and its subject is the session user. Without an approved grant, pages
    redirect to `grants` and writes get 403. Revoking the grant takes effect on
    the next request. `science.author` is never grantable, and TaskFoundry never
    writes Science.
@@ -25,10 +28,17 @@ workflow. Sibling of Science and PrivateHubWorkspace.
 
 ## Grants
 
-- `grants` shows the caller's grants. `grants/request` files a request for the
-  grantable scopes. Approval is out of band: an operator runs
-  `ManagerSkylark --approve-taskfoundry-grant <wag_id>` (or
-  `--revoke-taskfoundry-grant`). The CLI refuses grants for other sites.
+- `grants` shows the caller's TaskFoundry grants. `grants/request` links the
+  signed-in user to a meta identity (the form takes meta username, password
+  and, when enrolled, a TOTP code), verifies the credentials through the
+  broker `authenticate` op, and files the request with the meta user id as
+  subject and the session user as `client_user_id`. The pending request is
+  decided by its subject on the MetaAccount site (consent page), which also
+  revokes: the next TaskFoundry request sees the change.
+- The operator CLI (`ManagerSkylark --approve-taskfoundry-grant <wag_id>`,
+  `--revoke-taskfoundry-grant`) stays as a documented fallback for bootstrap
+  and tests; it refuses grants for other sites. Legacy grants (empty
+  `client_user_id`, subject = the session user) keep working.
 - The meta grant store is the same one Science uses. Composition passes it to
   `InstallTaskFoundrySite`.
 

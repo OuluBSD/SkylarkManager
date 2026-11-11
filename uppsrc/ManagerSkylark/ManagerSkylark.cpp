@@ -84,11 +84,13 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("science-corpus", 0, "Science corpus directory (default ~/Dev/AnthologyPrivate/site/data)", true, "directory");
 	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
 	cla.AddArg("taskfoundry-port", 0, "TaskFoundry engine site port (default 18213)", true, "port");
+	cla.AddArg("meta-port", 0, "MetaAccount engine site port (default 18214)", true, "port");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
 	cla.AddArg("approve-taskfoundry-grant", 0, "Approve a requested TaskFoundry grant by id (wag_...) and exit", true, "grant-id");
 	cla.AddArg("revoke-taskfoundry-grant", 0, "Revoke an active TaskFoundry grant by id and exit", true, "grant-id");
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
+	cla.AddArg("set-meta-user", 0, "Create/update a MetaAccount account with hidden prompt (or MANAGERSKYLARK_META_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("privatehub-role", 0, "Role for --set-privatehub-user (default member; only member may author)", true, "role");
 	cla.AddArg("github-backend", 0, "GitHub backend: gh (argv-only gh CLI, default) or emulated (local file-backed emulation, no network)", true, "gh|emulated");
@@ -207,6 +209,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.privatehub_workspace = NormalizePath(cla.GetArg("privatehub-workspace"));
 		if(!cla.GetArg("taskfoundry-port").IsEmpty())
 			cfg.taskfoundry_port = ScanInt(cla.GetArg("taskfoundry-port"));
+		if(!cla.GetArg("meta-port").IsEmpty())
+			cfg.meta_port = ScanInt(cla.GetArg("meta-port"));
 		if(!cla.GetArg("company-root").IsEmpty())
 			cfg.company_root = NormalizePath(cla.GetArg("company-root"));
 		if(!cla.GetArg("company-repos").IsEmpty())
@@ -229,6 +233,21 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			}
 			Cout() << "Configured TaskFoundry account '" << tf_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String meta_user = cla.GetArg("set-meta-user");
+		if(!meta_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_META_PASSWORD", "New MetaAccount password: ", password))
+				return false;
+			String error;
+			if(!SetMetaAccountPassword(meta_user, password, error)) {
+				Cerr() << "Failed to write MetaAccount credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured MetaAccount account '" << meta_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

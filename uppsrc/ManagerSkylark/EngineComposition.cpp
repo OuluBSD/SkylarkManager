@@ -53,15 +53,29 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		return false;
 	}
 
+	// The shared meta grant store (Science, TaskFoundry and the meta site use
+	// it). Created first: the meta and science installs below need it.
+	String grants_root = AppendFileName(engine_root, "grants");
+	RealizeDirectory(grants_root);
+	owned.grants.Create("meta", grants_root);
+
+	// The meta-account site: ecosystem identities and the consent page. Its
+	// accounts are what client sites (TaskFoundry) link to for consent grants.
+	String meta_root = AppendFileName(engine_root, "meta");
+	RealizeDirectory(meta_root);
+	EngineSite& meta = TheWebEngine().AddSite("meta", "MetaAccount",
+		Format("http://127.0.0.1:%d", cfg.meta_port), meta_root);
+	InstallMetaAccountSite(meta, *owned.grants);
+	InstallSessionRoutes(meta);
+	RegisterMetaAccountService("meta", meta.Accounts(), *owned.grants);
+	host.BindSite(cfg.meta_port, "meta");
+
 	String sci_root = AppendFileName(engine_root, "science");
 	RealizeDirectory(sci_root);
 	EngineSite& sci = TheWebEngine().AddSite("science", "Science",
 		Format("http://127.0.0.1:%d", cfg.science_port), sci_root);
 	// Article sidecars are written next to the records (the corpus is git-backed).
 	owned.science.Create(cfg.science_corpus, cfg.science_corpus);
-	String grants_root = AppendFileName(engine_root, "grants");
-	RealizeDirectory(grants_root);
-	owned.grants.Create("meta", grants_root);
 	InstallScienceSite(sci, *owned.science, ~owned.grants);
 	InstallSessionRoutes(sci);
 	host.BindSite(cfg.science_port, "science");
@@ -131,6 +145,12 @@ bool SetTaskFoundryPassword(const String& username, const String& password, Stri
 	Vector<String> roles;
 	roles.Add("member");
 	return SetEngineUser("taskfoundry", username, password, roles, error);
+}
+
+bool SetMetaAccountPassword(const String& username, const String& password, String& error)
+{
+	Vector<String> roles;
+	return SetEngineUser("meta", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

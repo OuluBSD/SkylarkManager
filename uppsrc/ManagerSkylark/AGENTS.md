@@ -47,7 +47,7 @@
 
 ## Composed engine sites
 
-The real server (not `--test` or `--demo-site`) composes three engine sites
+The real server (not `--test` or `--demo-site`) composes four engine sites
 behind `WebEngineHost`, each on its own listener port, plus the Company module:
 
 | Site | Default port | Data root | Flag |
@@ -55,6 +55,7 @@ behind `WebEngineHost`, each on its own listener port, plus the Company module:
 | `privatehub` | 18211 | `<site-dir>/engine/privatehub` | `--privatehub-port`, `--privatehub-workspace` (default `~/Dev`) |
 | `science` | 18212 | `<site-dir>/engine/science`, corpus `~/Dev/AnthologyPrivate/site/data` | `--science-port`, `--science-corpus` |
 | `taskfoundry` | 18213 | `<site-dir>/engine/taskfoundry` | `--taskfoundry-port` |
+| `meta` | 18214 | `<site-dir>/engine/meta` | `--meta-port` |
 | Company module (no site) | none | `<site-dir>/engine/company` | `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
 
 **Host-compose direction only.** ManagerSkylark composes the Company module from
@@ -65,8 +66,10 @@ touches the Company store, config or records. CompanySkylark never depends on
 this package or on ManagerSkylark (CompanySkylark AGENTS.md rule 8).
 
 Broker services registered in the composed process: `science` (ScienceService),
-`privatehub` (PrivateHub read and write operations, including `repo.info`), and
-`company` (the Company module). TaskFoundry calls all three.
+`privatehub` (PrivateHub read and write operations, including `repo.info`),
+`company` (the Company module), and `meta` (MetaAccountService: authenticate,
+request-consent, check-grant, revoke-grant). TaskFoundry calls all of them; the
+meta site owns the shared grant store under `<site-dir>/engine/grants`.
 
 Build note: ManagerSkylark links the Company packages, so its build needs the
 sibling source path: `uppbuilder -m CLANG -a ../CompanySkylark/uppsrc ManagerSkylark`.
@@ -74,7 +77,8 @@ sibling source path: `uppbuilder -m CLANG -a ../CompanySkylark/uppsrc ManagerSky
 Accounts are per site. Provision them with
 `MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`,
 `MANAGERSKYLARK_SCIENCE_PASSWORD=... ManagerSkylark --set-science-user NAME`
-(science-author role), or `MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=... ManagerSkylark --set-taskfoundry-user NAME`
+(science-author role), `MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=... ManagerSkylark --set-taskfoundry-user NAME`,
+or `MANAGERSKYLARK_META_PASSWORD=... ManagerSkylark --set-meta-user NAME`
 (or a hidden prompt); each command exits after writing the account. Engine
 listeners serve only their own site: a stock route claiming a path is answered
 404, except the home route (see `uppsrc/WebEngine/AGENTS.md`).
@@ -106,13 +110,19 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET /proposals/{id}` | taskfoundry | Proposal editor: fields, evidence, validation, submit |
 | `POST /proposals/{id}/edit`, `/evidence`, `/validate`, `/submit` | taskfoundry | Mutations (CSRF required); submit returns the same submission on repeat |
 | `GET /submissions/{id}` | taskfoundry | Submission snapshot and Company status |
-| `GET /grants`, `POST /grants/request` | taskfoundry | Caller's TaskFoundry grants; request one (session only) |
+| `GET /grants`, `POST /grants/request` | taskfoundry | Caller's TaskFoundry grants; request one by linking a meta identity (meta credentials + CSRF) |
+| `GET /` | meta | Meta-account home (login required) |
+| `GET/POST /session/login`, `POST /session/logout` | meta | Sign in/out |
+| `POST /totp/begin`, `/totp/confirm`, `/totp/disable` | meta | Enroll or disable the TOTP second factor |
+| `GET /consent`, `POST /consent/decide` | meta | Consent grants of the signed-in identity; decide (approve/deny/revoke) as the subject |
 
 TaskFoundry access needs an approved grant bound to the signed-in user. The
-operator approves or revokes a grant by id with
-`ManagerSkylark --site-dir DIR --approve-taskfoundry-grant wag_ID` or
-`--revoke-taskfoundry-grant wag_ID`. Both run without composing the engine, so
-they work while the server runs.
+user links their meta identity on the TaskFoundry grants page (meta username,
+password, TOTP code when enrolled) and the pending request is decided by its
+subject on the MetaAccount site consent page (approve/deny, revoke at any
+time; the next TaskFoundry request sees the change). The operator CLI stays as
+a fallback: `ManagerSkylark --site-dir DIR --approve-taskfoundry-grant wag_ID`
+or `--revoke-taskfoundry-grant wag_ID`; both run without composing the engine.
 
 Authoring is caller-bound: a `x-science-grant` id authorizes a write only from
 the authenticated session of the grant's subject. The same id from another

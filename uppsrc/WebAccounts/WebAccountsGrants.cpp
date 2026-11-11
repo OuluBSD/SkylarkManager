@@ -18,6 +18,13 @@ StoreResult WebGrants::RequestGrant(const String& subject_user_id, const String&
                                     const String& client_id, const Vector<String>& scopes,
                                     String& grant_id, bool& existed)
 {
+	return RequestGrantAs(subject_user_id, String(), client_site, client_id, scopes, grant_id, existed);
+}
+
+StoreResult WebGrants::RequestGrantAs(const String& subject_user_id, const String& client_user_id,
+                                      const String& client_site, const String& client_id,
+                                      const Vector<String>& scopes, String& grant_id, bool& existed)
+{
 	existed = false;
 	if(subject_user_id.IsEmpty() || client_site.IsEmpty())
 		return StoreResult("grant request needs subject and client site");
@@ -37,7 +44,8 @@ StoreResult WebGrants::RequestGrant(const String& subject_user_id, const String&
 			WebAccountGrant g;
 			LoadFromJsonValue(g, v);
 			if(g.subject_user_id == subject_user_id && g.client_site == client_site
-			&& g.client_id == client_id && (g.IsActive() || g.state == "requested")) {
+			&& g.client_id == client_id && g.client_user_id == client_user_id
+			&& (g.IsActive() || g.state == "requested")) {
 				existed = true;
 				grant_id = g.grant_id;
 				mutex.Leave();
@@ -51,6 +59,7 @@ StoreResult WebGrants::RequestGrant(const String& subject_user_id, const String&
 	g.subject_user_id = subject_user_id;
 	g.client_site = client_site;
 	g.client_id = client_id;
+	g.client_user_id = client_user_id;
 	g.scopes <<= scopes;
 	g.state = "requested";
 	g.requested_at = GetSysTime();
@@ -126,6 +135,35 @@ StoreResult WebGrants::ListForSubject(const String& subject_user_id, const Strin
 			WebAccountGrant g;
 			LoadFromJsonValue(g, v);
 			if(g.subject_user_id != subject_user_id)
+				continue;
+			if(state_filter.GetCount() && g.state != state_filter)
+				continue;
+			out.Add(g);
+		}
+		catch(...) {}
+	}
+	mutex.Leave();
+	return StoreResult(true);
+}
+
+StoreResult WebGrants::ListForSite(const String& client_site, const String& state_filter,
+                                   Vector<WebAccountGrant>& out)
+{
+	out.Clear();
+	mutex.Enter();
+	Vector<String> ids;
+	Store().List(ids);
+	for(const String& id : ids) {
+		String json, rev;
+		if(!Store().Get(id, json, rev))
+			continue;
+		try {
+			Value v = ParseJSON(json);
+			if(!v.Is<ValueMap>())
+				continue;
+			WebAccountGrant g;
+			LoadFromJsonValue(g, v);
+			if(g.client_site != client_site)
 				continue;
 			if(state_filter.GetCount() && g.state != state_filter)
 				continue;

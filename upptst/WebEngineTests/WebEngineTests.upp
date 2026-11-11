@@ -13,7 +13,8 @@ uses
 	GitHubForge,
 	SourceForgeForge,
 	PrivateHubWorkspace,
-	Science;
+	Science,
+	TaskFoundry;
 
 file
 	AGENTS.md,
