@@ -41,7 +41,8 @@ The ManagerSkylark process composes fenced engine sites on separate ports
 (`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
 **MetaAccount**, **Channels**, **Financials** (+ the Company module via
 `CompanyComposed` from the private CompanySkylark repo). The stock host site serves the manager
-dashboard, GitHub/SourceForge webapps, host inspection, WebChat, and SweAgent.
+dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and the
+`/docs` documentation portal.
 
 ---
 

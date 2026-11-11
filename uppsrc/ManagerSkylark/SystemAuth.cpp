@@ -103,11 +103,12 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 		                      id == "ApiNextTask" || id == "ApiGoals" || id == "ApiIssues" ||
 		                      id == "ApiReleases" || id == "ManagerFrameworkSpec" ||
 		                      id == "DataIndexPage" || id == "ApiDataSpec" || id == "ApiDataDocs" ||
-		                      id == "ResearchIndexPage" || id == "ApiResearchPapers" ||
-		                      id == "CandidateIndexPage" || id == "ApiCandidateLineage" ||
-		                      id == "CandidateWorkflowPage" || id == "ApiCandidateWorkflow" ||
-		                      id == "ReviewIndexPage" || id == "ReviewDetailPage" || id == "ApiReviewPackages" ||
-		                      id == "ApiReviewPackage" || id == "ApiReviewRelated";
+	                      id == "ResearchIndexPage" || id == "ApiResearchPapers" ||
+	                      id == "CandidateIndexPage" || id == "ApiCandidateLineage" ||
+	                      id == "CandidateWorkflowPage" || id == "ApiCandidateWorkflow" ||
+	                      id == "ReviewIndexPage" || id == "ReviewDetailPage" || id == "ApiReviewPackages" ||
+	                      id == "ApiReviewPackage" || id == "ApiReviewRelated" ||
+	                      id == "DocsPage" || id == "DocsRepoPage" || id == "DocsFilePage";
 		if(http.GetMethod() != "GET" || !read_only_page) {
 			http.Content("text/plain; charset=utf-8", "This synthetic demo site is read-only.");
 			http.Response(403, "Forbidden");

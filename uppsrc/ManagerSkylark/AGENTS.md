@@ -44,10 +44,13 @@
 | `GET /api/issues` | JSON list of v2 issues |
 | `GET /api/releases` | JSON list of v2 releases |
 | `POST /api/sweagent/run` | Execute SweAgent task and return trajectory |
+| `GET /docs` | The cross-project docs portal: the allowlisted repositories (`--docs-repos`) and their doc file counts |
+| `GET /docs/{repo}` | A repo's documentation files (AGENTS/README/DESIGN/STATUS/docs/**.md) |
+| `GET /docs/{repo}/**` | One documentation file, escaped preformatted (`?raw=1` for text/plain); traversal and non-doc files are 404 |
 
 ## Composed engine sites
 
-The real server (not `--test` or `--demo-site`) composes five engine sites
+The real server (not `--test` or `--demo-site`) composes six engine sites
 behind `WebEngineHost`, each on its own listener port, plus the Company module:
 
 | Site | Default port | Data root | Flag |

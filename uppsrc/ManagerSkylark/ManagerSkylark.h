@@ -34,6 +34,8 @@ public:
 	bool IsEngineComposed() const { return engine_composed; }
 	bool HasExplicitSiteDir() const { return custom_site_dir; }
 	String GetSiteDir() const { return site_dir; }
+	// The docs portal allowlist ("label=path,..."); set from --docs-repos.
+	String& DocsReposSpec() { return docs_repos_spec; }
 
 	V2Store&      GetV2Store()      { return v2_store; }
 	ManagerStore& GetLocalStore()   { static StaticMutex sMutex; Mutex::Lock __(sMutex); local_store.LoadAll(); return local_store; }
@@ -77,6 +79,7 @@ private:
 	bool         custom_site_dir;
 	String       site_dir;
 	int          custom_port;
+	String       docs_repos_spec; // "label=path,..." for the docs portal; empty = the default allowlist
 };
 
 END_UPP_NAMESPACE

@@ -93,6 +93,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("agentipc-client", 0, "agentipc client script (default ~/OuluLinux/AgentIPC/bin/agentipc)", true, "path");
 	cla.AddArg("agentipc-home", 0, "AgentIPC node home (default ~/.agentipc-skylark)", true, "directory");
 	cla.AddArg("financials-port", 0, "Financials engine site port (default 18216)", true, "port");
+	cla.AddArg("docs-repos", 0, "Documentation repositories for the /docs portal (label=path,...; default: SkylarkManager, CompanySkylark, AgentIPC)", true, "list");
 	cla.AddArg("financials-role", 0, "Role for --set-financials-user (default viewer; finance sees ledger rows and contracts)", true, "role");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
@@ -117,6 +118,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 
 	test_mode = cla.IsArg("test");
 	demo_site = cla.IsArg("demo-site");
+	DocsReposSpec() = cla.GetArg("docs-repos");
 	String set_site_user = cla.GetArg("set-site-password");
 	if(demo_site && !set_site_user.IsEmpty()) {
 		Cerr() << "--set-site-password cannot be combined with --demo-site.\n";

@@ -858,6 +858,89 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		}
 	}
 	{
+		// The docs portal (task 021): a fixture repo with an AGENTS.md and a
+		// docs/ note; traversal and non-doc files are refused.
+		String docs_root = AppendFileName(fixture.path, "docs-fixture");
+		RealizeDirectory(AppendFileName(docs_root, "docs"));
+		SaveFile(AppendFileName(docs_root, "AGENTS.md"), "# Fixture\n\nSome <b>markup</b> here.\n");
+		SaveFile(AppendFileName(docs_root, "docs/note.md"), "- note one\n");
+		SaveFile(AppendFileName(docs_root, "Store.cpp"), "not a doc");
+		ManagerSkylarkApp::Get().DocsReposSpec() = "DocsFix=" + docs_root;
+
+		HttpRequest req_list(base_url + "/docs");
+		req_list.Header("Authorization", "Bearer " + demo_token);
+		req_list.Timeout(3000);
+		String res_list = req_list.Execute();
+		if(req_list.GetStatusCode() != 200 || res_list.Find("DocsFix") < 0) {
+			Cerr() << "FAILED: docs repo list\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_repo(base_url + "/docs/DocsFix");
+		req_repo.Header("Authorization", "Bearer " + demo_token);
+		req_repo.Timeout(3000);
+		String res_repo = req_repo.Execute();
+		if(req_repo.GetStatusCode() != 200 || res_repo.Find("AGENTS.md") < 0
+		   || res_repo.Find("docs/note.md") < 0 || res_repo.Find("Store.cpp") >= 0) {
+			Cerr() << "FAILED: docs repo file list\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_file(base_url + "/docs/DocsFix/AGENTS.md");
+		req_file.Header("Authorization", "Bearer " + demo_token);
+		req_file.Timeout(3000);
+		String res_file = req_file.Execute();
+		if(req_file.GetStatusCode() != 200 || res_file.Find("Some &lt;b&gt;markup&lt;/b&gt; here") < 0
+		   || res_file.Find("<b>markup</b>") >= 0) {
+			Cerr() << "FAILED: docs file renders escaped\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_raw(base_url + "/docs/DocsFix/docs/note.md?raw=1");
+		req_raw.Header("Authorization", "Bearer " + demo_token);
+		req_raw.Timeout(3000);
+		req_raw.Execute();
+		if(req_raw.GetStatusCode() != 200) {
+			Cerr() << "FAILED: docs raw file\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_up(base_url + "/docs/DocsFix/../ManagerSkylark.h");
+		req_up.Header("Authorization", "Bearer " + demo_token);
+		req_up.Timeout(3000);
+		req_up.Execute();
+		if(req_up.GetStatusCode() != 404) {
+			Cerr() << "FAILED: docs traversal refused\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_non(base_url + "/docs/DocsFix/Store.cpp");
+		req_non.Header("Authorization", "Bearer " + demo_token);
+		req_non.Timeout(3000);
+		req_non.Execute();
+		if(req_non.GetStatusCode() != 404) {
+			Cerr() << "FAILED: docs non-doc file refused\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+		HttpRequest req_unknown(base_url + "/docs/Nope/README.md");
+		req_unknown.Header("Authorization", "Bearer " + demo_token);
+		req_unknown.Timeout(3000);
+		req_unknown.Execute();
+		if(req_unknown.GetStatusCode() != 404) {
+			Cerr() << "FAILED: docs unknown repo refused\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
+	}
+	{
 		ValueMap claim;
 		claim.Add("project", "manager-skylark");
 		claim.Add("seq", 1);
