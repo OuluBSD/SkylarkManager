@@ -6,9 +6,13 @@ to the next agent as self-contained task files.
 
 ## Working arrangement
 
-The planner (takeover agent session) issues work orders; the second agent
-executes them as worker and reports in `WORKER-LOG.md`. Current standing
-order: `WORKER-BRIEF-01.md`.
+The planner (S1) issues work orders; the worker (S2) executes them and
+reports in `WORKER-LOG.md` — over the AgentIPC channel SKYLARK-MANAGER
+(see PLANNER-HANDOFF-2026-11-11.md for the full protocol, current state,
+and the next planner's setup). The AgentLab plan (steps 1-6 in
+`~/skylark/plan.md`) is complete and verified; the next planner writes
+steps 7+ (MetaAccount composition, member-role gate, Aria phase,
+candidate webapps).
 
 ## Reading order
 
