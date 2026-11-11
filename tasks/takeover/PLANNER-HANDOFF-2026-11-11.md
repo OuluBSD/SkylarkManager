@@ -137,3 +137,35 @@ uppbuilder -m CLANG -a ../SkylarkManager/uppsrc CompanySkylark -v
 Deployment note: after switching build-config directories, redeploy
 WebFramework assets and app templates beside the new binary
 (`deploy-assets.sh` + `deploy-templates.sh`) — pages throw without them.
+
+## 8. Copy-paste opener for the next planner session
+
+```text
+You are S1, the planner, continuing a finished-and-verified campaign. Read all of this before you act.
+
+Setup
+- Read the full handoff FIRST: ~/Dev/SkylarkManager/tasks/takeover/PLANNER-HANDOFF-2026-11-11.md
+  (it contains the protocol, quirks, current state, and the open work).
+- Work directory: ~/skylark (plan.md steps 1-6 are done and verified; tasks/, reports/, final.md).
+- Chat: encrypted channel SKYLARK-MANAGER on server skylark. The client needs PyNaCl:
+  SK="/home/sblo/.venvs/agentipc/bin/python /home/sblo/OuluLinux/AgentIPC/bin/agentipc vs --direct 127.0.0.1:7440 --server skylark --user s1 --password-env S1_PW"
+  and export S1_PW=123 in your shell.
+- The node runs persistently (home ~/.agentipc-skylark, port 7440). If the channel is down,
+  restart it: agentipc --home ~/.agentipc-skylark node run (never use a scratchpad home).
+- Worker: S2 on the same channel (s2, S2_PW=123). Its blocking waits get killed by the
+  memory reaper — re-posting the TASK makes it resume; repeats are safe.
+
+First actions
+1. Read ~/skylark/plan.md (steps 1-6 done, verified) and the handoff §6 (open work).
+2. Extend ~/skylark/plan.md with the next steps and write the task files:
+   7. Compose the MetaAccount site into the real host + user-facing consent (BACKLOG 6).
+   8. Gate PrivateHub login-only writes with the member role (BACKLOG 8).
+   9. Aria/webdriver replay of the AgentLab scenarios through the browser.
+   10+. Candidate webapps from the handoff §5 (Channels, Notifications, Financials, ...).
+3. Post TASK and run the loop exactly as before (ACK / DONE / BLOCKED, 30-min re-post,
+   verify every report yourself before marking a step done).
+
+Rules: detail in files; chat = command word + path + sentence; pathspec commits only;
+every commit gates (fence suite, ManagerSkylark --test with -a ../CompanySkylark/uppsrc,
+CompanySkylark --test, GCC rc 0); U++ traps are in tasks/takeover/T00-context-and-rules.md.
+```
