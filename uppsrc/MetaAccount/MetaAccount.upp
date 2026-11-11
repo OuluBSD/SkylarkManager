@@ -11,5 +11,7 @@ uses
 
 file
 	AGENTS.md,
+	MetaInbox.h,
+	MetaInbox.cpp,
 	MetaAccountSite.h,
 	MetaAccountSite.cpp;

@@ -327,6 +327,17 @@ case "$loc" in
 *) fail "taskfoundry board after revoke redirects to the grants page (got '$loc')" ;;
 esac
 
+# The inbox (task 014): the subject's consent and TaskFoundry events land on
+# the meta site.
+check "meta inbox lists the subject's events" 200 "$META_URL/inbox" -b "$T/meta.jar"
+if grep -q "tf.grant_requested" "$T/body" && grep -q "consent.granted" "$T/body" \
+   && grep -q "tf.candidate_created" "$T/body" && grep -q "tf.proposal_submitted" "$T/body" \
+   && grep -q "consent.revoked" "$T/body"; then
+	pass "meta inbox carries the consent and taskfoundry lifecycle"
+else
+	fail "meta inbox carries the consent and taskfoundry lifecycle"
+fi
+
 # The Channels site (task 012): session-gated reads over the canned shim; no
 # writes exist.
 check "channels overview anonymous redirects" 302 "$CH_URL/overview"

@@ -5,6 +5,7 @@
 #include <WebEngine/WebEngine.h>
 #include <WebAccounts/WebAccounts.h>
 #include <WebAccounts/WebAccountsGrants.h>
+#include "MetaInbox.h"
 
 NAMESPACE_UPP
 
@@ -24,7 +25,7 @@ public:
 
 	static bool SupportedOp(const String& op) {
 		return op == "ping" || op == "authenticate" || op == "request-consent"
-		    || op == "check-grant" || op == "revoke-grant";
+		    || op == "check-grant" || op == "revoke-grant" || op == "notify";
 	}
 
 private:

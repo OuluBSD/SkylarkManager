@@ -175,6 +175,21 @@
       "announce": "@scenario-oversight grant approved on the meta site"
     },
     {
+      "id": "inbox-check",
+      "as": "metaacct",
+      "describe": "the approval landed in the subject's inbox",
+      "run": [
+        "meta",
+        "inbox-list"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "consent.granted"
+        ]
+      }
+    },
+    {
       "id": "candidate-create",
       "as": "tfdev",
       "describe": "a candidate is created from the Science paper",

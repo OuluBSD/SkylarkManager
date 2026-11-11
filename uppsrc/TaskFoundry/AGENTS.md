@@ -41,6 +41,10 @@ workflow. Sibling of Science and PrivateHubWorkspace.
   `client_user_id`, subject = the session user) keep working.
 - The meta grant store is the same one Science uses. Composition passes it to
   `InstallTaskFoundrySite`.
+- Lifecycle events reach the subject's meta inbox through the broker `notify`
+  op (task 014): grant requested, candidate created, proposal submitted —
+  best-effort, and skipped for unlinked users (a legacy grant's subject is a
+  site-local id with no meta mapping).
 
 ## Status
 

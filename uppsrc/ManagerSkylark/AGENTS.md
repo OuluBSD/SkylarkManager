@@ -120,6 +120,7 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET/POST /session/login`, `POST /session/logout` | meta | Sign in/out |
 | `POST /totp/begin`, `/totp/confirm`, `/totp/disable` | meta | Enroll or disable the TOTP second factor |
 | `GET /consent`, `POST /consent/decide` | meta | Consent grants of the signed-in identity; decide (approve/deny/revoke) as the subject |
+| `GET /inbox`, `POST /inbox/read-all` | meta | The identity inbox (consent and client-site lifecycle events); read-only for the subject, CSRF on the mutation |
 | `GET /overview` | channels | The AgentIPC node's channels and their last activity (read-only) |
 | `GET /channels/{server}/{chan}` | channels | A channel's recent messages through the argv-only client (read-only) |
 

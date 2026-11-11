@@ -84,6 +84,34 @@ static TfActor Actor(WebRequest& r)
 	return a;
 }
 
+// Best-effort inbox delivery (task 014): the meta subject of the caller's
+// linked grant learns about lifecycle events. Only the linked-consent shape
+// maps a TaskFoundry user to a meta identity; unlinked users get no events.
+static void NotifyMetaSubject(WebRequest& r, const String& meta_subject, const String& type,
+                              const String& message, const String& refs)
+{
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = "meta";
+	BrokerCall call;
+	call.op = "notify";
+	call.payload.Add("subject_user_id", meta_subject);
+	call.payload.Add("source_site", TASKFOUNDRY_SITE_ID);
+	call.payload.Add("type", type);
+	call.payload.Add("actor", String().Cat() << TASKFOUNDRY_SITE_ID << ":" << r.User().username);
+	call.payload.Add("message", message);
+	call.payload.Add("refs", refs);
+	TheWebEngine().Broker().Call(ctx, call);
+}
+
+static void NotifyMeta(WebRequest& r, const String& type, const String& message, const String& refs)
+{
+	WebAccountGrant g;
+	if(!ActiveGrant(r.User().user_id, g) || g.client_user_id.IsEmpty())
+		return;
+	NotifyMetaSubject(r, g.subject_user_id, type, message, refs);
+}
+
 // Returns false, after redirecting to the site login, for anonymous callers.
 static bool RequireLogin(WebRequest& r)
 {
@@ -180,7 +208,11 @@ static void CandidateCreate(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
-	r.Redirect(r.Site().Url("candidates/*", IdArgs(SiteText(res.payload, "candidate_id"))));
+	String cand = SiteText(res.payload, "candidate_id");
+	NotifyMeta(r, "tf.candidate_created",
+	           String().Cat() << "Candidate created: " << r.Param("title"),
+	           String().Cat() << "taskfoundry:/candidates/" << cand);
+	r.Redirect(r.Site().Url("candidates/*", IdArgs(cand)));
 }
 
 static void CandidateDetail(WebRequest& r)
@@ -325,12 +357,17 @@ static void ProposalSubmit(WebRequest& r)
 {
 	if(!RequireGrant(r))
 		return;
-	TfResult res = Service().Submit(Actor(r), r.PathArg(0));
+	String prop = r.PathArg(0);
+	TfResult res = Service().Submit(Actor(r), prop);
 	if(!res.ok) {
 		Failed(r, res);
 		return;
 	}
-	r.Redirect(r.Site().Url("submissions/*", IdArgs(SiteText(res.payload, "id"))));
+	String sub = SiteText(res.payload, "id");
+	NotifyMeta(r, "tf.proposal_submitted",
+	           String().Cat() << "Proposal " << prop << " submitted",
+	           String().Cat() << "taskfoundry:/submissions/" << sub);
+	r.Redirect(r.Site().Url("submissions/*", IdArgs(sub)));
 }
 
 static void SubmissionStatus(WebRequest& r)
@@ -429,6 +466,10 @@ static void GrantRequest(WebRequest& r)
 		Failed(r, res);
 		return;
 	}
+	if(!existed)
+		NotifyMetaSubject(r, meta_uid, "tf.grant_requested",
+		                  String().Cat() << "TaskFoundry access requested by " << r.User().username,
+		                  "meta:/consent");
 	r.Redirect(r.Site().Url("grants"));
 }
 

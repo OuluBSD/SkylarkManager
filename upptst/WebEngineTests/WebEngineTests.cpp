@@ -1807,6 +1807,9 @@ CONSOLE_APP_MAIN
 		Check(rgr.status == 302, "linked grant request accepted");
 		HttpReply rgl = HttpCall("GET", TASKFOUNDRY_PORT, "/grants", tf_h, "");
 		Check(rgl.status == 200 && rgl.body.Find("requested") >= 0, "pending linked grant is listed");
+		HttpReply rin0 = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+		Check(rin0.status == 200 && rin0.body.Find("tf.grant_requested") >= 0,
+		      "the inbox lists the TaskFoundry request for the subject");
 		String wag;
 		{
 			int p = rgl.body.Find("wag_");
@@ -1840,6 +1843,9 @@ CONSOLE_APP_MAIN
 		notmine.Add("approve", "1");
 		HttpReply rnm = HttpCall("POST", META_PORT, "/consent/decide", eva_h, FormEncode(notmine));
 		Check(rnm.status == 403, "a meta user who is not the subject cannot decide the grant");
+		HttpReply rin1 = HttpCall("GET", META_PORT, "/inbox", eva_h, "");
+		Check(rin1.status == 200 && rin1.body.Find("tf.grant_requested") < 0,
+		      "another identity's inbox shows none of the subject's events");
 
 		// The subject approves; TaskFoundry access opens.
 		VectorMap<String, String> yes_f;
@@ -1864,6 +1870,105 @@ CONSOLE_APP_MAIN
 		Check(rc2.status == 403, "taskfoundry write is refused after the meta revoke");
 		HttpReply rb2 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
 		Check(rb2.status == 302, "taskfoundry board redirects again after the meta revoke");
+
+		// The inbox carries the whole lifecycle for the subject (task 014).
+		HttpReply rina = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+		Check(rina.body.Find("consent.granted") >= 0 && rina.body.Find("tf.candidate_created") >= 0
+		      && rina.body.Find("consent.revoked") >= 0,
+		      "the inbox carries the consent and taskfoundry lifecycle events");
+
+		// Deny on a fresh pending request (the deny path was broken before
+		// task 014), and the denied state gives no access. The TOTP code is
+		// recomputed: the first request's code may have rotated by now.
+		VectorMap<String, String> grf2;
+		grf2.Add("meta_user", "mallory");
+		grf2.Add("meta_password", "pw-meta");
+		grf2.Add("meta_code", TotpCode(secret, TotpUnixNow()));
+		HttpCall("POST", TASKFOUNDRY_PORT, "/grants/request", tf_h, FormEncode(grf2));
+		HttpReply rgl2 = HttpCall("GET", TASKFOUNDRY_PORT, "/grants", tf_h, "");
+		// The page lists all of this user's grants; take the id whose state
+		// cell says "requested", not the revoked one.
+		String wag2;
+		{
+			int p = 0;
+			for(;;) {
+				p = rgl2.body.Find("wag_", p);
+				if(p < 0)
+					break;
+				int e = p + 4;
+				while(e < rgl2.body.GetCount()) {
+					char c = rgl2.body[e];
+					if(!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+					    || c == '_' || c == '-'))
+						break;
+					e++;
+				}
+				String id = rgl2.body.Mid(p, e - p);
+				int cell = rgl2.body.Find("</td><td>", e);
+				int cellend = cell >= 0 ? rgl2.body.Find("</td>", cell + 9) : -1;
+				if(cell >= 0 && cellend > cell
+				   && rgl2.body.Mid(cell + 9, cellend - cell - 9) == "requested") {
+					wag2 = id;
+					break;
+				}
+				p = e;
+			}
+			Check(wag2.GetCount() > 0, "the re-request creates a pending grant");
+		}
+		VectorMap<String, String> deny_f;
+		deny_f.Add("grant_id", wag2);
+		deny_f.Add("approve", "0");
+		HttpReply rdn = HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(deny_f));
+		Check(JsonFlag(ParseJSON(rdn.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rdn.body) : ValueMap(), "ok"),
+		      "the subject denies the pending request");
+		HttpReply rb3 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
+		Check(rb3.status == 302, "a denied grant gives no TaskFoundry access");
+		HttpReply rinb = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+		Check(rinb.body.Find("consent.denied") >= 0, "the deny lands in the inbox");
+
+		// Unread state and mark-all-read.
+		HttpReply rin3 = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+		Check(rin3.body.Find("class=\"unread\"") >= 0, "the inbox marks unread events");
+		VectorMap<String, String> no_fields;
+		HttpReply rra = HttpCall("POST", META_PORT, "/inbox/read-all", h_meta2, FormEncode(no_fields));
+		Check(JsonFlag(ParseJSON(rra.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rra.body) : ValueMap(), "ok"),
+		      "mark all read succeeds");
+		HttpReply rin4 = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+		Check(rin4.body.Find("class=\"unread\"") < 0, "read-all clears the unread state");
+
+		// The notify op validates its type, and the store stays sane under a
+		// bulk write.
+		{
+			BrokerCallContext ctx;
+			ctx.from_site = "taskfoundry";
+			ctx.to_site = "meta";
+			BrokerCall bad;
+			bad.op = "notify";
+			bad.payload.Add("subject_user_id", meta_uid);
+			bad.payload.Add("source_site", "taskfoundry");
+			bad.payload.Add("type", "not.a.type");
+			bad.payload.Add("actor", "taskfoundry:bulk");
+			bad.payload.Add("message", "x");
+			BrokerResult res = TheWebEngine().Broker().Call(ctx, bad);
+			Check(!res.ok, "the notify op refuses a non-allowlisted type");
+			bool bulk_ok = true;
+			for(int i = 0; i < 210; i++) {
+				BrokerCall bulk;
+				bulk.op = "notify";
+				bulk.payload.Add("subject_user_id", meta_uid);
+				bulk.payload.Add("source_site", "taskfoundry");
+				bulk.payload.Add("type", "tf.candidate_created");
+				bulk.payload.Add("actor", "taskfoundry:bulk");
+				bulk.payload.Add("message", String().Cat() << "bulk-" << i);
+				BrokerResult bres = TheWebEngine().Broker().Call(ctx, bulk);
+				if(!bres.ok)
+					bulk_ok = false;
+			}
+			Check(bulk_ok, "the bulk notify run succeeds");
+			HttpReply rin5 = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
+			Check(rin5.status == 200 && rin5.body.Find("bulk-209") >= 0,
+			      "the inbox still serves after a bulk write");
+		}
 	}
 
 	// --- Channels read-only frontend over an argv shim (task 012) ---

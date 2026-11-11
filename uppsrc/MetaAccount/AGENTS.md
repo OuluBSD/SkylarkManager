@@ -11,7 +11,8 @@ the WebBroker. Client webapps keep their own lightweight accounts
 
 | File | Role |
 |------|------|
-| `MetaAccountSite.h/.cpp` | `InstallMetaAccountSite` (routes on an `EngineSite`: login, TOTP enroll/confirm/disable, consent list/decide), `MetaAccountService` (broker ops: authenticate, request-consent, check-grant, revoke-grant, ping), `RegisterMetaAccountService` |
+| `MetaAccountSite.h/.cpp` | `InstallMetaAccountSite` (routes on an `EngineSite`: login, TOTP enroll/confirm/disable, consent list/decide, inbox list/read-all), `MetaAccountService` (broker ops: authenticate, request-consent, check-grant, revoke-grant, notify, ping), `RegisterMetaAccountService` |
+| `MetaInbox.h/.cpp` | The identity inbox: subject-scoped `InboxEvent` records over a `JsonFileStore` (`engine/meta/inbox`), push/list/mark-read with retention (latest 200 per subject) and a type allowlist |
 
 ## Invariants
 
@@ -34,3 +35,12 @@ the WebBroker. Client webapps keep their own lightweight accounts
    recorded in the broker diagnostics ledger.
 5. **Minimal HTML**: until the Witz work package, pages are small functional
    HTML emitted directly by handlers.
+6. **The inbox is subject-scoped and events are inert**: every inbox event
+   names its meta subject; the page and `inbox/read-all` serve the session
+   identity only, and a second identity sees an empty inbox. Events carry
+   ids and states only — never scopes, grant ids, or credentials. The
+   broker `notify` op (design 013, task 014) is how client sites deliver
+   events; it validates the type allowlist, the subject, and the message
+   length, and is recorded in the diagnostics ledger. Retention keeps the
+   latest 200 events per subject. Consent transitions (requested, granted,
+   denied, revoked) always write events locally.

@@ -1,4 +1,5 @@
 #include "MetaAccountSite.h"
+#include "MetaInbox.h"
 
 NAMESPACE_UPP
 
@@ -10,6 +11,15 @@ static WebGrants& Grants()
 {
 	ASSERT_(s_grants, "meta-account site not installed");
 	return *s_grants;
+}
+
+// The identity inbox, created with the site (its store lives under the site's
+// data root). Client sites reach it only through the broker `notify` op.
+static One<MetaInbox> s_inbox;
+
+static MetaInbox *Inbox()
+{
+	return s_inbox.Get();
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +49,25 @@ static String HtmlForm(const String& action, const String& csrf, const String& f
 	       + fields + "<input type=\"submit\" value=\"OK\"></form>";
 }
 
+// Inbox rows carry text composed by client sites (usernames included), so
+// they are escaped at render time.
+static String EscText(const String& s)
+{
+	StringBuffer out;
+	for(int i = 0; i < s.GetCount(); i++) {
+		char c = s[i];
+		switch(c) {
+		case '&': out << "&amp;"; break;
+		case '<': out << "&lt;"; break;
+		case '>': out << "&gt;"; break;
+		case '"': out << "&quot;"; break;
+		case '\'': out << "&#39;"; break;
+		default: out.Cat(c);
+		}
+	}
+	return String(out);
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -49,10 +78,14 @@ static void MetaHome(WebRequest& r)
 		r.Redirect(r.Site().Url("login"));
 		return;
 	}
+	MetaInbox *inbox = Inbox();
+	int unread = inbox ? inbox->UnreadCount(r.User().user_id) : 0;
 	String body = "<p>Signed in as <b>" + r.User().username + "</b> ("
 	            + r.User().user_id + ")</p>"
 	            + "<p>Two-factor: " + (r.User().totp_enrolled ? String("enrolled") : String("not enrolled")) + "</p>"
-	            + "<p><a href=\"" + r.Site().Url("consent") + "\">Consent grants</a></p>";
+	            + "<p><a href=\"" + r.Site().Url("consent") + "\">Consent grants</a></p>"
+	            + "<p><a href=\"" + r.Site().Url("inbox") + "\">Inbox"
+	            + (unread > 0 ? " (" + AsString(unread) + " unread)" : String()) + "</a></p>";
 	HtmlPage(r, "Meta account", body);
 }
 
@@ -176,10 +209,11 @@ static void MetaConsentList(WebRequest& r)
 			                 "<input type=\"hidden\" name=\"grant_id\" value=\"" + g.grant_id + "\">"
 			                 "<input type=\"hidden\" name=\"approve\" value=\"1\">"
 			                 "<input type=\"submit\" value=\"Approve\">")
-			    << " "
-			    << HtmlForm(r.Site().Url("consent/decide:POST"), r.CsrfToken(),
-			                "<input type=\"hidden\" name=\"grant_id\" value=\"" + g.grant_id + "\">"
-			                "<input type=\"submit\" value=\"Deny\">");
+		    << " "
+		    << HtmlForm(r.Site().Url("consent/decide:POST"), r.CsrfToken(),
+		                "<input type=\"hidden\" name=\"grant_id\" value=\"" + g.grant_id + "\">"
+		                "<input type=\"hidden\" name=\"approve\" value=\"0\">"
+		                "<input type=\"submit\" value=\"Deny\">");
 		else if(g.IsActive())
 			body << HtmlForm(r.Site().Url("consent/decide:POST"), r.CsrfToken(),
 			                 "<input type=\"hidden\" name=\"grant_id\" value=\"" + g.grant_id + "\">"
@@ -189,6 +223,63 @@ static void MetaConsentList(WebRequest& r)
 	}
 	body << "</table>";
 	HtmlPage(r, "Consent grants", body);
+}
+
+// Inbox: the subject's events, newest first; a mark-all-read mutation (CSRF).
+static void MetaInboxPage(WebRequest& r)
+{
+	if(!r.HasUser()) {
+		r.Redirect(r.Site().Url("login"));
+		return;
+	}
+	Vector<InboxEvent> events;
+	MetaInbox *inbox = Inbox();
+	if(inbox)
+		inbox->List(r.User().user_id, events, 50);
+	String body;
+	if(events.IsEmpty())
+		body = "<p>No notifications.</p>";
+	else {
+		body = "<table border=\"1\"><tr><th>When</th><th>Source</th><th>Event</th><th>Message</th></tr>";
+		for(const InboxEvent& e : events) {
+			body << "<tr" << (e.read ? "" : String(" class=\"unread\"")) << "><td>"
+			   << AsString(e.created_at) << "</td><td>" << EscText(e.source_site)
+			   << "</td><td>" << EscText(e.type) << "</td><td>" << EscText(e.message);
+			if(e.refs.GetCount()) {
+				if(e.refs.StartsWith("meta:"))
+					body << " <a href=\"" << EscText(e.refs.Mid(5)) << "\">open</a>";
+				else
+					body << " <code>" << EscText(e.refs) << "</code>";
+			}
+			body << "</td></tr>";
+		}
+		body << "</table>"
+		   << "<p>" << HtmlForm(r.Site().Url("inbox/read-all:POST"), r.CsrfToken(),
+		                        "<input type=\"submit\" value=\"Mark all read\">") << "</p>";
+	}
+	HtmlPage(r, "Inbox", body);
+}
+
+static void MetaInboxReadAll(WebRequest& r)
+{
+	if(!r.HasUser()) {
+		r.Json(JsonOk(false, "sign in first"), 401);
+		return;
+	}
+	MetaInbox *inbox = Inbox();
+	if(inbox)
+		inbox->MarkAllRead(r.User().user_id);
+	r.Json(JsonOk(true));
+}
+
+static void ConsentEvent(const String& subject, const String& client_site,
+                         const String& decider, const String& what)
+{
+	MetaInbox *inbox = Inbox();
+	if(inbox)
+		inbox->Push(subject, client_site, what, decider,
+		            String().Cat() << "Consent for " << client_site << " " << what.Mid(8),
+		            "meta:/consent");
 }
 
 static void MetaConsentDecide(WebRequest& r)
@@ -209,18 +300,30 @@ static void MetaConsentDecide(WebRequest& r)
 		r.Json(JsonOk(false, "not your grant"), 403);
 		return;
 	}
-	// Approve/deny only pending requests; revoke only active grants.
-	StoreResult st = approve ? Grants().Decide(grant_id, true) : Grants().Revoke(grant_id);
+	// Approve/deny only pending requests; revoke only active grants. (Deny on
+	// a pending request was broken before task 014: it tried to revoke.)
+	StoreResult st;
+	if(approve)
+		st = Grants().Decide(grant_id, true);
+	else if(g.state == "requested")
+		st = Grants().Decide(grant_id, false);
+	else
+		st = Grants().Revoke(grant_id);
 	if(!st.ok) {
 		r.Json(JsonOk(false, st.error), 409);
 		return;
 	}
+	ConsentEvent(g.subject_user_id, g.client_site, "meta:" + r.User().username,
+	             approve ? "consent.granted"
+	                     : (g.state == "requested" ? "consent.denied" : "consent.revoked"));
 	r.Json(JsonOk(true));
 }
 
 void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 {
 	s_grants = &grants;
+	if(!s_inbox)
+		s_inbox.Create(site.id, site.data_root);
 	SiteRouter& rt = site.Router();
 	rt.Add("", MetaHome);
 	rt.Add("login", MetaLoginForm);
@@ -231,6 +334,8 @@ void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 	rt.Add("totp/disable:POST", MetaTotpDisable);
 	rt.Add("consent", MetaConsentList);
 	rt.Add("consent/decide:POST", MetaConsentDecide);
+	rt.Add("inbox", MetaInboxPage);
+	rt.Add("inbox/read-all:POST", MetaInboxReadAll);
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	cm.Add(site.id, site.title, HttpCommand("consent-list", "GET", "consent", "session account",
@@ -239,6 +344,11 @@ void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 	                                        "session account (the grant's subject)", "html",
 	                                        "Approve, deny or revoke a consent grant",
 	                                        {"grant_id:string:required", "approve:string:required"}));
+	cm.Add(site.id, site.title, HttpCommand("inbox-list", "GET", "inbox", "session account",
+	                                        "html", "Show my inbox events (unread first)", {}));
+	cm.Add(site.id, site.title, HttpCommand("inbox-read-all", "POST", "inbox/read-all",
+	                                        "session account", "html",
+	                                        "Mark all my inbox events read", {}));
 }
 
 // ---------------------------------------------------------------------------
@@ -297,10 +407,38 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 			r.error = st.error;
 			return r;
 		}
+		if(!existed && Inbox())
+			Inbox()->Push(subject, client_site, "consent.requested",
+			              client_site + ":" + client_user,
+			              String().Cat() << "Access requested for " << client_site
+			                             << (client_user.IsEmpty() ? String() : String(" by ") + client_user),
+			              "meta:/consent");
 		r.ok = true;
 		r.status = 200;
 		r.payload.Add("grant_id", grant_id);
 		r.payload.Add("existed", existed);
+		return r;
+	}
+	if(call.op == "notify") {
+		MetaInbox *inbox = Inbox();
+		if(!inbox) {
+			r.status = 503;
+			r.error = "the meta inbox is not installed";
+			return r;
+		}
+		StoreResult st = inbox->Push(call.payload.Get("subject_user_id"),
+		                             call.payload.Get("source_site"),
+		                             call.payload.Get("type"),
+		                             call.payload.Get("actor"),
+		                             call.payload.Get("message"),
+		                             call.payload.Get("refs"));
+		if(!st.ok) {
+			r.status = 400;
+			r.error = st.error;
+			return r;
+		}
+		r.ok = true;
+		r.status = 200;
 		return r;
 	}
 	if(call.op == "check-grant") {
