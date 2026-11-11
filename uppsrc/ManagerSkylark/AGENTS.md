@@ -173,8 +173,8 @@ Enforcement, as the code does it today (task 022, item 3):
 | `/api/gh/workflows/save` | POST | signed in | central filter; writes a workflow file to disk |
 | `/api/gh/tpp/preview` | GET | signed in | central filter |
 
-Residual: the file-writing and build-starting routes (`workflows/save`, `actions/trigger`) are
-signed-in only. Narrowing them to admin changes behavior, so it waits for a planner decision.
+Decided (planner, 2026-11-11): the file-writing and build-starting routes (`workflows/save`,
+`actions/trigger`) stay signed-in only; there is no current threat model for narrowing them to admin.
 
 ## GitHub views and witz templates
 

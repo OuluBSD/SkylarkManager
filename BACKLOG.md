@@ -12,7 +12,7 @@ success. The contract suite covers invalid names and both implementations.
 
 The role of each `api/gh` route is now written in `uppsrc/ManagerSkylark/AGENTS.md`. Only repo
 creation checks a role. Repo roles (PR-only, merge rights) still belong with the Company project
-and repo model. Narrowing `workflows/save` and `actions/trigger` to admin needs a planner decision.
+and repo model. DECIDED (planner, 2026-11-11): `workflows/save` and `actions/trigger` stay signed-in only; no current threat model justifies narrowing them to admin.
 
 ## GitHub host routes: project-scoped role matrix
 
