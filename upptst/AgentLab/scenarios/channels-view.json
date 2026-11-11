@@ -1,0 +1,62 @@
+{
+  "id": "channels-view",
+  "title": "The Channels site reads the live SKYLARK-MANAGER channel through the argv-only agentipc client (read-only, no announcer writes)",
+  "sites": [
+    "channels"
+  ],
+  "agents": {
+    "watcher": {
+      "user": "cviewer",
+      "role": "session account",
+      "instructions": "You are cviewer, a Channels viewer. Open the channel overview and read the live SKYLARK-MANAGER channel through the site. The view is read-only.",
+      "announcer": "a1"
+    }
+  },
+  "provision": {
+    "channels": [
+      {
+        "user": "cviewer"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "chan-login",
+      "as": "watcher",
+      "login": "channels"
+    },
+    {
+      "id": "overview",
+      "as": "watcher",
+      "describe": "the channel overview lists the node's channels",
+      "run": [
+        "channels",
+        "channels-overview"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "skylark"
+        ]
+      }
+    },
+    {
+      "id": "channel-read",
+      "as": "watcher",
+      "describe": "a live channel renders through the argv-only client",
+      "run": [
+        "channels",
+        "channel-read",
+        "server=skylark",
+        "chan=SKYLARK-MANAGER"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "SKYLARK-MANAGER"
+        ]
+      },
+      "announce": "@scenario-oversight channels view rendered"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 
 #include <Core/Core.h>
 #include <WebEngine/Host.h>
+#include <Channels/ChannelsSite.h>
 #include <MetaAccount/MetaAccountSite.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <Science/ScienceSite.h>
@@ -19,6 +20,15 @@ struct EngineComposition {
 	int    science_port = 18212;
 	int    taskfoundry_port = 18213;
 	int    meta_port = 18214;
+	int    channels_port = 18215;
+	// The read-only AgentIPC bridge (Channels). Empty strings keep the
+	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
+	String agentipc_direct = "127.0.0.1:7440";
+	String agentipc_server = "skylark";
+	String agentipc_user = "channels";
+	String agentipc_python;
+	String agentipc_client;
+	String agentipc_home;
 	String privatehub_workspace; // checkouts root (default ~/Dev)
 	String science_corpus;       // flat corpus + article sidecars (default ~/Dev/AnthologyPrivate/site/data)
 	String company_root;         // Company store root (default <site_dir>/engine/company)
@@ -64,6 +74,10 @@ bool SetTaskFoundryPassword(const String& username, const String& password, Stri
 // ecosystem identity a client site links to for consent).
 // Requires ComposeEngineSites to have run.
 bool SetMetaAccountPassword(const String& username, const String& password, String& error);
+
+// Creates or updates a Channels viewer account on the composed channels site
+// (read-only frontend). Requires ComposeEngineSites to have run.
+bool SetChannelsPassword(const String& username, const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);

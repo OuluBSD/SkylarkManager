@@ -85,12 +85,20 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("privatehub-workspace", 0, "PrivateHub workspace root (default ~/Dev)", true, "directory");
 	cla.AddArg("taskfoundry-port", 0, "TaskFoundry engine site port (default 18213)", true, "port");
 	cla.AddArg("meta-port", 0, "MetaAccount engine site port (default 18214)", true, "port");
+	cla.AddArg("channels-port", 0, "Channels engine site port (default 18215)", true, "port");
+	cla.AddArg("agentipc-direct", 0, "AgentIPC node address for the Channels site (default 127.0.0.1:7440)", true, "host:port");
+	cla.AddArg("agentipc-server", 0, "AgentIPC virtual server for the Channels site (default skylark)", true, "server");
+	cla.AddArg("agentipc-user", 0, "AgentIPC identity the Channels site reads as (default channels)", true, "user");
+	cla.AddArg("agentipc-python", 0, "Python running the agentipc client (default ~/.venvs/agentipc/bin/python)", true, "path");
+	cla.AddArg("agentipc-client", 0, "agentipc client script (default ~/OuluLinux/AgentIPC/bin/agentipc)", true, "path");
+	cla.AddArg("agentipc-home", 0, "AgentIPC node home (default ~/.agentipc-skylark)", true, "directory");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
 	cla.AddArg("approve-taskfoundry-grant", 0, "Approve a requested TaskFoundry grant by id (wag_...) and exit", true, "grant-id");
 	cla.AddArg("revoke-taskfoundry-grant", 0, "Revoke an active TaskFoundry grant by id and exit", true, "grant-id");
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
 	cla.AddArg("set-meta-user", 0, "Create/update a MetaAccount account with hidden prompt (or MANAGERSKYLARK_META_PASSWORD)", true, "username");
+	cla.AddArg("set-channels-user", 0, "Create/update a Channels account with hidden prompt (or MANAGERSKYLARK_CHANNELS_PASSWORD)", true, "username");
 	cla.AddArg("set-privatehub-user", 0, "Create/update a PrivateHub account with hidden prompt (or MANAGERSKYLARK_PRIVATEHUB_PASSWORD)", true, "username");
 	cla.AddArg("privatehub-role", 0, "Role for --set-privatehub-user (default member; only member may author)", true, "role");
 	cla.AddArg("github-backend", 0, "GitHub backend: gh (argv-only gh CLI, default) or emulated (local file-backed emulation, no network)", true, "gh|emulated");
@@ -211,6 +219,20 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.taskfoundry_port = ScanInt(cla.GetArg("taskfoundry-port"));
 		if(!cla.GetArg("meta-port").IsEmpty())
 			cfg.meta_port = ScanInt(cla.GetArg("meta-port"));
+		if(!cla.GetArg("channels-port").IsEmpty())
+			cfg.channels_port = ScanInt(cla.GetArg("channels-port"));
+		if(!cla.GetArg("agentipc-direct").IsEmpty())
+			cfg.agentipc_direct = cla.GetArg("agentipc-direct");
+		if(!cla.GetArg("agentipc-server").IsEmpty())
+			cfg.agentipc_server = cla.GetArg("agentipc-server");
+		if(!cla.GetArg("agentipc-user").IsEmpty())
+			cfg.agentipc_user = cla.GetArg("agentipc-user");
+		if(!cla.GetArg("agentipc-python").IsEmpty())
+			cfg.agentipc_python = NormalizePath(cla.GetArg("agentipc-python"));
+		if(!cla.GetArg("agentipc-client").IsEmpty())
+			cfg.agentipc_client = NormalizePath(cla.GetArg("agentipc-client"));
+		if(!cla.GetArg("agentipc-home").IsEmpty())
+			cfg.agentipc_home = NormalizePath(cla.GetArg("agentipc-home"));
 		if(!cla.GetArg("company-root").IsEmpty())
 			cfg.company_root = NormalizePath(cla.GetArg("company-root"));
 		if(!cla.GetArg("company-repos").IsEmpty())
@@ -233,6 +255,21 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			}
 			Cout() << "Configured TaskFoundry account '" << tf_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String ch_user = cla.GetArg("set-channels-user");
+		if(!ch_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_CHANNELS_PASSWORD", "New Channels password: ", password))
+				return false;
+			String error;
+			if(!SetChannelsPassword(ch_user, password, error)) {
+				Cerr() << "Failed to write Channels credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured Channels account '" << ch_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

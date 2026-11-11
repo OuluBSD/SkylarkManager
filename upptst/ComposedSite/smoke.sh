@@ -7,7 +7,8 @@
 # proposal -> Science and PrivateHub evidence -> validate -> submit -> Company proposal id,
 # with a repeat submit returning the same submission. TaskFoundry access is consented on
 # the MetaAccount site (link, request, approve, revoke) and the operator CLI is kept as a
-# fallback check.
+# fallback check. The Channels site reads a canned AgentIPC shim, so its fence is
+# deterministic.
 #
 # Usage: sh upptst/ComposedSite/smoke.sh <ManagerSkylark binary>
 #   e.g. sh upptst/ComposedSite/smoke.sh \
@@ -16,12 +17,13 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
 TF_URL=http://127.0.0.1:$TF_PORT
 META_URL=http://127.0.0.1:$META_PORT
+CH_URL=http://127.0.0.1:$CH_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -43,6 +45,21 @@ fi
 # One public paper, so the science author route has a paper to check auth on.
 printf '%s' '{"id":"2612.00002","kind":"paper","title":"Smoke paper","status":"draft","abstract":"Fixture.","envelope":{"schema_id":"skylark/paper","schema_version":"1","workspace_id":"science","stable_id":"2612.00002","record_kind":"paper","revision":"1","visibility":"public","provenance_ref":""}}' > "$T/corpus/2612.00002.json"
 
+# The Channels fixtures: a canned agentipc shim and the node record file whose
+# metadata the overview reads (bodies are never read).
+mkdir -p "$T/mesh" || exit 1
+cat > "$T/channels-shim.sh" <<'SHIMEOF'
+#!/bin/sh
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  names) echo s1 ;;
+  *) printf '#SMOKE [2026-11-11T04:00:00Z] s1: smoke line <b>raw</b>\n' ;;
+esac
+SHIMEOF
+chmod +x "$T/channels-shim.sh"
+printf '%s' '{"chan":"SMOKE","origin":"x","oseq":1,"server":"skylark","ts":"2026-11-11T04:00:00Z","user":"s1"}' > "$T/mesh/records.jsonl"
+
 # Provision the PrivateHub and Science author accounts, then start the server.
 MANAGERSKYLARK_PRIVATEHUB_PASSWORD=pw-ph "$BIN" --site-dir "$T" --privatehub-workspace "$T/ws" \
 	--set-privatehub-user dev >/dev/null 2>&1
@@ -57,18 +74,22 @@ MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos
 if [ $? -eq 0 ]; then pass "provision TaskFoundry account"; else fail "provision TaskFoundry account"; fi
 MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfmeta >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
+MANAGERSKYLARK_CHANNELS_PASSWORD=pw-chan "$BIN" --site-dir "$T" --set-channels-user cviewer >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Channels account"; fi
 
-"$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT --science-port $SC_PORT \
-	--taskfoundry-port $TF_PORT --meta-port $META_PORT --company-root "$T/company" \
-	--company-repos acme/widget --science-corpus "$T/corpus" --privatehub-workspace "$T/ws" \
-	> "$T/server.log" 2>&1 &
+MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
+	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
+	--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
+	--company-root "$T/company" --company-repos acme/widget --science-corpus "$T/corpus" \
+	--privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
 pid=$!
 ready=0
 for i in $(seq 1 40); do
 	if [ "$(curl -s -o /dev/null -w '%{http_code}' $PH_URL/session/login)" = "200" ] && \
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $SC_URL/)" != "000" ] && \
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ] && \
-	   [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ]; then ready=1; break; fi
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ] && \
+	   [ "$(curl -s -o /dev/null -w '%{http_code}' $CH_URL/)" != "000" ]; then ready=1; break; fi
 	sleep 0.25
 done
 if [ $ready -ne 1 ]; then
@@ -76,7 +97,7 @@ if [ $ready -ne 1 ]; then
 	kill $pid 2>/dev/null
 	exit 1
 fi
-pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT"
+pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT"
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"
@@ -85,7 +106,7 @@ check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.
 check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
 man=$(cat "$T/body")
-for site in privatehub science taskfoundry meta company github; do
+for site in privatehub science taskfoundry meta channels company github; do
 	if printf '%s' "$man" | grep -q "\"id\": *\"$site\""; then pass "manifest lists $site"; else fail "manifest lists $site"; fi
 done
 for path in 'api/papers' 'api/papers/\*/article' 'session/login' 'privatehub/\*/\*/issues/create' \
@@ -305,6 +326,20 @@ case "$loc" in
 */grants) pass "taskfoundry board after revoke redirects to the grants page" ;;
 *) fail "taskfoundry board after revoke redirects to the grants page (got '$loc')" ;;
 esac
+
+# The Channels site (task 012): session-gated reads over the canned shim; no
+# writes exist.
+check "channels overview anonymous redirects" 302 "$CH_URL/overview"
+curl -s -c "$T/chan.jar" -o "$T/chan_login" -H "Origin: $CH_URL" -H "Accept: application/json" \
+	--data "username=cviewer&password=pw-chan" "$CH_URL/session/login"
+check "channels overview lists the node channels" 200 "$CH_URL/overview" -b "$T/chan.jar"
+if grep -q "SMOKE" "$T/body"; then pass "channels overview lists the SMOKE channel"; else fail "channels overview lists the SMOKE channel"; fi
+check "channels page renders the shimmed messages" 200 "$CH_URL/channels/skylark/SMOKE" -b "$T/chan.jar"
+if grep -q "&lt;b&gt;raw&lt;/b&gt;" "$T/body" && ! grep -q "<b>raw</b>" "$T/body"; then
+	pass "channels bodies render escaped"
+else
+	fail "channels bodies render escaped"
+fi
 
 # The operator CLI stays as a documented fallback: a fresh request can be
 # approved and revoked out of band.

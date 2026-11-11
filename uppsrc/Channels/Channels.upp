@@ -1,0 +1,15 @@
+description "Channels webapp: read-only AgentIPC frontend over the argv-only client\377";
+
+uses
+	Core,
+	Skylark,
+	WebStorage,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	AgentIpcClient.h,
+	AgentIpcClient.cpp,
+	ChannelsSite.h,
+	ChannelsSite.cpp;

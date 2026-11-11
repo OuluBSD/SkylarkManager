@@ -15,6 +15,7 @@ uses
 	CompanyComposed,
 	Science,
 	MetaAccount,
+	Channels,
 	WebEngine,
 	WebBroker,
 	GitHubForge,

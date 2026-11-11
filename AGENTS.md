@@ -23,6 +23,7 @@
 | `uppsrc/SourceForgeForge` | Library | Official-SourceForge adapter: `IForgeBackend` over the Allura REST API with injectable transport; writes gated on API credentials. |
 | `uppsrc/PrivateHubWorkspace` | Library | PrivateHub backend: live local-repo inspection via argv-only git, strict path containment, site-scoped JSON issues/comments. |
 | `uppsrc/MetaAccount` | Application / Site | Meta-account webapp (the ecosystem's "Google login"): ecosystem identities, real TOTP second factor (RFC 6238 SHA256) with single-use recovery codes, consent grants for client webapps; broker service (`authenticate`, `request-consent`, `check-grant`, `revoke-grant`). |
+| `uppsrc/Channels` | Application / Site | Read-only AgentIPC frontend: the composed channels webapp reads the AgentIPC node's channel metadata and recent messages through the argv-only `agentipc` client; no writes. |
 | `uppsrc/Science` | Application / Site | arXiv-style Science webapp: read-only frontend over the flat paper corpus plus schema-validated structured article sidecars (`science/article-tree`), optimistic revisions, atomic writes. |
 | `uppsrc/TaskFoundry` | Application / Site | TaskFoundry webapp: candidates → evidence-backed proposals → validation → idempotent submission to Company via the WebBroker; evidence references Science papers and PrivateHub branches. |
 | `uppsrc/SiteCli` | Application / CLI | `skylarkctl`: agent-first CLI/REPL. Discovers commands dynamically from the connected server's `/api/cli/manifest`; `--json` and `--toon` output (TOON preferred for AI agents); session/bearer auth; per-section commands mirroring the web APIs. |
@@ -37,9 +38,9 @@
 
 The ManagerSkylark process composes fenced engine sites on separate ports
 (`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
-**MetaAccount** (+ the Company module via `CompanyComposed` from the private
-CompanySkylark repo). The stock host site serves the manager dashboard,
-GitHub/SourceForge webapps, host inspection, WebChat, and SweAgent.
+**MetaAccount**, **Channels** (+ the Company module via `CompanyComposed`
+from the private CompanySkylark repo). The stock host site serves the manager
+dashboard, GitHub/SourceForge webapps, host inspection, WebChat, and SweAgent.
 
 ---
 

@@ -14,7 +14,8 @@ uses
 	SourceForgeForge,
 	PrivateHubWorkspace,
 	Science,
-	TaskFoundry;
+	TaskFoundry,
+	Channels;
 
 file
 	AGENTS.md,

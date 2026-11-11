@@ -47,7 +47,7 @@
 
 ## Composed engine sites
 
-The real server (not `--test` or `--demo-site`) composes four engine sites
+The real server (not `--test` or `--demo-site`) composes five engine sites
 behind `WebEngineHost`, each on its own listener port, plus the Company module:
 
 | Site | Default port | Data root | Flag |
@@ -56,6 +56,7 @@ behind `WebEngineHost`, each on its own listener port, plus the Company module:
 | `science` | 18212 | `<site-dir>/engine/science`, corpus `~/Dev/AnthologyPrivate/site/data` | `--science-port`, `--science-corpus` |
 | `taskfoundry` | 18213 | `<site-dir>/engine/taskfoundry` | `--taskfoundry-port` |
 | `meta` | 18214 | `<site-dir>/engine/meta` | `--meta-port` |
+| `channels` | 18215 | `<site-dir>/engine/channels` | `--channels-port`, `--agentipc-*` (see `uppsrc/Channels/AGENTS.md`) |
 | Company module (no site) | none | `<site-dir>/engine/company` | `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
 
 **Host-compose direction only.** ManagerSkylark composes the Company module from
@@ -78,8 +79,12 @@ Accounts are per site. Provision them with
 `MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`,
 `MANAGERSKYLARK_SCIENCE_PASSWORD=... ManagerSkylark --set-science-user NAME`
 (science-author role), `MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=... ManagerSkylark --set-taskfoundry-user NAME`,
-or `MANAGERSKYLARK_META_PASSWORD=... ManagerSkylark --set-meta-user NAME`
-(or a hidden prompt); each command exits after writing the account. Engine
+`MANAGERSKYLARK_META_PASSWORD=... ManagerSkylark --set-meta-user NAME`,
+or `MANAGERSKYLARK_CHANNELS_PASSWORD=... ManagerSkylark --set-channels-user NAME`
+(or a hidden prompt); each command exits after writing the account. The
+Channels site additionally reads the AgentIPC node identity's password from
+`MANAGERSKYLARK_AGENTIPC_PASSWORD` at startup (see
+`uppsrc/Channels/AGENTS.md`). Engine
 listeners serve only their own site: a stock route claiming a path is answered
 404, except the home route (see `uppsrc/WebEngine/AGENTS.md`).
 
@@ -115,6 +120,8 @@ listeners serve only their own site: a stock route claiming a path is answered
 | `GET/POST /session/login`, `POST /session/logout` | meta | Sign in/out |
 | `POST /totp/begin`, `/totp/confirm`, `/totp/disable` | meta | Enroll or disable the TOTP second factor |
 | `GET /consent`, `POST /consent/decide` | meta | Consent grants of the signed-in identity; decide (approve/deny/revoke) as the subject |
+| `GET /overview` | channels | The AgentIPC node's channels and their last activity (read-only) |
+| `GET /channels/{server}/{chan}` | channels | A channel's recent messages through the argv-only client (read-only) |
 
 TaskFoundry access needs an approved grant bound to the signed-in user. The
 user links their meta identity on the TaskFoundry grants page (meta username,

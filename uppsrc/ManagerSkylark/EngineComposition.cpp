@@ -7,6 +7,9 @@ EngineComposition EngineComposition::Defaults()
 	EngineComposition cfg;
 	cfg.privatehub_workspace = GetHomeDirFile("Dev");
 	cfg.science_corpus = GetHomeDirFile("Dev/AnthologyPrivate/site/data");
+	cfg.agentipc_python = GetHomeDirFile(".venvs/agentipc/bin/python");
+	cfg.agentipc_client = GetHomeDirFile("OuluLinux/AgentIPC/bin/agentipc");
+	cfg.agentipc_home = GetHomeDirFile(".agentipc-skylark");
 	return cfg;
 }
 
@@ -98,6 +101,31 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
 	InstallSessionRoutes(tf);
 	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
+
+	// The channels site: the read-only frontend over the AgentIPC node. It
+	// reaches the node only through the argv-only client; the node identity's
+	// password is read once from the environment and held in memory.
+	String ch_root = AppendFileName(engine_root, "channels");
+	RealizeDirectory(ch_root);
+	AgentIpcConfig ipc;
+	ipc.direct = cfg.agentipc_direct;
+	ipc.server = cfg.agentipc_server;
+	ipc.user = cfg.agentipc_user;
+	if(!cfg.agentipc_python.IsEmpty() || !cfg.agentipc_client.IsEmpty()) {
+		ipc.client_argv.Add(cfg.agentipc_python.IsEmpty()
+			? GetHomeDirFile(".venvs/agentipc/bin/python") : cfg.agentipc_python);
+		ipc.client_argv.Add(cfg.agentipc_client.IsEmpty()
+			? GetHomeDirFile("OuluLinux/AgentIPC/bin/agentipc") : cfg.agentipc_client);
+	}
+	else
+		ipc.client_argv = AgentIpcDefaultClientArgv();
+	ipc.records_path = AppendFileName(cfg.agentipc_home, "mesh/records.jsonl");
+	ipc.password = GetEnv("MANAGERSKYLARK_AGENTIPC_PASSWORD");
+	EngineSite& ch = TheWebEngine().AddSite("channels", "Channels",
+		Format("http://127.0.0.1:%d", cfg.channels_port), ch_root);
+	InstallChannelsSite(ch, ipc);
+	InstallSessionRoutes(ch);
+	host.BindSite(cfg.channels_port, "channels");
 	RegisterComposedBrokerCommands();
 	return true;
 }
@@ -151,6 +179,12 @@ bool SetMetaAccountPassword(const String& username, const String& password, Stri
 {
 	Vector<String> roles;
 	return SetEngineUser("meta", username, password, roles, error);
+}
+
+bool SetChannelsPassword(const String& username, const String& password, String& error)
+{
+	Vector<String> roles;
+	return SetEngineUser("channels", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

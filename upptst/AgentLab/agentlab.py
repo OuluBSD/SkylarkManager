@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 AGENTIPC = [os.path.expanduser("~/.venvs/agentipc/bin/python"), "/home/sblo/bin/agentipc"]
 AGENTIPC_HOME = os.path.expanduser("~/.agentipc-skylark")
 PW_ENV = "AGENTLAB_ANN_PW"
-SITE_ORDER = ["privatehub", "science", "taskfoundry", "meta"]
+SITE_ORDER = ["privatehub", "science", "taskfoundry", "meta", "channels"]
 STOCK_SECTIONS = ["github"]  # served by the main port, no composed port of their own
 
 
@@ -136,6 +136,9 @@ def provision(binary, site_dir, workspace, scenario):
             elif site == "meta":
                 env["MANAGERSKYLARK_META_PASSWORD"] = password_for(user)
                 flags = ["--set-meta-user", user]
+            elif site == "channels":
+                env["MANAGERSKYLARK_CHANNELS_PASSWORD"] = password_for(user)
+                flags = ["--set-channels-user", user]
             elif site == "github":
                 env["MANAGERSKYLARK_SITE_PASSWORD"] = password_for(user)
                 flags = ["--set-site-password", user]
@@ -160,6 +163,8 @@ def server_args(binary, site_dir, ports, workspace, corpus, company_root):
                  "--company-repos", "acme/widget"]
     if "meta" in ports:
         args += ["--meta-port", str(ports["meta"])]
+    if "channels" in ports:
+        args += ["--channels-port", str(ports["channels"])]
     return args
 
 

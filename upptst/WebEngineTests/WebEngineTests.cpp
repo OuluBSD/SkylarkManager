@@ -14,6 +14,7 @@
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
 #include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <TaskFoundry/TaskFoundrySite.h>
+#include <Channels/ChannelsSite.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -37,6 +38,7 @@ static const int META_PORT  = 18203;
 static const int SCIENCE_PORT = 18204;
 static const int PRIVATEHUB_PORT = 18205;
 static const int TASKFOUNDRY_PORT = 18206;
+static const int CHANNELS_PORT = 18207;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -474,6 +476,41 @@ static void SetupSites()
 
 	// A second meta identity, for the not-your-grant negative.
 	meta.Accounts().CreateUser("eva", "pw-eva", "Eva", ph_no_roles, uid, existed);
+
+	// Channels site over an argv shim (task 012: read-only AgentIPC frontend).
+	String shim_path = AppendFileName(s_root, "channels-shim.sh");
+	FileOut shim(shim_path);
+	shim << "#!/bin/sh\n"
+	     << "printf '%s\\n' \"$@\" > \"$AGENTIPC_SHIM_ARGV\"\n"
+	     << "echo run >> \"$AGENTIPC_SHIM_COUNT\"\n"
+	     << "if [ -n \"$AGENTIPC_SHIM_FAIL\" ]; then echo shim failure >&2; exit 3; fi\n"
+	     << "last=\"\"; for a in \"$@\"; do last=\"$a\"; done\n"
+	     << "case \"$last\" in\n"
+	     << "  names) echo s1; echo s2 ;;\n"
+	     << "  *) cat \"$AGENTIPC_SHIM_CANNED\" ;;\n"
+	     << "esac\n";
+	shim.Close();
+	system(~String("chmod +x \"" + shim_path + "\""));
+	FileOut canned(AppendFileName(s_root, "channels-canned.txt"));
+	canned << "#SKYLARK-MANAGER [2026-11-11T03:00:00Z] s1: TASK hello <script>alert(1)</script>\n"
+	       << "#SKYLARK-MANAGER [2026-11-11T03:01:00Z] s2: ACK hello\n";
+	canned.Close();
+	FileOut records(AppendFileName(s_root, "channels-records.jsonl"));
+	records << "{\"body\":\"ciphertext-a\",\"chan\":\"SKYLARK-MANAGER\",\"origin\":\"skylark-a\","
+	           "\"oseq\":2,\"server\":\"skylark\",\"ts\":\"2026-11-11T03:01:00Z\",\"user\":\"s2\"}\n"
+	        << "{\"body\":\"ciphertext-b\",\"chan\":\"AGENTLAB\",\"origin\":\"skylark-a\","
+	           "\"oseq\":3,\"server\":\"skylark\",\"ts\":\"2026-11-11T03:02:00Z\",\"user\":\"a1\"}\n";
+	records.Close();
+	AgentIpcConfig ch_ipc;
+	ch_ipc.client_argv.Add("/bin/sh");
+	ch_ipc.client_argv.Add(shim_path);
+	ch_ipc.records_path = AppendFileName(s_root, "channels-records.jsonl");
+	ch_ipc.password = "pw-secret";
+	EngineSite& ch = TheWebEngine().AddSite("channels", "Channels",
+		Format("http://127.0.0.1:%d", CHANNELS_PORT), AppendFileName(s_root, "channels"));
+	InstallChannelsSite(ch, ch_ipc);
+	InstallSessionRoutes(ch);
+	ch.Accounts().CreateUser("viewer", "pw-view", "Viewer", ph_no_roles, uid, existed);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -1116,6 +1153,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(SCIENCE_PORT, "science");
 	host.BindSite(PRIVATEHUB_PORT, "privatehub");
 	host.BindSite(TASKFOUNDRY_PORT, "taskfoundry");
+	host.BindSite(CHANNELS_PORT, "channels");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
@@ -1826,6 +1864,77 @@ CONSOLE_APP_MAIN
 		Check(rc2.status == 403, "taskfoundry write is refused after the meta revoke");
 		HttpReply rb2 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
 		Check(rb2.status == 302, "taskfoundry board redirects again after the meta revoke");
+	}
+
+	// --- Channels read-only frontend over an argv shim (task 012) ---
+	{
+		String ch_origin = Format("http://127.0.0.1:%d", CHANNELS_PORT);
+		VectorMap<String, String> ch_lo;
+		ch_lo.Add("Origin", ch_origin);
+		ch_lo.Add("accept", "application/json");
+		setenv("AGENTIPC_SHIM_ARGV", AppendFileName(s_root, "channels-argv.txt"), 1);
+		setenv("AGENTIPC_SHIM_COUNT", AppendFileName(s_root, "channels-count.txt"), 1);
+		setenv("AGENTIPC_SHIM_CANNED", AppendFileName(s_root, "channels-canned.txt"), 1);
+		DeleteFile(AppendFileName(s_root, "channels-argv.txt"));
+		DeleteFile(AppendFileName(s_root, "channels-count.txt"));
+
+		VectorMap<String, String> clf;
+		clf.Add("username", "viewer");
+		clf.Add("password", "pw-view");
+		HttpReply rcl = HttpCall("POST", CHANNELS_PORT, "/session/login", ch_lo, FormEncode(clf));
+		String ch_csrf = (String)ParseJSON(rcl.body)["csrf"];
+		String ch_raw;
+		String ch_cookie = "wfs_channels=" + CookieOf(rcl, "wfs_channels", ch_raw);
+		Check(rcl.status == 200 && ch_csrf.GetCount() > 0, "channels session login");
+
+		// Anonymous callers are redirected.
+		VectorMap<String, String> anon_h;
+		anon_h.Add("Origin", ch_origin);
+		HttpReply rca = HttpCall("GET", CHANNELS_PORT, "/overview", anon_h, "");
+		Check(rca.status == 302, "channels overview anonymous redirects");
+
+		VectorMap<String, String> ch_h;
+		ch_h.Add("Origin", ch_origin);
+		ch_h.Add("Cookie", ch_cookie);
+		HttpReply rco = HttpCall("GET", CHANNELS_PORT, "/overview", ch_h, "");
+		Check(rco.status == 200 && rco.body.Find("SKYLARK-MANAGER") >= 0
+		      && rco.body.Find("AGENTLAB") >= 0, "channels overview lists the node's channels");
+		HttpReply rcp = HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER", ch_h, "");
+		Check(rcp.status == 200 && rcp.body.Find("ACK hello") >= 0, "channels page renders the shimmed messages");
+		Check(rcp.body.Find("<script>alert(1)") < 0 && rcp.body.Find("&lt;script&gt;") >= 0,
+		      "channel bodies render escaped");
+
+		// The argv the shim saw: the password value is never in argv.
+		String argv_dump = LoadFile(AppendFileName(s_root, "channels-argv.txt"));
+		Check(argv_dump.Find("--password-env") >= 0 && argv_dump.Find("AGENTIPC_CHANNELS_PW") >= 0
+		      && argv_dump.Find("pw-secret") < 0, "the client argv carries the env name, never the password");
+		Check(argv_dump.Find("sh") < 0 || argv_dump.Find(";") < 0, "the client argv carries no shell metacharacters");
+
+		// The overview reads the record metadata without a client call; the page
+		// view made one client call, the next one is served from the cache, and
+		// ?fresh=1 forces a new call. The shim appends one line per call.
+		auto RunsOf = [](const String& path) {
+			String f = LoadFile(path);
+			int n = 0;
+			for(int i = 0; i < f.GetCount(); i++)
+				if(f[i] == '\n')
+					n++;
+			return n;
+		};
+		int runs = RunsOf(AppendFileName(s_root, "channels-count.txt"));
+		Check(runs == 1, "the page view made one client call");
+		HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER", ch_h, "");
+		runs = RunsOf(AppendFileName(s_root, "channels-count.txt"));
+		Check(runs == 1, "a repeated page view is served from the cache");
+		HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER?fresh=1", ch_h, "");
+		runs = RunsOf(AppendFileName(s_root, "channels-count.txt"));
+		Check(runs == 2, "?fresh=1 forces a new client call");
+
+		// A failing client turns into a 503 page.
+		setenv("AGENTIPC_SHIM_FAIL", "1", 1);
+		HttpReply rcf = HttpCall("GET", CHANNELS_PORT, "/channels/skylark/AGENTLAB?fresh=1", ch_h, "");
+		setenv("AGENTIPC_SHIM_FAIL", "", 1);
+		Check(rcf.status == 503, "a failing client answers with the unavailable page");
 	}
 
 	// Command manifest: the registry shape, and the session routes checked against their descriptors.
