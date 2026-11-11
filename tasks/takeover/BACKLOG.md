@@ -111,15 +111,16 @@ source so a later brief can pick it up. All five are done as of brief 13; each e
   only (`RequireUser`), not the member role. Item 5 gated only the authoring endpoints
   it added (wiki, topic, release file). Under the rule that every mutation checks the
   actor's role, these three need the same gate.
-- **Status:** not changed in brief 14, because the brief names only the authoring
-  endpoints. Needs a planner decision on whether viewers may comment.
+- **Decision (planner, 2026-11-11):** gate them with the member role — viewers read,
+  members write. Consistent with item 5 and the every-mutation-checks-the-role rule.
+  Open for the next brief (small: three RequireRole checks + fence negatives).
 - **Source:** found while writing the viewer-denial fence (brief 14 step 0).
 
 ## 9. Stale `MT` mainconfig in CompanySkylark
 
-- **What:** `uppsrc/CompanySkylark/CompanySkylark.upp` still declares `mainconfig "" = "MT";`.
-  Multithreading is always compiled in, so the `MT` setting does nothing. The mainconfig
-  itself is kept only because the package builds a standalone main behind `flagMAIN`.
-- **Status:** not changed in brief 14. The change is a CompanySkylark edit, and it needs a
-  planner decision on whether the mainconfig stays with an empty value or is removed.
+- **Status: done** (2026-11-11, planner). The `MT` flag was dropped; the mainconfig
+  stays with an empty value (`"" = "";`) because CompanySkylark is a dual-main package
+  (standalone main behind `flagMAIN`). Commit `5feb147` in CompanySkylark. Note: the
+  config switch moves the output directory, so assets and templates must be redeployed
+  beside the new binary (`deploy-assets.sh` + `deploy-templates.sh`).
 - **Source:** found while verifying the UppSkillz build skill (brief 14 step 2).

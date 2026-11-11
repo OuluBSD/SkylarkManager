@@ -18,9 +18,29 @@
 | `uppsrc/WebBroker` | Library | Transport-independent communication bus between fenced websites: versioned request/result contracts, in-process transport, bounded diagnostics ledger; TCP transport is an explicit stub. |
 | `uppsrc/WebAccounts` | Library | Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens; crypto reuses `WebAuth` primitives. |
 | `uppsrc/WebEngine` | Library | Composable website engine: independently fenced virtual websites (own accounts, sessions, cookies, storage, routers) inside one Skylark process via per-port engine listeners and gateway catch-alls. |
+| `uppsrc/ForgeCore` | Library | Canonical forge domain suite: backend-qualified `ForgeRef` identity, issues/PRs/comments records, mandatory provenance (remote/local/snapshot/synthetic/unavailable), capability-declaring `IForgeBackend`. Core-only. |
+| `uppsrc/GitHubForge` | Library | Official-github adapter: `IForgeBackend` over argv-only `gh api` (`GitHubGhConnector`) or a C++ stateful emulation (`GitHubEmulatedBackend`, file-backed, flock, seeds — no fake gh executable). Config-selected. |
+| `uppsrc/SourceForgeForge` | Library | Official-SourceForge adapter: `IForgeBackend` over the Allura REST API with injectable transport; writes gated on API credentials. |
+| `uppsrc/PrivateHubWorkspace` | Library | PrivateHub backend: live local-repo inspection via argv-only git, strict path containment, site-scoped JSON issues/comments. |
+| `uppsrc/MetaAccount` | Application / Site | Meta-account webapp (the ecosystem's "Google login"): ecosystem identities, real TOTP second factor (RFC 6238 SHA256) with single-use recovery codes, consent grants for client webapps; broker service (`authenticate`, `request-consent`, `check-grant`, `revoke-grant`). |
+| `uppsrc/Science` | Application / Site | arXiv-style Science webapp: read-only frontend over the flat paper corpus plus schema-validated structured article sidecars (`science/article-tree`), optimistic revisions, atomic writes. |
+| `uppsrc/TaskFoundry` | Application / Site | TaskFoundry webapp: candidates → evidence-backed proposals → validation → idempotent submission to Company via the WebBroker; evidence references Science papers and PrivateHub branches. |
+| `uppsrc/SiteCli` | Application / CLI | `skylarkctl`: agent-first CLI/REPL. Discovers commands dynamically from the connected server's `/api/cli/manifest`; `--json` and `--toon` output (TOON preferred for AI agents); session/bearer auth; per-section commands mirroring the web APIs. |
 | `upptst/WebEngineTests` | Test | Engine fence self-test host: multiple fenced sites with identical paths, site-stamped session isolation, CSRF/origin fence, broker diagnostics. Run the binary directly; exit 0 = all checks passed. |
+| `upptst/SiteCli` | Test | SiteCli self-tests + live check script (manifest fetch, login jar, JSON/TOON output). |
+| `upptst/AgentLab` | Test / Rig | Multi-agent scenario rig: data-driven runner over SiteCli, per-agent announcers, AgentIPC oversight client matching exact `@scenario-oversight` milestones; scenarios: github-pr-flow, privatehub-issues, science-authoring, taskfoundry-submit. |
+| `upptst/GitHubCapture` | Test | Headless GitHub route capture + normalized compare against the emulated-backend baseline. |
 | `examples/SkylarkGuiExample` | Example | Bi-directional desktop integration combining U++ `CtrlLib` GUI with an embedded `Skylark` HTTP server. |
 | `examples/WebShowcase` | Example | Standalone reference showcase application for `WebFramework` components, themes, and navigation widgets. |
+
+### Composed sites (engine host in ManagerSkylark)
+
+The ManagerSkylark process composes fenced engine sites on separate ports
+(`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**
+(+ the Company module via `CompanyComposed` from the private CompanySkylark
+repo). The **MetaAccount** site installer exists but is not composed yet.
+The stock host site serves the manager dashboard, GitHub/SourceForge
+webapps, host inspection, WebChat, and SweAgent.
 
 ---
 
