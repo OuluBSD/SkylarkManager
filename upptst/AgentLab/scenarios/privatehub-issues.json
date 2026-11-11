@@ -105,6 +105,46 @@
         ]
       },
       "announce": "@scenario-oversight wiki create refused for viewer"
+    },
+    {
+      "id": "viewer-issue-refused",
+      "as": "viewer",
+      "describe": "a viewer without the member role cannot open an issue (role negative, task 010)",
+      "run": [
+        "privatehub",
+        "issue-create",
+        "owner=acme",
+        "repo=widget",
+        "title=Viewer issue",
+        "body=should be refused"
+      ],
+      "expect": {
+        "rc": 1,
+        "not_contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight issue create refused for viewer"
+    },
+    {
+      "id": "viewer-comment-refused",
+      "as": "viewer",
+      "describe": "a viewer without the member role cannot comment on an issue (role negative, task 010)",
+      "run": [
+        "privatehub",
+        "issue-comment",
+        "owner=acme",
+        "repo=widget",
+        "number={issue}",
+        "body=should be refused"
+      ],
+      "expect": {
+        "rc": 1,
+        "not_contains": [
+          "\"ok\""
+        ]
+      },
+      "announce": "@scenario-oversight issue comment refused for viewer"
     }
   ]
 }

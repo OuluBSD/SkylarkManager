@@ -12,6 +12,7 @@
 #include <GitHubForge/GitHubGhConnector.h>
 #include <SourceForgeForge/SourceForgeForge.h>
 #include <PrivateHubWorkspace/PrivateHubWorkspace.h>
+#include <PrivateHubWorkspace/PrivateHubSite.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
@@ -33,6 +34,7 @@ static const int ALPHA_PORT = 18201;
 static const int BETA_PORT  = 18202;
 static const int META_PORT  = 18203;
 static const int SCIENCE_PORT = 18204;
+static const int PRIVATEHUB_PORT = 18205;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -381,6 +383,7 @@ static WebGrants *s_meta_grants = NULL;
 static String     s_sci_reader_uid;
 static String     s_sci_other_uid;
 static ScienceCorpus *s_sci_corpus = NULL;
+static PrivateHubWorkspaceBackend *s_ph_backend = NULL;
 
 static void SetupSites()
 {
@@ -439,6 +442,22 @@ static void SetupSites()
 	science.Accounts().CreateUser("author", "pw-author", "Author", author_roles, uid, existed);
 	science.Accounts().CreateUser("reader", "pw-reader", "Reader", reader_roles, s_sci_reader_uid, existed);
 	science.Accounts().CreateUser("other", "pw-other", "Other", reader_roles, s_sci_other_uid, existed);
+
+	// PrivateHub site over a git fixture repo under s_root (task 010: members write, viewers read).
+	String ph_ws = AppendFileName(s_root, "privatehub-http-ws");
+	RealizeDirectory(AppendFileName(AppendFileName(ph_ws, "oulubsd"), "demo"));
+	String ph_repo = AppendFileName(AppendFileName(ph_ws, "oulubsd"), "demo");
+	system(~String("cd \"" + ph_repo + "\" && git init -q && git config user.email t@t && git config user.name t && echo hi > file.txt && git add file.txt && git commit -qm init"));
+	s_ph_backend = new PrivateHubWorkspaceBackend(ph_ws, AppendFileName(s_root, "privatehub-http-issues"));
+	EngineSite& ph = TheWebEngine().AddSite("privatehub", "PrivateHub",
+		Format("http://127.0.0.1:%d", PRIVATEHUB_PORT), AppendFileName(s_root, "privatehub"));
+	InstallPrivateHubSite(ph, *s_ph_backend);
+	InstallSessionRoutes(ph);
+	Vector<String> ph_member_roles;
+	ph_member_roles.Add("member");
+	Vector<String> ph_no_roles;
+	ph.Accounts().CreateUser("member", "pw-member", "Member", ph_member_roles, uid, existed);
+	ph.Accounts().CreateUser("viewer", "pw-viewer", "Viewer", ph_no_roles, uid, existed);
 }
 
 struct EngineTestHost : WebEngineHost {
@@ -1079,6 +1098,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(BETA_PORT, "beta");
 	host.BindSite(META_PORT, "meta");
 	host.BindSite(SCIENCE_PORT, "science");
+	host.BindSite(PRIVATEHUB_PORT, "privatehub");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
@@ -1209,6 +1229,71 @@ CONSOLE_APP_MAIN
 		bad_h.Add(SCIENCE_GRANT_HEADER, "wag_unknown");
 		HttpReply rbadg = HttpCall("POST", SCIENCE_PORT, article_path, bad_h, good, "application/json");
 		Check(rbadg.status == 403, "science article write with an unknown grant is refused");
+	}
+
+	// --- PrivateHub member-role gate (task 010): viewers read, members write ---
+	{
+		String ph_origin = Format("http://127.0.0.1:%d", PRIVATEHUB_PORT);
+		VectorMap<String, String> ph_o;
+		ph_o.Add("Origin", ph_origin);
+		ph_o.Add("accept", "application/json");
+		auto PhHeaders = [&](VectorMap<String, String>& h, const String& cookie, const String& csrf) {
+			h.Add("Origin", ph_origin);
+			if(cookie.GetCount()) h.Add("Cookie", cookie);
+			if(csrf.GetCount()) h.Add("x-wf-csrf", csrf);
+		};
+		auto PhLogin = [&](const char* user, const char* pw, String& cookie, String& csrf) {
+			VectorMap<String, String> f;
+			f.Add("username", user);
+			f.Add("password", pw);
+			HttpReply r = HttpCall("POST", PRIVATEHUB_PORT, "/session/login", ph_o, FormEncode(f));
+			csrf = (String)ParseJSON(r.body)["csrf"];
+			String pair;
+			String val = CookieOf(r, "wfs_privatehub", pair);
+			cookie = "wfs_privatehub=" + val;
+			return r.status == 200 && csrf.GetCount() > 0;
+		};
+		String mem_cookie, mem_csrf, view_cookie, view_csrf;
+		Check(PhLogin("member", "pw-member", mem_cookie, mem_csrf), "privatehub member logs in");
+		Check(PhLogin("viewer", "pw-viewer", view_cookie, view_csrf), "privatehub viewer logs in");
+
+		const String repo = "/privatehub/oulubsd/demo";
+		VectorMap<String, String> mem_h, view_h;
+		PhHeaders(mem_h, mem_cookie, mem_csrf);
+		PhHeaders(view_h, view_cookie, view_csrf);
+
+		// Issue create: viewer refused, member allowed.
+		VectorMap<String, String> issue_f;
+		issue_f.Add("title", "Gate check");
+		issue_f.Add("body", "opened by a member");
+		HttpReply vi = HttpCall("POST", PRIVATEHUB_PORT, repo + "/issues/create", view_h, FormEncode(issue_f));
+		Check(vi.status == 403, "privatehub viewer cannot open an issue");
+		HttpReply mi = HttpCall("POST", PRIVATEHUB_PORT, repo + "/issues/create", mem_h, FormEncode(issue_f));
+		Check(mi.status < 400, "privatehub member opens an issue");
+
+		// Issue comment on the member's issue: viewer refused, member allowed.
+		VectorMap<String, String> c_f;
+		c_f.Add("body", "a comment");
+		Vector<ForgeIssue> opened;
+		s_ph_backend->ListIssues("oulubsd/demo", opened);
+		String issue_path = repo + "/issues/" + (opened.IsEmpty() ? String("missing") : opened[0].issue_id) + "/comment";
+		HttpReply vc = HttpCall("POST", PRIVATEHUB_PORT, issue_path, view_h, FormEncode(c_f));
+		Check(vc.status == 403, "privatehub viewer cannot comment on an issue");
+		HttpReply mc = HttpCall("POST", PRIVATEHUB_PORT, issue_path, mem_h, FormEncode(c_f));
+		Check(mc.status < 400, "privatehub member comments on an issue");
+
+		// Discussion topic post: a member starts the topic; the viewer is refused, the member posts.
+		VectorMap<String, String> t_f;
+		t_f.Add("slug", "gate-topic");
+		t_f.Add("title", "Gate topic");
+		HttpReply mt = HttpCall("POST", PRIVATEHUB_PORT, repo + "/discussions/create", mem_h, FormEncode(t_f));
+		Check(mt.status < 400, "privatehub member starts a discussion topic");
+		VectorMap<String, String> p_f;
+		p_f.Add("body", "a post");
+		HttpReply vp = HttpCall("POST", PRIVATEHUB_PORT, repo + "/discussions/gate-topic/post", view_h, FormEncode(p_f));
+		Check(vp.status == 403, "privatehub viewer cannot post in a discussion topic");
+		HttpReply mp = HttpCall("POST", PRIVATEHUB_PORT, repo + "/discussions/gate-topic/post", mem_h, FormEncode(p_f));
+		Check(mp.status < 400, "privatehub member posts in a discussion topic");
 	}
 
 	// --- Science broker surface (brief 10 step 3) ---

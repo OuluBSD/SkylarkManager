@@ -67,6 +67,8 @@ static bool CanAuthor(WebRequest& r)
 	return false;
 }
 
+static bool RequireAuthor(WebRequest& r);
+
 static String CsrfField(WebRequest& r)
 {
 	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
@@ -179,7 +181,7 @@ static void Done(WebRequest& r, const String& location)
 
 static void IssueCreate(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireAuthor(r))
 		return;
 	String title = r.Param("title");
 	if(title.IsEmpty() || title.GetCount() > 200) {
@@ -226,7 +228,7 @@ static void IssueDetail(WebRequest& r)
 
 static void IssueComment(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireAuthor(r))
 		return;
 	String body = r.Param("body");
 	if(body.IsEmpty()) {
@@ -341,7 +343,7 @@ static void TopicDetail(WebRequest& r)
 
 static void TopicPost(WebRequest& r)
 {
-	if(!RequireUser(r))
+	if(!RequireAuthor(r))
 		return;
 	String body = r.Param("body");
 	if(body.IsEmpty()) {
@@ -625,11 +627,11 @@ void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	cm.Add(site.id, site.title, HttpCommand("issue-create", "POST", "privatehub/*/*/issues/create",
-	                                        "signed-in user", "html", "Open an issue",
+	                                        "member role", "html", "Open an issue",
 	                                        {"owner:string:required", "repo:string:required", "title:string:required",
 	                                         "body:text"}));
 	cm.Add(site.id, site.title, HttpCommand("issue-comment", "POST", "privatehub/*/*/issues/*/comment",
-	                                        "signed-in user", "html", "Comment on an issue",
+	                                        "member role", "html", "Comment on an issue",
 	                                        {"owner:string:required", "repo:string:required", "number:string:required",
 	                                         "body:text:required"}));
 	cm.Add(site.id, site.title, HttpCommand("wiki-create", "POST", "privatehub/*/*/wiki/create",
@@ -645,7 +647,7 @@ void InstallPrivateHubSite(EngineSite& site, PrivateHubWorkspaceBackend& backend
 	                                        {"owner:string:required", "repo:string:required", "slug:string:required",
 	                                         "title:string:required", "forum:string"}));
 	cm.Add(site.id, site.title, HttpCommand("topic-post", "POST", "privatehub/*/*/discussions/*/post",
-	                                        "signed-in user", "html", "Post in a discussion topic",
+	                                        "member role", "html", "Post in a discussion topic",
 	                                        {"owner:string:required", "repo:string:required", "topic:string:required",
 	                                         "body:text:required"}));
 	cm.Add(site.id, site.title, HttpCommand("file-register", "POST", "privatehub/*/*/files/register",
