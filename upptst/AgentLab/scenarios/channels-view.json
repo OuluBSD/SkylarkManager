@@ -10,6 +10,11 @@
       "role": "session account",
       "instructions": "You are cviewer, a Channels viewer. Open the channel overview and read the live SKYLARK-MANAGER channel through the site. The view is read-only.",
       "announcer": "a1"
+    },
+    "anon": {
+      "user": null,
+      "role": "anonymous",
+      "instructions": "You are not signed in. Try to read the live SKYLARK-MANAGER channel and expect a refusal."
     }
   },
   "provision": {
@@ -57,6 +62,20 @@
         ]
       },
       "announce": "@scenario-oversight channels view rendered"
+    },
+    {
+      "id": "anon-read-refused",
+      "as": "anon",
+      "describe": "an anonymous channel read is refused (role negative)",
+      "run": [
+        "channels",
+        "channel-read",
+        "server=skylark",
+        "chan=SKYLARK-MANAGER"
+      ],
+      "expect": {
+        "rc": 1
+      }
     }
   ]
 }

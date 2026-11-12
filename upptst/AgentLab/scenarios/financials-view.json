@@ -10,6 +10,12 @@
       "role": "finance",
       "instructions": "You are ffin, a Financials finance-role viewer. Open the summary, the ledger and the contracts views. Everything is read-only.",
       "announcer": "a1"
+    },
+    "fviewer": {
+      "user": "fviewer",
+      "role": "viewer",
+      "instructions": "You are fviewer, a Financials viewer without the finance role. The summary renders; the ledger and the contracts are refused. Announce each refusal on AgentIPC with @scenario-oversight.",
+      "announcer": "a2"
     }
   },
   "provision": {
@@ -17,6 +23,10 @@
       {
         "user": "ffin",
         "role": "finance"
+      },
+      {
+        "user": "fviewer",
+        "role": "viewer"
       }
     ]
   },
@@ -65,6 +75,52 @@
         "rc": 0
       },
       "announce": "@scenario-oversight financials views rendered"
+    },
+    {
+      "id": "fviewer-login",
+      "as": "fviewer",
+      "login": "financials"
+    },
+    {
+      "id": "fviewer-summary",
+      "as": "fviewer",
+      "describe": "a viewer without the finance role sees the summary",
+      "run": [
+        "financials",
+        "financials-summary"
+      ],
+      "expect": {
+        "rc": 0,
+        "contains": [
+          "Financials summary"
+        ]
+      }
+    },
+    {
+      "id": "fviewer-ledger-refused",
+      "as": "fviewer",
+      "describe": "a viewer without the finance role cannot open the ledger (role negative)",
+      "run": [
+        "financials",
+        "financials-ledger"
+      ],
+      "expect": {
+        "rc": 1
+      },
+      "announce": "@scenario-oversight ledger refused for viewer"
+    },
+    {
+      "id": "fviewer-contracts-refused",
+      "as": "fviewer",
+      "describe": "a viewer without the finance role cannot open the contracts (role negative)",
+      "run": [
+        "financials",
+        "financials-contracts"
+      ],
+      "expect": {
+        "rc": 1
+      },
+      "announce": "@scenario-oversight contracts refused for viewer"
     }
   ]
 }
