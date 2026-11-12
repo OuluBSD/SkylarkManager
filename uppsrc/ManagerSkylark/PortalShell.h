@@ -20,13 +20,15 @@ struct PortalWebapp : Moveable<PortalWebapp> {
 // links (task 032).
 String PortalLinkHost(const String& host_header);
 
-// The descriptors for the meta-list: the manager's own home first, then one per
-// site bound in this process (absolute origins on the request's host), then the
-// stock settings page. Sites are a parameter so the self-tests can pass their own.
+// The descriptors for the meta-list: the five stock hubs (their roots, first is
+// the default), then one per site bound in this process (absolute origins on the
+// request's host), then the stock settings page. Sites are a parameter so the
+// self-tests can pass their own.
 Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineSiteListing>& sites);
 
-// The user row at the foot of the meta-list.
-String RenderShellAccountRow(const UserSession& sess);
+// The user row at the foot of the meta-list. A guest's "Log in" opens inside the
+// portal frame and returns to return_url (the selected webapp).
+String RenderShellAccountRow(const UserSession& sess, const String& return_url);
 
 // The portal page at "/": the meta-list on the left and the selected descriptor's
 // frame in the main area. An unknown or empty selection falls back to the manager.

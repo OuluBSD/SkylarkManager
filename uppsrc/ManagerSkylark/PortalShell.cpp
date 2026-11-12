@@ -20,13 +20,23 @@ Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineS
 	String host = PortalLinkHost(host_header);
 	Vector<PortalWebapp> out;
 
-	PortalWebapp manager;
-	manager.id = "manager";
-	manager.title = "Manager";
-	manager.group = "webapp";
-	manager.mode = "frame";
-	manager.url = "/home";
-	out.Add(pick(manager));
+	// The five stock hubs, each framed at its root; the first one is the default.
+	static const char *hubs[][3] = {
+		{ "ai", "Local AI Hub", "/ai" },
+		{ "github", "GitHub Hub", "/github" },
+		{ "sourceforge", "SourceForge Hub", "/sourceforge" },
+		{ "host", "Self-Hosted", "/host" },
+		{ "mesh", "Mesh-Hosted", "/mesh" },
+	};
+	for(const auto& hub : hubs) {
+		PortalWebapp app;
+		app.id = hub[0];
+		app.title = hub[1];
+		app.group = "webapp";
+		app.mode = "frame";
+		app.url = hub[2];
+		out.Add(pick(app));
+	}
 
 	for(const EngineSiteListing& s : sites) {
 		PortalWebapp app;
@@ -48,7 +58,7 @@ Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineS
 	return out;
 }
 
-String RenderShellAccountRow(const UserSession& sess)
+String RenderShellAccountRow(const UserSession& sess, const String& return_url)
 {
 	String h;
 	h << "<div class=\"wf-shell-account\" style=\"display:flex; flex-direction:column; gap:6px; font-size:0.85rem;\">\n";
@@ -59,8 +69,9 @@ String RenderShellAccountRow(const UserSession& sess)
 		  << "<strong>" << EscapeHtml(sess.username) << "</strong></div>\n"
 		  << "  <div><a href=\"/logout\">Log out</a></div>\n";
 	}
-	else
-		h << "  <div><a href=\"/login\" class=\"wf-btn wf-btn-primary\">Log in</a></div>\n";
+	else // the sign-in opens inside the frame, then returns to the selected webapp
+		h << "  <div><a href=\"/login?next=" << EscapeHtml(UrlEncode(return_url))
+		  << "\" target=\"portal-frame\" class=\"wf-btn wf-btn-primary\">Log in</a></div>\n";
 	h << "</div>";
 	return h;
 }
@@ -86,9 +97,10 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 
 	String frame;
 	frame << "<style>.portal-frame { display:block; width:100%; height:calc(100vh - 3rem); border:0; }</style>\n"
-	      << "<iframe class=\"portal-frame\" src=\"" << EscapeHtml(apps[sel].url) << "\" title=\""
+	      << "<iframe class=\"portal-frame\" name=\"portal-frame\" src=\"" << EscapeHtml(apps[sel].url) << "\" title=\""
 	      << EscapeHtml(apps[sel].title) << "\"></iframe>";
 
+	String return_url = apps[sel].url.StartsWith("/") ? apps[sel].url : String("/");
 	PageBuilder pb;
 	pb.Title("Portal - Manager Skylark")
 	  .Brand("Manager Skylark", "/", "cube")
@@ -96,7 +108,7 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 	  .Theme("vivid-dark")
 	  .Density(DENSITY_COMFORTABLE)
 	  .LeftTree(tree, "Portal", "portal-tree")
-	  .SidebarFooter(RenderShellAccountRow(sess))
+	  .SidebarFooter(RenderShellAccountRow(sess, return_url))
 	  .Content(frame);
 	return pb.Build();
 }
@@ -106,6 +118,28 @@ SKYLARK(PortalShellPage, "")
 	http.ContentType("text/html; charset=utf-8") << RenderPortalShell(http.GetHeader("host"), http["app"],
 	                                                               SystemAuthService::GetCurrentSession(http),
 	                                                               TheWebEngine().ListSites());
+}
+
+// Hub roots (task 035): each hub's address opens its first page, which carries
+// that hub's own navigator. The host hub's root is HostOverviewPage ("host").
+SKYLARK(HubAiPage, "ai")
+{
+	http.Redirect("/chat");
+}
+
+SKYLARK(HubGitHubPage, "github")
+{
+	http.Redirect("/repo/SeppoPakonen");
+}
+
+SKYLARK(HubSourceForgePage, "sourceforge")
+{
+	http.Redirect("/projects/topside/");
+}
+
+SKYLARK(HubMeshPage, "mesh")
+{
+	http.Redirect("/host/nodes");
 }
 
 END_UPP_NAMESPACE

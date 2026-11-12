@@ -7,6 +7,19 @@
 
 NAMESPACE_UPP
 
+// A hub's top navigator is that hub's category alone (task 035): the sections
+// and items it owns, with nothing from the other hubs. An empty hub gives no
+// navigator at all.
+static NavigationModel ScopeToHub(const NavigationModel& all, const String& hub)
+{
+	NavigationModel scoped;
+	for(const NavCategory& c : all.GetCategories())
+		if(c.id == hub)
+			scoped.AddCategory(c.id, c.title, c.icon, c.description) = c;
+	scoped.SetActive(hub, all.GetActiveItemId());
+	return scoped;
+}
+
 NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav)
 {
 	NavigationModel nav;
@@ -94,10 +107,14 @@ NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav)
 		nav.SetActive("github", active_nav);
 	else if(active_nav.StartsWith("sf") || active_nav.StartsWith("projects/topside") || active_nav.StartsWith("p/"))
 		nav.SetActive("sourceforge", active_nav);
-	else if(active_nav == "chat" || active_nav == "sweagent" || active_nav == "projects" || active_nav == "goals" || active_nav == "issues" || active_nav == "releases" || active_nav == "spec" || active_nav == "health")
+	else if(active_nav == "chat" || active_nav == "sweagent" || active_nav == "projects" || active_nav == "goals" || active_nav == "issues" || active_nav == "releases" || active_nav == "spec" || active_nav == "health" ||
+	        active_nav == "home" || active_nav == "calendar" || active_nav == "data" || active_nav == "docs" || active_nav == "research" || active_nav == "candidates" || active_nav == "reviews")
 		nav.SetActive("sweagent", active_nav);
 
-	return nav;
+	// No active_nav is the framework spec's full model; any other page gets only its hub.
+	if(active_nav.IsEmpty())
+		return nav;
+	return ScopeToHub(nav, nav.GetActiveCategoryId());
 }
 
 TreeModel ManagerSkylarkApp::BuildProjectsTree(ManagerStore& store, const String& active_slug)

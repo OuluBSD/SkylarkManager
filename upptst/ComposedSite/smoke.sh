@@ -112,15 +112,19 @@ if [ $ready -ne 1 ]; then
 fi
 pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT, $FIN_PORT"
 
-# Portal shell (tasks 033, 034): "/" is the meta-shell framing the selected webapp.
-# curl matches cookies against the Host it sends, so the session cookie is passed by hand.
+# Portal shell (tasks 033-035): "/" is the public meta-shell; it frames the selected
+# hub, and a guest's framed sign-in returns to that hub. curl matches cookies against
+# the Host it sends, so the session cookie is passed by hand.
+check "portal shell is public" 200 "$MAIN_URL/"
+curl -s "$MAIN_URL/" -o "$T/shell_guest.html"
+if grep -q 'class="portal-frame"' "$T/shell_guest.html" && grep -q 'src="/ai"' "$T/shell_guest.html" \
+   && grep -q 'target="portal-frame"' "$T/shell_guest.html"; then
+	pass "portal shell frames the Local AI Hub with a framed log in"; else fail "portal shell frames the Local AI Hub with a framed log in"; fi
 curl -s -c "$T/stock.jar" -o /dev/null --data "redirect=/&username=shell&password=pw-stock" "$MAIN_URL/login/submit"
 SESSION=$(awk '/wf_auth_session/ {print $7}' "$T/stock.jar")
-check "stock page after login" 200 "$MAIN_URL/" -b "$T/stock.jar"
-curl -s -b "$T/stock.jar" "$MAIN_URL/" -o "$T/shell_default.html"
-if grep -q 'class="portal-frame"' "$T/shell_default.html" && grep -q 'src="/home"' "$T/shell_default.html" \
-   && grep -q 'wf-shell-account' "$T/shell_default.html"; then
-	pass "portal shell frames the manager home with a user row"; else fail "portal shell frames the manager home with a user row"; fi
+curl -s -b "$T/stock.jar" "$MAIN_URL/?app=github" -o "$T/shell_github.html"
+if grep -q 'src="/github"' "$T/shell_github.html"; then
+	pass "?app=github frames the GitHub Hub"; else fail "?app=github frames the GitHub Hub"; fi
 curl -s -b "$T/stock.jar" "$MAIN_URL/?app=atlas" -o "$T/shell_atlas.html"
 if grep -q "src=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_atlas.html"; then
 	pass "?app=atlas frames the Atlas site on loopback"; else fail "?app=atlas frames the Atlas site on loopback"; fi
@@ -128,14 +132,25 @@ curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: 192.168.1.169:$MAIN" "$M
 if grep -q "src=\"http://192.168.1.169:$ATL_PORT/\"" "$T/shell_lan.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_lan.html"; then
 	pass "?app=atlas frames the Atlas site on the LAN host"; else fail "?app=atlas frames the Atlas site on the LAN host"; fi
 curl -s -b "$T/stock.jar" "$MAIN_URL/home" -o "$T/home.html"
-if grep -q 'wf-template-sidebar' "$T/home.html" && ! grep -q 'portal-frame' "$T/home.html" && ! grep -q 'Webapps' "$T/home.html"; then
+if grep -q 'wf-template-megamenu' "$T/home.html" && ! grep -q 'portal-frame' "$T/home.html" && ! grep -q 'Webapps' "$T/home.html"; then
 	pass "/home is the stock home standalone with no Webapps"; else fail "/home is the stock home standalone with no Webapps"; fi
 headers=$(curl -s -D - -o /dev/null -b "$T/stock.jar" "$MAIN_URL/home"; curl -s -D - -o /dev/null "$ATL_URL/")
 if echo "$headers" | grep -qi 'x-frame-options\|frame-ancestors'; then
 	fail "no frame-blocking headers on the shell or composed sites"; else pass "no frame-blocking headers on the shell or composed sites"; fi
 
+# Hub roots (task 035): a gated hub frames the plain sign-in, which returns to the hub.
+check "gated hub root redirects to login" 302 "$MAIN_URL/github"
+if curl -s -D - -o /dev/null "$MAIN_URL/github" | grep -qi '^location: /login?next=%2Fgithub'; then
+	pass "gated hub returns to itself after sign-in"; else fail "gated hub returns to itself after sign-in"; fi
+curl -s "$MAIN_URL/login?next=%2Fgithub" -o "$T/login_plain.html"
+if grep -q 'name="redirect" value="/github"' "$T/login_plain.html" && ! grep -q 'class="wf-nav-categories"' "$T/login_plain.html" \
+   && ! grep -q 'Local AI Hub' "$T/login_plain.html"; then
+	pass "the sign-in page is plain and carries next"; else fail "the sign-in page is plain and carries next"; fi
+check "signed-in hub root redirects to its first page" 302 "$MAIN_URL/github" -b "$T/stock.jar"
+check "signed-in mesh root redirects to its first page" 302 "$MAIN_URL/mesh" -b "$T/stock.jar"
+check "unknown hub is a 404" 404 "$MAIN_URL/no-such-hub" -b "$T/stock.jar"
+
 # Stock app: global login enforcement stays on the stock port.
-check "stock / redirects to login" 302 "$MAIN_URL/"
 check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.

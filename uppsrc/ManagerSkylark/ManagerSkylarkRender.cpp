@@ -43,66 +43,53 @@ String ManagerSkylarkApp::RenderProgressBar(double percent)
 
 String ManagerSkylarkApp::RenderHtmlPage(const String& title, const String& active_nav, const String& body_content, const Http* http)
 {
+	// The top navigator is the page's hub alone (task 035); the left pane appears
+	// only for a page with a tree of its own, so no hub repeats its items there.
 	NavigationModel nav = BuildNavigation(active_nav);
-
-	// Every page but the full-width chat and the login form gets the left pane:
-	// the navigation tree on top, the user row pinned at the bottom (task 033).
-	bool sidebar_shell = active_nav != "chat" && active_nav != "login";
 
 	PageBuilder pb;
 	pb.Title(title + " - Manager Skylark")
 	  .Brand("Manager Skylark", "/", "cube")
 	  .Navigation(nav)
-	  .Template(sidebar_shell ? "sidebar" : "megamenu")
+	  .Template("megamenu")
 	  .Theme("vivid-dark")
 	  .Density(active_nav == "chat" ? DENSITY_NONE : DENSITY_COMFORTABLE)
 	  .Content(body_content);
 
 	UserSession sess = http ? SystemAuthService::GetCurrentSession(*http) : UserSession();
-	if(sidebar_shell)
-		pb.SidebarFooter(RenderShellAccountRow(sess));
-	else
-		pb.NavActions(SystemAuthService::RenderUserMenu(sess));
+	pb.NavActions(SystemAuthService::RenderUserMenu(sess));
 
 	// Contextual Left Tree configuration
-	if(active_nav != "chat" && active_nav != "login") {
-		TreeModel tree;
-		String tree_title = "Navigation";
-		String tree_id = "wf-tree";
+	TreeModel tree;
+	String tree_title = "Navigation";
+	String tree_id = "wf-tree";
 
-		if(active_nav.StartsWith("node") || active_nav.StartsWith("host") || active_nav.StartsWith("mesh")) {
-			String active_node_id = "";
-			if(active_nav.StartsWith("node_")) {
-				Vector<String> parts = Split(active_nav, '_');
-				if(parts.GetCount() >= 2)
-					active_node_id = parts[1];
-			} else if(active_nav.StartsWith("host")) {
-				active_node_id = "local-workstation";
-			}
-			tree = BuildMeshFleetTree(active_nav, active_node_id);
-			tree_title = "Compute Fleet & Repositories";
-			tree_id = "mesh-tree";
+	if(active_nav.StartsWith("node") || active_nav.StartsWith("host") || active_nav.StartsWith("mesh")) {
+		String active_node_id = "";
+		if(active_nav.StartsWith("node_")) {
+			Vector<String> parts = Split(active_nav, '_');
+			if(parts.GetCount() >= 2)
+				active_node_id = parts[1];
+		} else if(active_nav.StartsWith("host")) {
+			active_node_id = "local-workstation";
 		}
-		else if(active_nav == "projects" || active_nav.StartsWith("project")) {
-			tree = BuildProjectsTree(Get().GetLocalStore(), "");
-			tree_title = "Manager Task Queue";
-			tree_id = "mgr-tree";
-		}
-		else if(active_nav == "goals" || active_nav.StartsWith("goal")) {
-			tree = BuildGoalsTree(Get().GetV2Store(), "");
-			tree_title = "Milestones & Goals";
-			tree_id = "goals-tree";
-		}
-		else {
-			tree = TreeGenerators::FromNavigation(nav);
-			tree_title = "Workspace Navigation";
-			tree_id = "nav-tree";
-		}
-
-		if(!tree.IsEmpty()) {
-			pb.LeftTree(tree, tree_title, tree_id);
-			pb.AutoOutline(true); // Automatically builds right-side TOC outline
-		}
+		tree = BuildMeshFleetTree(active_nav, active_node_id);
+		tree_title = "Compute Fleet & Repositories";
+		tree_id = "mesh-tree";
+	}
+	else if(active_nav == "projects" || active_nav.StartsWith("project")) {
+		tree = BuildProjectsTree(Get().GetLocalStore(), "");
+		tree_title = "Manager Task Queue";
+		tree_id = "mgr-tree";
+	}
+	else if(active_nav == "goals" || active_nav.StartsWith("goal")) {
+		tree = BuildGoalsTree(Get().GetV2Store(), "");
+		tree_title = "Milestones & Goals";
+		tree_id = "goals-tree";
+	}
+	if(!tree.IsEmpty()) {
+		pb.LeftTree(tree, tree_title, tree_id);
+		pb.AutoOutline(true); // Automatically builds right-side TOC outline
 	}
 
 	pb.Footer("Manager Skylark &bull; Built on Ultimate++ Skylark &amp; Core &bull; OpenRouter &amp; SweAgent Autonomous Engineering");

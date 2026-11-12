@@ -148,33 +148,47 @@ static bool PortalShellSelfTests()
 	sites.Add(pick(atlas));
 
 	Vector<PortalWebapp> apps = ListWebapps("192.168.1.169:8081", sites);
-	if(apps.GetCount() != 3 || apps[0].id != "manager" || apps[0].url != "/home"
-	   || apps[1].url != "http://192.168.1.169:18217/" || apps[2].id != "settings"
-	   || apps[2].url != "/host/settings" || apps[2].group != "settings") {
-		Cerr() << "FAILED: portal descriptors are not manager, the site on the request host, then settings\n";
+	if(apps.GetCount() != 7 || apps[0].id != "ai" || apps[0].url != "/ai" || apps[4].id != "mesh"
+	   || apps[5].url != "http://192.168.1.169:18217/" || apps[6].id != "settings"
+	   || apps[6].url != "/host/settings" || apps[6].group != "settings") {
+		Cerr() << "FAILED: portal descriptors are not the five hubs, the site on the request host, then settings\n";
 		return false;
 	}
 
 	UserSession guest;
 	String atlas_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
 	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("wf-template-sidebar") < 0
-	   || atlas_page.Find("/?app=atlas") < 0 || atlas_page.Find("wf-shell-account") < 0) {
+	   || atlas_page.Find("/?app=atlas") < 0 || atlas_page.Find("wf-shell-account") < 0
+	   || atlas_page.Find("href=\"/login?next=http%3A%2F%2F") >= 0 || atlas_page.Find("name=\"portal-frame\"") < 0) {
 		Cerr() << "FAILED: ?app=atlas does not frame the Atlas site in the meta-shell\n";
 		return false;
 	}
+	String guest_row = RenderPortalShell("192.168.1.169:8081", "github", guest, sites);
+	if(guest_row.Find("href=\"/login?next=%2Fgithub\" target=\"portal-frame\"") < 0) {
+		Cerr() << "FAILED: a guest's log in does not open inside the frame and return to the selected hub\n";
+		return false;
+	}
 	String fallback = RenderPortalShell("", "no-such-app", guest, sites);
-	if(fallback.Find("src=\"/home\"") < 0) {
-		Cerr() << "FAILED: an unknown app does not fall back to the manager's home\n";
+	if(fallback.Find("src=\"/ai\"") < 0) {
+		Cerr() << "FAILED: an unknown app does not fall back to the Local AI Hub\n";
 		return false;
 	}
 
-	String stock = ManagerSkylarkApp::RenderHtmlPage("Docs", "docs", "<p>body</p>");
-	if(stock.Find("Webapps") >= 0 || stock.Find("/?app=") >= 0) {
-		Cerr() << "FAILED: the stock navigation still carries Webapps items\n";
+	// Each hub's top navigator is its own category alone (task 035).
+	String docs = ManagerSkylarkApp::RenderHtmlPage("Docs", "docs", "<p>body</p>");
+	String gh = ManagerSkylarkApp::RenderHtmlPage("Profile", "gh_profile", "<p>body</p>");
+	String host = ManagerSkylarkApp::RenderHtmlPage("Host", "host", "<p>body</p>");
+	String mesh = ManagerSkylarkApp::RenderHtmlPage("Mesh", "mesh_nodes", "<p>body</p>");
+	bool scoped = docs.Find("Pair Chat") >= 0 && docs.Find("SeppoPakonen Profile") < 0 && docs.Find("Local Workstation") < 0
+	           && gh.Find("SeppoPakonen Profile") >= 0 && gh.Find("Pair Chat") < 0 && gh.Find("Local Workstation") < 0
+	           && host.Find("Local Workstation (192.168.1.106)") >= 0 && host.Find("Pair Chat") < 0 && host.Find("SeppoPakonen Profile") < 0
+	           && mesh.Find("MediaCenter FX-8350") >= 0 && mesh.Find("Pair Chat") < 0 && mesh.Find("SeppoPakonen Profile") < 0;
+	if(!scoped || docs.Find("Webapps") >= 0 || docs.Find("/?app=") >= 0 || gh.Find("Local AI Hub") >= 0 || host.Find("GitHub Hub") >= 0) {
+		Cerr() << "FAILED: a hub's top navigator carries another hub's items\n";
 		return false;
 	}
 	String chat = ManagerSkylarkApp::RenderHtmlPage("Chat", "chat", "<p>body</p>");
-	if(chat.Find("wf-template-sidebar") >= 0) {
+	if(chat.Find("wf-template-sidebar") >= 0 || chat.Find("Pair Chat") < 0) {
 		Cerr() << "FAILED: the full-width chat page must not get the left pane\n";
 		return false;
 	}

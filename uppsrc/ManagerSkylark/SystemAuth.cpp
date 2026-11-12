@@ -76,6 +76,7 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 {
 	String id = http.GetHandlerId();
 	bool public_route = id == "LoginPage" || id == "LoginPost" || id == "LogoutHandler" ||
+	                    id == "PortalShellPage" || // the portal shell is public; gated webapps frame the login
 	                    id == "ApiHealth" || id == "ApiAuthStatus" || id == "ApiAuthLogin" ||
 	                    id == "ApiCliManifest" || id == "ApiCliManifestSite" || // public, read-only command manifest
 	                    IsEngineGatewayHandler(id); // engine sites authenticate with their own sessions
@@ -89,9 +90,12 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 			http.Response(401, "Unauthorized");
 		}
 		else {
+			// A page request returns to the page it asked for once signed in (task 035).
+			String uri = http.GetRequestURI();
+			bool back = http.GetMethod() == "GET" && uri.StartsWith("/") && !uri.StartsWith("//");
 			http.Content("text/plain; charset=utf-8", "Authentication required");
 			http.Response(302, "Found");
-			http.Redirect("/login");
+			http.Redirect(back ? "/login?next=" + UrlEncode(uri) : String("/login"));
 		}
 		return false;
 	}
@@ -332,14 +336,17 @@ String SystemAuthService::RenderLoginForm(const String& redirect_url, const Stri
 
 SKYLARK(LoginPage, "login")
 {
-	String err = http["err"];
-	String form = SystemAuthService::RenderLoginForm(http["redirect"], err);
+	// The sign-in page is plain: the form and a brand line, with no navigator and no
+	// webapp list. A framed sign-in returns to the page that asked for it (next).
+	String next = http["next"];
+	if(next.IsEmpty())
+		next = http["redirect"];
+	String form = SystemAuthService::RenderLoginForm(next, http["err"]);
 
-	NavigationModel nav = ManagerSkylarkApp::BuildNavigation("login");
 	String html = PageBuilder()
 		.Title("Sign In - ManagerSkylark Site Auth")
 		.Brand("ManagerSkylark", "/", "shield")
-		.Navigation(nav)
+		.Header("<div style=\"padding:12px 16px; font-weight:700;\">Manager Skylark</div>")
 		.Content(form)
 		.Build();
 
@@ -367,7 +374,10 @@ SKYLARK(LoginPost, "login/submit:POST_RAW")
 	if(SystemAuthService::Login(http, user, pass)) {
 		http.Redirect(redir);
 	} else {
-		http.Redirect("/login?err=" + UrlEncode("Authentication failed. Invalid site username or password."));
+		String back = "/login?err=" + UrlEncode("Authentication failed. Invalid site username or password.");
+		if(redir != "/")
+			back << "&next=" << UrlEncode(redir);
+		http.Redirect(back);
 	}
 }
 
