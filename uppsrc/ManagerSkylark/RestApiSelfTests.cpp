@@ -128,6 +128,7 @@ static ValueMap TestPolicyConfiguration()
 bool RunMetaInboxSelfTests(const String& scratch_dir);
 bool RunDocsPortalSelfTests(const String& scratch_dir);
 bool RunV2CalendarSelfTests(const String& scratch_dir);
+bool RunMarkdownSelfTests();
 
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
@@ -249,6 +250,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunV2CalendarSelfTests(AppendFileName(fixture.path, "v2-calendar"))) {
 		Cerr() << "FAILED: v2 calendar unit tests\n";
+		return false;
+	}
+	if(!RunMarkdownSelfTests()) {
+		Cerr() << "FAILED: markdown pipeline static tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

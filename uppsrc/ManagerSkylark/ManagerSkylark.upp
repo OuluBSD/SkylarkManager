@@ -141,6 +141,7 @@ file
 	MetaInboxSelfTests.cpp,
 	DocsPortalSelfTests.cpp,
 	V2CalendarSelfTests.cpp,
+	MarkdownSelfTests.cpp,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
 	ManagerSkylarkSetup.cpp,

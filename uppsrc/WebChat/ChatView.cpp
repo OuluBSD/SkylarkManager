@@ -78,6 +78,23 @@ String WebChatView::GetStyles()
 	return s;
 }
 
+// The markdown libraries, pinned with SRI (task 028). The integrity values were
+// computed from the files at these exact URLs; see reports/028.md.
+String WebChatView::GetMarkdownLibraryTags()
+{
+	String s;
+	s << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js\" integrity=\"sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp\" crossorigin=\"anonymous\"></script>\n"
+	  << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.2.0/diff.min.js\" integrity=\"sha384-lJJVaUgxmk/PVfQnAsGN1QuJZrE+n6bg2EMu33yVZOJ2av/3UzTHbmnPCI7ENJYa\" crossorigin=\"anonymous\"></script>\n"
+	  << "<script src=\"https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.umd.js\" integrity=\"sha384-T1OK2q1An/VBbLfrDkX11wmjRXeNhgvphqV8slhJenXlpmThRql6xsmTB4K6YGjY\" crossorigin=\"anonymous\"></script>\n"
+	  << "<script src=\"https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js\" integrity=\"sha384-XQqX/4yiUGu+oyr87jvWzRuqBUK/adrY0DunhL+tID9m/9dwSpV8h9Fk/Sg6ifVQ\" crossorigin=\"anonymous\"></script>\n";
+	return s;
+}
+
+String WebChatView::GetMarkdownStylesheetTag()
+{
+	return "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css\" integrity=\"sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07\" crossorigin=\"anonymous\">\n";
+}
+
 String WebChatView::GetMarkdownStyles()
 {
 	return
@@ -257,8 +274,8 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-diff\">DIFF</span> <span style=\"margin-left:8px;font-size:0.75rem;\">' + statsHtml + '</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Raw</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy Diff</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Raw</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy Diff</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"diff-container viewer-formatted\"><table class=\"diff-table\"><tbody>' + tableRows + '</tbody></table></div>' +\n"
@@ -276,9 +293,9 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-svg\">SVG CANVAS</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Source</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"downloadSvg(\\'' + blockId + '\\')\">Download SVG</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy SVG</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Source</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"downloadSvg\" data-block-id=\"' + blockId + '\">Download SVG</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy SVG</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"svg-preview-box viewer-formatted\">' + cleanSvg + '</div>' +\n"
@@ -295,8 +312,8 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-html\">HTML PREVIEW</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Source</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy HTML</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Source</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy HTML</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"viewer-formatted\" style=\"background:#ffffff;padding:14px;border-radius:0 0 8px 8px;min-height:100px;color:#1e293b;\">' + code + '</div>' +\n"
@@ -328,8 +345,8 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-csv\">SPREADSHEET / CSV</span> <span style=\"font-size:0.75rem;margin-left:6px;\">(' + (lines.length - 1) + ' rows)</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Raw</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy CSV</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Raw</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy CSV</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"csv-table-box viewer-formatted\">' + tableHtml + '</div>' +\n"
@@ -358,8 +375,8 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-obj\">3D OBJ MESH</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Source</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy OBJ</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Source</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy OBJ</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"obj-inspector viewer-formatted\">' +\n"
@@ -386,8 +403,8 @@ String WebChatView::GetMarkdownScript()
 		"             '<div class=\"viewer-header\">' +\n"
 		"               '<div><span class=\"viewer-badge badge-chart\">DIAGRAM / CHART</span></div>' +\n"
 		"               '<div class=\"viewer-actions\">' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"toggleViewerRaw(\\'' + blockId + '\\')\">Toggle Source</button>' +\n"
-		"                 '<button class=\"viewer-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy Chart</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"toggleViewerRaw\" data-block-id=\"' + blockId + '\">Toggle Source</button>' +\n"
+		"                 '<button class=\"viewer-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy Chart</button>' +\n"
 		"               '</div>' +\n"
 		"             '</div>' +\n"
 		"             '<div class=\"viewer-formatted\" style=\"background:#ffffff;padding:16px;color:#0f172a;\">' +\n"
@@ -460,7 +477,7 @@ String WebChatView::GetMarkdownScript()
 		"    return '<div class=\"code-container\" id=\"' + blockId + '\">' +\n"
 		"             '<div class=\"code-header\">' +\n"
 		"               '<span>' + (cleanLang || 'text') + '</span>' +\n"
-		"               '<button class=\"copy-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy</button>' +\n"
+		"               '<button class=\"copy-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy</button>' +\n"
 		"             '</div>' +\n"
 		"             '<pre><code class=\"language-' + (cleanLang || 'text') + '\">' + escapeHtml(code) + '</code></pre>' +\n"
 		"             '<textarea class=\"raw-content\" style=\"display:none;\">' + escapeHtml(code) + '</textarea>' +\n"
@@ -480,8 +497,19 @@ String WebChatView::GetMarkdownScript()
 		"  return html;\n"
 		"}\n"
 		"\n"
+		"/* Viewer buttons carry data-viewer-action instead of inline handlers, so the sanitizer can strip onclick from markdown output. */\n"
+		"var VIEWER_ACTIONS = { toggleViewerRaw: true, copyViewerRaw: true, downloadSvg: true };\n"
+		"document.addEventListener('click', function(ev) {\n"
+		"  var btn = ev.target && ev.target.closest ? ev.target.closest('[data-viewer-action]') : null;\n"
+		"  if (!btn) return;\n"
+		"  var action = btn.getAttribute('data-viewer-action');\n"
+		"  if (VIEWER_ACTIONS[action]) window[action](btn.getAttribute('data-block-id'));\n"
+		"});\n"
+		"\n"
 		"function renderMarkdown(md) {\n"
 		"  if (!md) return '';\n"
+		"  // Fail closed: without DOMPurify the source is shown escaped, never as markup.\n"
+		"  if (typeof DOMPurify === 'undefined') return '<pre>' + escapeHtml(md) + '</pre>';\n"
 		"  let tidied = tidyMarkdown(md);\n"
 		"  let html = '';\n"
 		"  if (typeof marked !== 'undefined' && marked.parse) {\n"
@@ -494,7 +522,7 @@ String WebChatView::GetMarkdownScript()
 		"  } else {\n"
 		"    html = fallbackRenderMarkdown(tidied);\n"
 		"  }\n"
-		"  return html;\n"
+		"  return DOMPurify.sanitize(html, { FORBID_TAGS: ['style'] });\n"
 		"}\n"
 		"\n"
 		"function initMarkdown() {\n"
@@ -528,7 +556,7 @@ String WebChatView::GetMarkdownScript()
 		"        return '<div class=\"code-container\" id=\"' + blockId + '\">' +\n"
 		"                 '<div class=\"code-header\">' +\n"
 		"                   '<span class=\"code-lang\">' + (lang || 'code') + '</span>' +\n"
-		"                   '<button class=\"copy-btn\" onclick=\"copyViewerRaw(\\'' + blockId + '\\')\">Copy</button>' +\n"
+		"                   '<button class=\"copy-btn\" data-viewer-action=\"copyViewerRaw\" data-block-id=\"' + blockId + '\">Copy</button>' +\n"
 		"                 '</div>' +\n"
 		"                 '<pre><code class=\"hljs language-' + (lang || 'text') + '\">' + highlighted + '</code></pre>' +\n"
 		"                 '<textarea class=\"raw-content\" style=\"display:none;\">' + escapeHtml(code) + '</textarea>' +\n"
@@ -1150,9 +1178,7 @@ String WebChatView::RenderSnippet(const String& current_session_id)
 	  << "</div>\n";
 
 	// Load CDNs
-	h << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js\"></script>\n";
-	h << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.2.0/diff.min.js\"></script>\n";
-	h << "<script src=\"https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js\"></script>\n";
+	h << GetMarkdownLibraryTags();
 	h << "<script>\n"
 	  << GetClientScript()
 	  << "currentSessionId = '" << active_id << "';\n"

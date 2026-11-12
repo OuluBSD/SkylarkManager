@@ -139,10 +139,8 @@ String ManagerSkylarkApp::RenderHtmlPage(const String& title, const String& acti
 void ManagerSkylarkApp::AddMarkdownSupport(PageBuilder& pb)
 {
 	String markdown_head;
-	markdown_head << "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css\">\n"
-	              << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js\"></script>\n"
-	              << "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.2.0/diff.min.js\"></script>\n"
-	              << "<script src=\"https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js\"></script>\n"
+	markdown_head << WebChatView::GetMarkdownStylesheetTag()
+	              << WebChatView::GetMarkdownLibraryTags()
 	              << "<style>\n"
 	              << WebChatView::GetMarkdownStyles() << "\n"
 	              << "</style>\n";

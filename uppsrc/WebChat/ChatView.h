@@ -22,6 +22,8 @@ public:
 
 	// Returns core client-side JavaScript for Markdown parsing & custom viewers
 	static String GetMarkdownScript();
+	static String GetMarkdownLibraryTags();
+	static String GetMarkdownStylesheetTag();
 
 	// Returns modern CSS stylesheet for Markdown body & custom viewers
 	static String GetMarkdownStyles();
