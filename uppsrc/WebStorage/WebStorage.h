@@ -18,6 +18,7 @@ struct StoreResult {
 	String error;
 
 	StoreResult(bool ok_ = true) : ok(ok_) {}
+	StoreResult(const char* err) : ok(false), error(err) {}
 	StoreResult(const String& err) : ok(false), error(err) {}
 	explicit operator bool() const { return ok; }
 };

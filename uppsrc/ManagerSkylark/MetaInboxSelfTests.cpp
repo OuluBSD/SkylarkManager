@@ -22,10 +22,14 @@ bool RunMetaInboxSelfTests(const String& scratch_dir)
 	RealizeDirectory(scratch_dir);
 	MetaInbox inbox("meta-inbox-test", scratch_dir);
 
-	// A refused type stores nothing. (Empty subject and source are refused in
-	// the code, but report ok: see the report for the StoreResult(const char*) bug.)
+	// Refusals store nothing. (A literal refusal once bound the StoreResult(bool) constructor and
+	// reported ok; the const char* constructor fixes that, task 026.)
 	all &= Check(!inbox.Push("alice", "meta", "consent.bogus", "meta:alice", "x", "").ok,
 	             "inbox: an event type off the allowlist is refused");
+	all &= Check(!inbox.Push("", "meta", "consent.granted", "meta:alice", "x", "").ok,
+	             "inbox: an event without a subject is refused");
+	all &= Check(!inbox.Push("alice", "", "consent.granted", "meta:alice", "x", "").ok,
+	             "inbox: an event without a source site is refused");
 	Vector<InboxEvent> none;
 	inbox.List("alice", none, -1);
 	all &= Check(none.IsEmpty(), "inbox: refused events store nothing");

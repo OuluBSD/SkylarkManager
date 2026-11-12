@@ -646,6 +646,19 @@ static bool JsonFlag(const ValueMap& m, const char *key)
 	return v.Is<bool>() ? (bool)v : (!v.IsNull() && IsNumber(v) && (int)v != 0);
 }
 
+// The state cell of one grant row on the TaskFoundry grants page ("" when the row is absent).
+static String GrantStateCell(const String& body, const String& id)
+{
+	int p = body.Find(id);
+	if(p < 0)
+		return String();
+	int cell = body.Find("</td><td>", p + id.GetCount());
+	int end = cell >= 0 ? body.Find("</td>", cell + 9) : -1;
+	if(cell < 0 || end < 0)
+		return String();
+	return body.Mid(cell + 9, end - cell - 9);
+}
+
 static Vector<String> failures;
 static int checks = 0;
 
@@ -2048,6 +2061,9 @@ CONSOLE_APP_MAIN
 		Check(rc2.status == 403, "taskfoundry write is refused after the meta revoke");
 		HttpReply rb2 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
 		Check(rb2.status == 302, "taskfoundry board redirects again after the meta revoke");
+		HttpReply rgs_rev = HttpCall("GET", TASKFOUNDRY_PORT, "/grants", tf_h, "");
+		Check(GrantStateCell(rgs_rev.body, wag) == "revoked",
+		      "the grants page shows the linked grant as revoked after the meta revoke");
 
 		// The inbox carries the whole lifecycle for the subject (task 014).
 		HttpReply rina = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
@@ -2099,6 +2115,9 @@ CONSOLE_APP_MAIN
 		HttpReply rdn = HttpCall("POST", META_PORT, "/consent/decide", h_meta2, FormEncode(deny_f));
 		Check(JsonFlag(ParseJSON(rdn.body).Is<ValueMap>() ? (ValueMap)ParseJSON(rdn.body) : ValueMap(), "ok"),
 		      "the subject denies the pending request");
+		HttpReply rgs_den = HttpCall("GET", TASKFOUNDRY_PORT, "/grants", tf_h, "");
+		Check(GrantStateCell(rgs_den.body, wag2) == "denied",
+		      "the grants page shows the denied request as denied (state changed, not just ok)");
 		HttpReply rb3 = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
 		Check(rb3.status == 302, "a denied grant gives no TaskFoundry access");
 		HttpReply rinb = HttpCall("GET", META_PORT, "/inbox", h_meta2, "");
