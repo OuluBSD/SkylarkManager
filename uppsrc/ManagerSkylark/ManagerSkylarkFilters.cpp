@@ -13,13 +13,13 @@ bool ManagerSkylarkApp::FilterHandler(Http& http)
 	// Engine listeners serve only their composed sites. A stock route can claim
 	// a path before the engine catch-all: the gateway then rebuilds the path
 	// from the route's wildcard arguments, which drops literal segments, so it
-	// would serve the wrong page. Only the home route is safe to hand over: its
+	// would serve the wrong page. Only the root route is safe to hand over: its
 	// pattern matches exactly "/", the one path it can be reached with.
 	if(WebEngine::CurrentListenerPort() > 0) {
 		String id = http.GetHandlerId();
 		if(IsEngineGatewayHandler(id))
 			return true;
-		if(id == "HomePage") {
+		if(id == "PortalShellPage") {
 			TheWebEngine().Gateway(http);
 			return false;
 		}

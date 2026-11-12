@@ -152,6 +152,8 @@ file
 	ManagerSkylarkRender.cpp,
 	ManagerSkylarkSeed.h,
 	WebViews.cpp,
+	PortalShell.h,
+	PortalShell.cpp,
 	RestApi.cpp,
 	RestApiProjects.cpp,
 	RestApiSweAgent.cpp,

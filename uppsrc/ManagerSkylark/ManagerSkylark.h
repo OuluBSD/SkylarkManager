@@ -19,10 +19,7 @@
 
 NAMESPACE_UPP
 
-// The host portal links are served on, from a request's Host header: the name
-// without its port (loopback when the header is empty). A LAN browser gets LAN
-// links (task 032). Declared here so the self-tests can reach it.
-String PortalLinkHost(const String& host_header);
+#include "PortalShell.h"
 
 class ManagerSkylarkApp : public WebEngineHost {
 public:
@@ -62,7 +59,7 @@ public:
 	static void   AddMarkdownSupport(PageBuilder& pb);
 	static String RenderBadge(const String& status);
 	static String RenderProgressBar(double percent);
-	static NavigationModel BuildNavigation(const String& active_nav = "", const Http* http = nullptr);
+	static NavigationModel BuildNavigation(const String& active_nav = "");
 	static TreeModel       BuildMeshFleetTree(const String& active_nav = "", const String& active_node_id = "");
 	static TreeModel       BuildGoalsTree(V2Store& store, const String& active_id = "");
 	static TreeModel       BuildProjectsTree(ManagerStore& store, const String& active_slug = "");

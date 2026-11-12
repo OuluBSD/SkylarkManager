@@ -4,7 +4,7 @@
 
 NAMESPACE_UPP
 
-SKYLARK(HomePage, "")
+SKYLARK(HomePage, "home")
 {
 	ManagerSkylarkApp& app = ManagerSkylarkApp::Get();
 	ManagerStore& local = app.GetLocalStore();

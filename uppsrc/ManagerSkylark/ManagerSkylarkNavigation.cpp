@@ -7,40 +7,9 @@
 
 NAMESPACE_UPP
 
-String PortalLinkHost(const String& host_header)
-{
-	String host = TrimBoth(host_header);
-	if(host.StartsWith("[")) {
-		int e = host.Find(']');
-		return e < 0 ? String("127.0.0.1") : host.Left(e + 1);
-	}
-	int colon = host.Find(':');
-	if(colon >= 0)
-		host = host.Left(colon);
-	return host.IsEmpty() ? String("127.0.0.1") : host;
-}
-
-// One link per site composed into this process (task 033). Sites are listed only
-// when the request is known, because their links are built from its Host.
-static void AddWebappsCategory(NavigationModel& nav, const Http* http)
-{
-	if(!http)
-		return;
-	Vector<EngineSiteListing> sites = TheWebEngine().ListSites();
-	if(sites.IsEmpty())
-		return;
-	String host = PortalLinkHost(http ? http->GetHeader("host") : String());
-	NavCategory& cat = nav.AddCategory("webapps", "Webapps", "layers", "Sites composed into this process, each with its own sign-in");
-	NavSection& sec = cat.AddSection("Composed Sites");
-	for(const EngineSiteListing& s : sites)
-		sec.Add("webapp_" + s.id, s.title, Format("http://%s:%d/", host, s.port), "layers",
-		        "Open the " + s.title + " site").Badge("Composed", "emerald");
-}
-
-NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav, const Http* http)
+NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav)
 {
 	NavigationModel nav;
-	AddWebappsCategory(nav, http);
 
 	// Pillar 1: Self-Hosted / Local Machine
 	NavCategory& cat_host = nav.AddCategory("host", "Self-Hosted", "server", "Local workstation, file system, git repositories, and disk storage");

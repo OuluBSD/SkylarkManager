@@ -112,20 +112,27 @@ if [ $ready -ne 1 ]; then
 fi
 pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT, $FIN_PORT"
 
-# Portal shell (task 033): a signed-in stock page is the left-pane shell, and its
-# webapp links are built from the Host the page was requested with (task 032).
-curl -s -c "$T/stock.jar" -o /dev/null --data "redirect=/&username=shell&password=pw-stock" "$MAIN_URL/login/submit"
-check "stock page after login" 200 "$MAIN_URL/" -b "$T/stock.jar"
-curl -s -b "$T/stock.jar" "$MAIN_URL/" -o "$T/shell_loopback.html"
-if grep -q 'wf-template-sidebar' "$T/shell_loopback.html" && grep -q 'wf-shell-account' "$T/shell_loopback.html"; then
-	pass "stock page is the left-pane shell with a user row"; else fail "stock page is the left-pane shell with a user row"; fi
-if grep -q "href=\"http://127.0.0.1:$PH_PORT/\"" "$T/shell_loopback.html" && grep -q "href=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_loopback.html"; then
-	pass "webapp links use the loopback host"; else fail "webapp links use the loopback host"; fi
+# Portal shell (tasks 033, 034): "/" is the meta-shell framing the selected webapp.
 # curl matches cookies against the Host it sends, so the session cookie is passed by hand.
+curl -s -c "$T/stock.jar" -o /dev/null --data "redirect=/&username=shell&password=pw-stock" "$MAIN_URL/login/submit"
 SESSION=$(awk '/wf_auth_session/ {print $7}' "$T/stock.jar")
-curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: 192.168.1.169:$MAIN" "$MAIN_URL/" -o "$T/shell_lan.html"
-if grep -q "href=\"http://192.168.1.169:$ATL_PORT/\"" "$T/shell_lan.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_lan.html"; then
-	pass "webapp links follow the LAN Host, not loopback"; else fail "webapp links follow the LAN Host, not loopback"; fi
+check "stock page after login" 200 "$MAIN_URL/" -b "$T/stock.jar"
+curl -s -b "$T/stock.jar" "$MAIN_URL/" -o "$T/shell_default.html"
+if grep -q 'class="portal-frame"' "$T/shell_default.html" && grep -q 'src="/home"' "$T/shell_default.html" \
+   && grep -q 'wf-shell-account' "$T/shell_default.html"; then
+	pass "portal shell frames the manager home with a user row"; else fail "portal shell frames the manager home with a user row"; fi
+curl -s -b "$T/stock.jar" "$MAIN_URL/?app=atlas" -o "$T/shell_atlas.html"
+if grep -q "src=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_atlas.html"; then
+	pass "?app=atlas frames the Atlas site on loopback"; else fail "?app=atlas frames the Atlas site on loopback"; fi
+curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: 192.168.1.169:$MAIN" "$MAIN_URL/?app=atlas" -o "$T/shell_lan.html"
+if grep -q "src=\"http://192.168.1.169:$ATL_PORT/\"" "$T/shell_lan.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_lan.html"; then
+	pass "?app=atlas frames the Atlas site on the LAN host"; else fail "?app=atlas frames the Atlas site on the LAN host"; fi
+curl -s -b "$T/stock.jar" "$MAIN_URL/home" -o "$T/home.html"
+if grep -q 'wf-template-sidebar' "$T/home.html" && ! grep -q 'portal-frame' "$T/home.html" && ! grep -q 'Webapps' "$T/home.html"; then
+	pass "/home is the stock home standalone with no Webapps"; else fail "/home is the stock home standalone with no Webapps"; fi
+headers=$(curl -s -D - -o /dev/null -b "$T/stock.jar" "$MAIN_URL/home"; curl -s -D - -o /dev/null "$ATL_URL/")
+if echo "$headers" | grep -qi 'x-frame-options\|frame-ancestors'; then
+	fail "no frame-blocking headers on the shell or composed sites"; else pass "no frame-blocking headers on the shell or composed sites"; fi
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"

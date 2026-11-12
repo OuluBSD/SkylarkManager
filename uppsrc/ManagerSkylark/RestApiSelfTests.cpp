@@ -131,7 +131,7 @@ bool RunV2CalendarSelfTests(const String& scratch_dir);
 bool RunMarkdownSelfTests();
 bool RunAtlasSelfTests(const String& scratch_dir);
 
-// Portal shell (task 033): the link host and the left-pane page shell.
+// Portal shell (tasks 033, 034): the descriptors, the meta-shell frame and the stock tree.
 static bool PortalShellSelfTests()
 {
 	if(PortalLinkHost("") != "127.0.0.1" || PortalLinkHost("192.168.1.169:8081") != "192.168.1.169"
@@ -139,10 +139,38 @@ static bool PortalShellSelfTests()
 		Cerr() << "FAILED: portal link host is not the request's name without its port\n";
 		return false;
 	}
-	String page = ManagerSkylarkApp::RenderHtmlPage("Shell", "docs", "<p>body</p>");
-	if(page.Find("wf-template-sidebar") < 0 || page.Find("wf-shell-account") < 0
-	   || page.Find("/login") < 0) {
-		Cerr() << "FAILED: a guest page does not render the left-pane shell with a user row\n";
+
+	Vector<EngineSiteListing> sites;
+	EngineSiteListing atlas;
+	atlas.id = "atlas";
+	atlas.title = "Atlas";
+	atlas.port = 18217;
+	sites.Add(pick(atlas));
+
+	Vector<PortalWebapp> apps = ListWebapps("192.168.1.169:8081", sites);
+	if(apps.GetCount() != 3 || apps[0].id != "manager" || apps[0].url != "/home"
+	   || apps[1].url != "http://192.168.1.169:18217/" || apps[2].id != "settings"
+	   || apps[2].url != "/host/settings" || apps[2].group != "settings") {
+		Cerr() << "FAILED: portal descriptors are not manager, the site on the request host, then settings\n";
+		return false;
+	}
+
+	UserSession guest;
+	String atlas_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
+	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("wf-template-sidebar") < 0
+	   || atlas_page.Find("/?app=atlas") < 0 || atlas_page.Find("wf-shell-account") < 0) {
+		Cerr() << "FAILED: ?app=atlas does not frame the Atlas site in the meta-shell\n";
+		return false;
+	}
+	String fallback = RenderPortalShell("", "no-such-app", guest, sites);
+	if(fallback.Find("src=\"/home\"") < 0) {
+		Cerr() << "FAILED: an unknown app does not fall back to the manager's home\n";
+		return false;
+	}
+
+	String stock = ManagerSkylarkApp::RenderHtmlPage("Docs", "docs", "<p>body</p>");
+	if(stock.Find("Webapps") >= 0 || stock.Find("/?app=") >= 0) {
+		Cerr() << "FAILED: the stock navigation still carries Webapps items\n";
 		return false;
 	}
 	String chat = ManagerSkylarkApp::RenderHtmlPage("Chat", "chat", "<p>body</p>");
@@ -822,7 +850,7 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		}
 	}
 	{
-		HttpRequest req(base_url + "/");
+		HttpRequest req(base_url + "/home");
 		req.Header("Authorization", "Bearer " + demo_token);
 		req.Timeout(3000);
 		String res = req.Execute();
