@@ -25,6 +25,7 @@
 | `uppsrc/MetaAccount` | Application / Site | Meta-account webapp (the ecosystem's "Google login"): ecosystem identities, real TOTP second factor (RFC 6238 SHA256) with single-use recovery codes, consent grants for client webapps; broker service (`authenticate`, `request-consent`, `check-grant`, `revoke-grant`). |
 | `uppsrc/Channels` | Application / Site | Read-only AgentIPC frontend: the composed channels webapp reads the AgentIPC node's channel metadata and recent messages through the argv-only `agentipc` client; no writes. |
 | `uppsrc/Financials` | Application / Site | Read-only Financials portal: ledger summary, recent entries and client contracts from the Company module, read through scope-checked broker ops; finance role gates the rows. |
+| `uppsrc/Atlas` | Application / Site | Atlas topology map: a 2D map of the project on a virtual plane (continents, blocks with inside-maps, places; seas and roads), one revision-checked map document per project version; admin edits, other roles read. |
 | `uppsrc/Science` | Application / Site | arXiv-style Science webapp: read-only frontend over the flat paper corpus plus schema-validated structured article sidecars (`science/article-tree`), optimistic revisions, atomic writes. |
 | `uppsrc/TaskFoundry` | Application / Site | TaskFoundry webapp: candidates → evidence-backed proposals → validation → idempotent submission to Company via the WebBroker; evidence references Science papers and PrivateHub branches. |
 | `uppsrc/SiteCli` | Application / CLI | `skylarkctl`: agent-first CLI/REPL. Discovers commands dynamically from the connected server's `/api/cli/manifest`; `--json` and `--toon` output (TOON preferred for AI agents); session/bearer auth; per-section commands mirroring the web APIs. |
@@ -39,7 +40,7 @@
 
 The ManagerSkylark process composes fenced engine sites on separate ports
 (`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
-**MetaAccount**, **Channels**, **Financials** (+ the Company module via
+**MetaAccount**, **Channels**, **Financials**, **Atlas** (+ the Company module via
 `CompanyComposed` from the private CompanySkylark repo). The stock host site serves the manager
 dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and the
 `/docs` documentation portal.
@@ -140,6 +141,7 @@ The `--test` flag boots an internal server instance on port 18080, runs automate
 | `/issues` | `GET` | `Manager/v2` multi-repository issue tracker |
 | `/releases` | `GET` | Cross-repository release milestones |
 | `/calendar` | `GET` | Month grid of release and task dates (`?m=YYYY-MM`) |
+| `/atlas`, `/atlas/{map}`, `/atlas/{map}/element/{id}` | `GET` | Atlas topology map (engine site on `--atlas-port`, default 18217): map list, canvas with pan, zoom and drag-to-move (admin), element detail. Mutations under `/atlas/...` are admin-only and revision-checked. |
 | `/chat` | `GET` | Integrated AI pair-programming chat view |
 | `/webchat` | `GET` | Standalone AI chat application |
 | `/sweagent` | `GET` | SweAgent web runner and execution trajectory viewer |

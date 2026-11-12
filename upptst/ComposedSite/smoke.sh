@@ -17,7 +17,7 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225; FIN_PORT=18226
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225; FIN_PORT=18226; ATL_PORT=18217
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
@@ -25,6 +25,7 @@ TF_URL=http://127.0.0.1:$TF_PORT
 META_URL=http://127.0.0.1:$META_PORT
 CH_URL=http://127.0.0.1:$CH_PORT
 FIN_URL=http://127.0.0.1:$FIN_PORT
+ATL_URL=http://127.0.0.1:$ATL_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -80,10 +81,12 @@ if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Ch
 MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fin "$BIN" --site-dir "$T" --financials-role finance \
 	--set-financials-user ffin >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Financials finance account"; else fail "provision Financials finance account"; fi
+MANAGERSKYLARK_ATLAS_PASSWORD=pw-atl "$BIN" --site-dir "$T" --atlas-role admin --set-atlas-user atlasadmin >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision Atlas admin account"; else fail "provision Atlas admin account"; fi
 
 MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
 	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
-	--financials-port $FIN_PORT \
+	--financials-port $FIN_PORT --atlas-port $ATL_PORT \
 	--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
 	--company-root "$T/company" --company-repos acme/widget --science-corpus "$T/corpus" \
 	--privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
@@ -95,7 +98,8 @@ for i in $(seq 1 40); do
 	   [ "$(curl -s -o /dev/null -w '%{http_code}' $TF_URL/session/login)" = "200" ] && \
    [ "$(curl -s -o /dev/null -w '%{http_code}' $META_URL/)" != "000" ] && \
    [ "$(curl -s -o /dev/null -w '%{http_code}' $CH_URL/)" != "000" ] && \
-   [ "$(curl -s -o /dev/null -w '%{http_code}' $FIN_URL/)" != "000" ]; then ready=1; break; fi
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $FIN_URL/)" != "000" ] && \
+   [ "$(curl -s -o /dev/null -w '%{http_code}' $ATL_URL/)" != "000" ]; then ready=1; break; fi
 
 	sleep 0.25
 done
@@ -113,7 +117,7 @@ check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.
 check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
 man=$(cat "$T/body")
-for site in privatehub science taskfoundry meta channels financials company github; do
+for site in privatehub science taskfoundry meta channels financials atlas company github; do
 	if printf '%s' "$man" | grep -q "\"id\": *\"$site\""; then pass "manifest lists $site"; else fail "manifest lists $site"; fi
 done
 for path in 'api/papers' 'api/papers/\*/article' 'session/login' 'privatehub/\*/\*/issues/create' \
@@ -369,6 +373,20 @@ check "financials ledger empty state" 200 "$FIN_URL/ledger" -b "$T/fin.jar"
 if grep -q "No ledger entries yet" "$T/body"; then pass "financials ledger shows the empty state"; else fail "financials ledger shows the empty state"; fi
 check "financials contracts empty state" 200 "$FIN_URL/contracts" -b "$T/fin.jar"
 if grep -q "No contracts yet" "$T/body"; then pass "financials contracts shows the empty state"; else fail "financials contracts shows the empty state"; fi
+
+# The Atlas site (task 029): anonymous requests redirect to login; the admin
+# account creates a map version through the fenced form, and the empty map
+# renders its canvas and the edit panel.
+check "atlas list anonymous redirects" 302 "$ATL_URL/atlas"
+curl -s -c "$T/atl.jar" -o "$T/atl_login" -H "Origin: $ATL_URL" -H "Accept: application/json" \
+	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
+atl_csrf=$(curl -s -b "$T/atl.jar" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
+check "atlas create refuses a missing csrf token" 403 "$ATL_URL/atlas/create" -b "$T/atl.jar" \
+	-H "Origin: $ATL_URL" --data "map=pkr&version=v0.0.1&title=PKR" -X POST
+check "atlas create a map version" 302 "$ATL_URL/atlas/create" -b "$T/atl.jar" -H "Origin: $ATL_URL" \
+	--data "map=pkr&version=v0.0.1&title=PKR+v0.0.1&__wf_csrf__=$atl_csrf" -X POST
+check "atlas map view renders the canvas" 200 "$ATL_URL/atlas/pkr-v0.0.1" -b "$T/atl.jar"
+if grep -q 'id="atlas-canvas"' "$T/body" && grep -q "Edit (admin)" "$T/body"; then pass "atlas map view has the canvas and the admin panel"; else fail "atlas map view has the canvas and the admin panel"; fi
 
 # The command console (task 019): the meta site's console renders its
 # commands for the signed-in identity.

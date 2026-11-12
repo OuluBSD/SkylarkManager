@@ -4,6 +4,7 @@
 #include <Core/Core.h>
 #include <WebEngine/Host.h>
 #include <WebEngine/CommandConsole.h>
+#include <Atlas/AtlasSite.h>
 #include <Channels/ChannelsSite.h>
 #include <Financials/FinancialsSite.h>
 #include <MetaAccount/MetaAccountSite.h>
@@ -24,6 +25,7 @@ struct EngineComposition {
 	int    meta_port = 18214;
 	int    channels_port = 18215;
 	int    financials_port = 18216;
+	int    atlas_port = 18217;
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the
 	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
 	String agentipc_direct = "127.0.0.1:7440";
@@ -86,6 +88,10 @@ bool SetChannelsPassword(const String& username, const String& password, String&
 // the financials role flag). Requires ComposeEngineSites to have run.
 bool SetFinancialsPassword(const String& username, const String& role,
                            const String& password, String& error);
+
+// Creates or updates an Atlas account on the composed atlas site. The role
+// "admin" may edit maps; any other role reads only. Requires ComposeEngineSites.
+bool SetAtlasPassword(const String& username, const String& role, const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);

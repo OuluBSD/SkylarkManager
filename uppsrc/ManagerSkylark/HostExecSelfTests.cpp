@@ -5,7 +5,7 @@ NAMESPACE_UPP
 // Synthetic checks for the git argument allowlist (brief 13 item 3). They need no
 // repository and run no git.
 
-static bool Check(bool cond, const String& what)
+static bool HostExecCheck(bool cond, const String& what)
 {
 	if(cond)
 		Cout() << "ok    " << what << "\n";
@@ -26,7 +26,7 @@ bool RunHostExecSelfTests()
 		"fetch --prune origin", "pull --ff-only", "show --stat HEAD~1", "log -1 HEAD^",
 	};
 	for(const char *a : allowed)
-		all &= Check(HostExec::SafeGitArgs(a, tokens) && tokens.GetCount() >= 1,
+		all &= HostExecCheck(HostExec::SafeGitArgs(a, tokens) && tokens.GetCount() >= 1,
 		             String("git allowlist accepts: ") + a);
 
 	const char *refused[] = {
@@ -39,7 +39,7 @@ bool RunHostExecSelfTests()
 		"--exec=sh status",
 	};
 	for(const char *r : refused)
-		all &= Check(!HostExec::SafeGitArgs(r, tokens) && tokens.IsEmpty(),
+		all &= HostExecCheck(!HostExec::SafeGitArgs(r, tokens) && tokens.IsEmpty(),
 		             String("git allowlist refuses: ") + r);
 
 	return all;

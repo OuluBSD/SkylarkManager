@@ -1,0 +1,17 @@
+description "Atlas webapp: the topological map of the project (world, continents, blocks, places; seas and roads), one version-tied map document per project version\377";
+
+uses
+	Core,
+	Skylark,
+	WebStorage,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	AtlasModel.h,
+	AtlasModel.cpp,
+	AtlasSite.h,
+	AtlasSite.cpp,
+	AtlasClient.cpp,
+	AtlasSelfTests.cpp;

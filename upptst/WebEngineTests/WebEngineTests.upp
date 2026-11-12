@@ -16,7 +16,8 @@ uses
 	Science,
 	TaskFoundry,
 	Channels,
-	Financials;
+	Financials,
+	Atlas;
 
 file
 	AGENTS.md,

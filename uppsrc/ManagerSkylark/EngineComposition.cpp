@@ -142,6 +142,17 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallSessionRoutes(fin);
 	InstallCommandConsole(fin);
 	host.BindSite(cfg.financials_port, "financials");
+
+	// The atlas site: the topological map of the project (task 029). Its own
+	// accounts; the admin role edits, every other role reads.
+	String atlas_root = AppendFileName(engine_root, "atlas");
+	RealizeDirectory(atlas_root);
+	EngineSite& atl = TheWebEngine().AddSite("atlas", "Atlas",
+		Format("http://127.0.0.1:%d", cfg.atlas_port), atlas_root);
+	InstallAtlasSite(atl);
+	InstallSessionRoutes(atl);
+	InstallCommandConsole(atl);
+	host.BindSite(cfg.atlas_port, "atlas");
 	RegisterComposedBrokerCommands();
 	return true;
 }
@@ -210,6 +221,14 @@ bool SetFinancialsPassword(const String& username, const String& role,
 	if(!role.IsEmpty())
 		roles.Add(role);
 	return SetEngineUser("financials", username, password, roles, error);
+}
+
+bool SetAtlasPassword(const String& username, const String& role, const String& password, String& error)
+{
+	Vector<String> roles;
+	if(!role.IsEmpty())
+		roles.Add(role);
+	return SetEngineUser("atlas", username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)

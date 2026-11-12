@@ -93,6 +93,9 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("agentipc-client", 0, "agentipc client script (default ~/OuluLinux/AgentIPC/bin/agentipc)", true, "path");
 	cla.AddArg("agentipc-home", 0, "AgentIPC node home (default ~/.agentipc-skylark)", true, "directory");
 	cla.AddArg("financials-port", 0, "Financials engine site port (default 18216)", true, "port");
+	cla.AddArg("atlas-port", 0, "Atlas engine site port (default 18217)", true, "port");
+	cla.AddArg("atlas-role", 0, "Role for --set-atlas-user (default admin: may edit maps; other roles read only)", true, "role");
+	cla.AddArg("set-atlas-user", 0, "Create/update an Atlas account with hidden prompt (or MANAGERSKYLARK_ATLAS_PASSWORD)", true, "username");
 	cla.AddArg("docs-repos", 0, "Documentation repositories for the /docs portal (label=path,...; default: SkylarkManager, CompanySkylark, AgentIPC)", true, "list");
 	cla.AddArg("financials-role", 0, "Role for --set-financials-user (default viewer; finance sees ledger rows and contracts)", true, "role");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
@@ -228,6 +231,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.channels_port = ScanInt(cla.GetArg("channels-port"));
 		if(!cla.GetArg("financials-port").IsEmpty())
 			cfg.financials_port = ScanInt(cla.GetArg("financials-port"));
+		if(!cla.GetArg("atlas-port").IsEmpty())
+			cfg.atlas_port = ScanInt(cla.GetArg("atlas-port"));
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
 			cfg.agentipc_direct = cla.GetArg("agentipc-direct");
 		if(!cla.GetArg("agentipc-server").IsEmpty())
@@ -277,6 +282,22 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			}
 			Cout() << "Configured Financials account '" << fin_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String atl_user = cla.GetArg("set-atlas-user");
+		if(!atl_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_ATLAS_PASSWORD", "New Atlas password: ", password))
+				return false;
+			String error;
+			String atl_role = cla.GetArg("atlas-role").IsEmpty() ? String("admin") : cla.GetArg("atlas-role");
+			if(!SetAtlasPassword(atl_user, atl_role, password, error)) {
+				Cerr() << "Failed to write Atlas credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured Atlas account '" << atl_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

@@ -17,6 +17,7 @@
 #include <WebBroker/WebBroker.h>
 #include <Channels/ChannelsSite.h>
 #include <Financials/FinancialsSite.h>
+#include <Atlas/AtlasSite.h>
 #include <WebEngine/CommandConsole.h>
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
@@ -43,6 +44,7 @@ static const int PRIVATEHUB_PORT = 18205;
 static const int TASKFOUNDRY_PORT = 18206;
 static const int CHANNELS_PORT = 18207;
 static const int FINANCIALS_PORT = 18208;
+static const int ATLAS_PORT = 18209;
 
 // ---------------------------------------------------------------------------
 // Minimal raw HTTP client (Connection: close)
@@ -588,6 +590,16 @@ static void SetupSites()
 	fin.Accounts().CreateUser("fviewer", "pw-fin", "Fviewer", ph_no_roles, uid, existed);
 	fin.Accounts().CreateUser("ffin", "pw-fin2", "Ffin", fin_finance_roles, uid, existed);
 
+	// Atlas map webapp (task 029): the admin edits, a viewer reads.
+	EngineSite& atl = TheWebEngine().AddSite("atlas", "Atlas",
+		Format("http://127.0.0.1:%d", ATLAS_PORT), AppendFileName(s_root, "atlas"));
+	InstallAtlasSite(atl);
+	InstallSessionRoutes(atl);
+	Vector<String> atl_admin_roles;
+	atl_admin_roles.Add("admin");
+	atl.Accounts().CreateUser("aadmin", "pw-atl", "Aadmin", atl_admin_roles, uid, existed);
+	atl.Accounts().CreateUser("aview", "pw-atl2", "Aview", ph_no_roles, uid, existed);
+
 	// Channels site over an argv shim (task 012: read-only AgentIPC frontend).
 	String shim_path = AppendFileName(s_root, "channels-shim.sh");
 	FileOut shim(shim_path);
@@ -657,6 +669,20 @@ static String GrantStateCell(const String& body, const String& id)
 	if(cell < 0 || end < 0)
 		return String();
 	return body.Mid(cell + 9, end - cell - 9);
+}
+
+// The revision a map page embeds in its atlas-data script ("" when absent).
+static String AtlasRevisionOf(const String& body)
+{
+	int p = body.Find("id=\"atlas-data\">");
+	if(p < 0)
+		return String();
+	p += 16;
+	int e = body.Find("</script>", p);
+	if(e < 0)
+		return String();
+	ValueMap m = ParseJSON(body.Mid(p, e - p));
+	return AsString(m.Get("revision"));
 }
 
 static Vector<String> failures;
@@ -1344,6 +1370,7 @@ CONSOLE_APP_MAIN
 	host.BindSite(TASKFOUNDRY_PORT, "taskfoundry");
 	host.BindSite(CHANNELS_PORT, "channels");
 	host.BindSite(FINANCIALS_PORT, "financials");
+	host.BindSite(ATLAS_PORT, "atlas");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
@@ -2317,6 +2344,184 @@ CONSOLE_APP_MAIN
 		HttpReply rff = HttpCall("GET", FINANCIALS_PORT, "/financials?fresh=1", fin_h, "");
 		setenv("COMPANY_SHIM_FAIL", "", 1);
 		Check(rff.status == 503, "a failing module answers with the unavailable page");
+	}
+
+	// --- Atlas map webapp (task 029): admin edits, viewer reads, every write revision-checked ---
+	{
+		String atl_origin = Format("http://127.0.0.1:%d", ATLAS_PORT);
+		auto AtlLogin = [&](const char* user, const char* pw, String& cookie, String& csrf) {
+			VectorMap<String, String> o;
+			o.Add("Origin", atl_origin);
+			o.Add("accept", "application/json");
+			VectorMap<String, String> f;
+			f.Add("username", user);
+			f.Add("password", pw);
+			HttpReply rl = HttpCall("POST", ATLAS_PORT, "/session/login", o, FormEncode(f));
+			csrf = (String)ParseJSON(rl.body)["csrf"];
+			String raw;
+			cookie = "wfs_atlas=" + CookieOf(rl, "wfs_atlas", raw);
+			return rl.status == 200 && csrf.GetCount() > 0;
+		};
+		String adm_cookie, adm_csrf, vw_cookie, vw_csrf;
+		Check(AtlLogin("aadmin", "pw-atl", adm_cookie, adm_csrf), "atlas admin login");
+		Check(AtlLogin("aview", "pw-atl2", vw_cookie, vw_csrf), "atlas viewer login");
+
+		VectorMap<String, String> anon_h;
+		anon_h.Add("Origin", atl_origin);
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "").status == 302, "atlas list anonymous redirects");
+
+		VectorMap<String, String> adm_h;
+		adm_h.Add("Origin", atl_origin);
+		adm_h.Add("Cookie", adm_cookie);
+		VectorMap<String, String> vw_h;
+		vw_h.Add("Origin", atl_origin);
+		vw_h.Add("Cookie", vw_cookie);
+
+		// Creating a map version: fenced, admin-only, one document per version.
+		VectorMap<String, String> cf;
+		cf.Add("map", "pkr");
+		cf.Add("version", "v0.0.1");
+		cf.Add("title", "PKR <v0.0.1>");
+		cf.Add("__wf_csrf__", adm_csrf);
+		HttpReply rcreate = HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(cf));
+		Check(rcreate.status == 302, "the admin creates a map version");
+		HttpReply rdup = HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(cf));
+		Check(rdup.status == 409, "a second create of the same version is refused");
+		VectorMap<String, String> nocsrf;
+		nocsrf.Add("map", "pkr2");
+		nocsrf.Add("version", "v1");
+		nocsrf.Add("title", "No token");
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(nocsrf)).status == 403,
+		      "a mutation without the CSRF token is refused by the fence");
+		VectorMap<String, String> cross_f;
+		cross_f.Add("map", "pkr");
+		cross_f.Add("version", "v0.0.1");
+		cross_f.Add("title", "x");
+		cross_f.Add("__wf_csrf__", "not-the-token");
+		VectorMap<String, String> evil_h;
+		evil_h.Add("Origin", "http://evil.example");
+		evil_h.Add("Cookie", adm_cookie);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", evil_h, FormEncode(cross_f)).status == 403,
+		      "a mutation from a foreign origin is refused by the fence");
+		VectorMap<String, String> vcreate;
+		vcreate.Add("map", "pkr3");
+		vcreate.Add("version", "v1");
+		vcreate.Add("title", "Viewer");
+		vcreate.Add("__wf_csrf__", vw_csrf);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", vw_h, FormEncode(vcreate)).status == 403,
+		      "a viewer cannot create a map");
+
+		HttpReply rmap = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		String rev1 = AtlasRevisionOf(rmap.body);
+		Check(rmap.status == 200 && rmap.body.Find("atlas-canvas") >= 0 && rmap.body.Find("Edit (admin)") >= 0
+		      && rmap.body.Find("data-editable=\"1\"") >= 0, "the admin sees the canvas and the edit panel");
+		Check(rev1.GetCount() > 0, "the map page embeds its revision");
+		Check(rmap.body.Find("PKR &lt;v0.0.1&gt;") >= 0 && rmap.body.Find("PKR <v0.0.1>") < 0,
+		      "the map title is escaped");
+
+		// Seed import: a hand-transcribed containment list plus one edge.
+		VectorMap<String, String> sf;
+		sf.Add("seed", "Main | block | active\n  Child | place | hot\n  Other\nChild -> Other: feeds\n");
+		sf.Add("expected_revision", rev1);
+		sf.Add("__wf_csrf__", adm_csrf);
+		HttpReply rseed = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf));
+		Check(rseed.status == 302, "the admin seeds the empty map");
+		HttpReply rmap2 = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		String rev2 = AtlasRevisionOf(rmap2.body);
+		Check(rmap2.body.Find("3 elements") >= 0 && rmap2.body.Find("1 roads") >= 0,
+		      "the seed creates its elements and road");
+		Check(rev2 != rev1, "a write advances the revision");
+		HttpReply rseed_stale = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf));
+		Check(rseed_stale.status == 409, "a stale revision is refused as a conflict");
+		VectorMap<String, String> sf2;
+		sf2.Add("seed", "Again\n");
+		sf2.Add("expected_revision", rev2);
+		sf2.Add("__wf_csrf__", adm_csrf);
+		HttpReply rseed_again = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf2));
+		Check(rseed_again.status == 400, "a seed never fills a map that already has elements");
+
+		// Adding an element with markup in its name: escaped on the page and in the embedded JSON.
+		VectorMap<String, String> af;
+		af.Add("name", "<img src=x onerror=alert(1)>");
+		af.Add("kind", "place");
+		af.Add("status", "trouble");
+		af.Add("parent", "");
+		af.Add("x", "900");
+		af.Add("y", "40");
+		af.Add("w", "180");
+		af.Add("h", "100");
+		af.Add("expected_revision", rev2);
+		af.Add("__wf_csrf__", adm_csrf);
+		HttpReply radd = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/add", adm_h, FormEncode(af));
+		Check(radd.status == 302, "the admin adds an element");
+		HttpReply rmap3 = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		String rev3 = AtlasRevisionOf(rmap3.body);
+		Check(rmap3.body.Find("&lt;img src=x") >= 0 && rmap3.body.Find("<img src=x") < 0,
+		      "an element name with markup is escaped in the page");
+		Check(rmap3.body.Find("<img") < 0, "an element name with markup never reaches the raw page");
+
+		// Drag-to-move: JSON answers, revision-checked, validation before the save.
+		VectorMap<String, String> mf;
+		mf.Add("id", "e_child");
+		mf.Add("x", "300");
+		mf.Add("y", "60");
+		mf.Add("expected_revision", rev3);
+		mf.Add("__wf_csrf__", adm_csrf);
+		HttpReply rmove = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mf));
+		ValueMap mj = ParseJSON(rmove.body);
+		Check(rmove.status == 200 && (bool)mj["ok"], "a move saves and answers ok");
+		String rev4 = AtlasRevisionOf(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "").body);
+		Check(rev4 != rev3 && (String)mj["revision"] == rev4, "a move advances the revision it returns");
+		HttpReply rmove_stale = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mf));
+		Check(rmove_stale.status == 409, "a move from a stale page is refused");
+		VectorMap<String, String> mv;
+		mv.Add("id", "e_child");
+		mv.Add("x", "-5");
+		mv.Add("y", "60");
+		mv.Add("expected_revision", rev4);
+		mv.Add("__wf_csrf__", adm_csrf);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mv)).status == 400,
+		      "a move to a negative position is refused by validation");
+		VectorMap<String, String> vmove;
+		vmove.Add("id", "e_child");
+		vmove.Add("x", "300");
+		vmove.Add("y", "60");
+		vmove.Add("expected_revision", rev4);
+		vmove.Add("__wf_csrf__", vw_csrf);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", vw_h, FormEncode(vmove)).status == 403,
+		      "a viewer cannot move an element");
+
+		// Roads: one plane only; a road from a child to its own block is refused.
+		VectorMap<String, String> rf;
+		rf.Add("from", "e_child");
+		rf.Add("to", "e_main");
+		rf.Add("kind", "dependency");
+		rf.Add("label", "cross");
+		rf.Add("expected_revision", rev4);
+		rf.Add("__wf_csrf__", adm_csrf);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/road/add", adm_h, FormEncode(rf)).status == 400,
+		      "a road across planes is refused");
+
+		// Deleting a block that still has children is refused.
+		VectorMap<String, String> df;
+		df.Add("id", "e_main");
+		df.Add("expected_revision", rev4);
+		df.Add("__wf_csrf__", adm_csrf);
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/delete", adm_h, FormEncode(df)).status == 400,
+		      "a block with children cannot be deleted");
+
+		// Reads: the viewer sees the map read-only; the element detail shows its path.
+		HttpReply rvm = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "");
+		Check(rvm.status == 200 && rvm.body.Find("data-editable=\"0\"") >= 0 && rvm.body.Find("Edit (admin)") < 0,
+		      "the viewer reads the map with no edit panel");
+		HttpReply rve = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "");
+		Check(rve.status == 200 && rve.body.Find("Containment path") >= 0 && rve.body.Find("Main") >= 0,
+		      "the element detail shows its containment path");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_nope", vw_h, "").status == 404,
+		      "an unknown element is not found");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 200
+		      && HttpCall("GET", ATLAS_PORT, "/atlas/no-such-map", vw_h, "").status == 404,
+		      "an unknown map is not found");
 	}
 
 	// Command manifest: the registry shape, and the session routes checked against their descriptors.

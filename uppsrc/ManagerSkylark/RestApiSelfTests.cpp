@@ -129,6 +129,7 @@ bool RunMetaInboxSelfTests(const String& scratch_dir);
 bool RunDocsPortalSelfTests(const String& scratch_dir);
 bool RunV2CalendarSelfTests(const String& scratch_dir);
 bool RunMarkdownSelfTests();
+bool RunAtlasSelfTests(const String& scratch_dir);
 
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
@@ -254,6 +255,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunMarkdownSelfTests()) {
 		Cerr() << "FAILED: markdown pipeline static tests\n";
+		return false;
+	}
+	if(!RunAtlasSelfTests(AppendFileName(fixture.path, "atlas"))) {
+		Cerr() << "FAILED: Atlas map model and store tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));
