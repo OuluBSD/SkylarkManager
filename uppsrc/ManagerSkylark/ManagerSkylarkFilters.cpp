@@ -11,20 +11,14 @@ NAMESPACE_UPP
 bool ManagerSkylarkApp::FilterHandler(Http& http)
 {
 	// Engine listeners serve only their composed sites. A stock route can claim
-	// a path before the engine catch-all: the gateway then rebuilds the path
-	// from the route's wildcard arguments, which drops literal segments, so it
-	// would serve the wrong page. Only the root route is safe to hand over: its
-	// pattern matches exactly "/", the one path it can be reached with.
+	// a literal path before the engine catch-all (stock "login" shadowed the
+	// meta site's own login form, task 036 audit). The gateway routes by the raw
+	// request target, so every path goes to the site's own router. The site
+	// answers only with its own routes; no stock page renders on an engine port.
 	if(WebEngine::CurrentListenerPort() > 0) {
-		String id = http.GetHandlerId();
-		if(IsEngineGatewayHandler(id))
+		if(IsEngineGatewayHandler(http.GetHandlerId()))
 			return true;
-		if(id == "PortalShellPage") {
-			TheWebEngine().Gateway(http);
-			return false;
-		}
-		http << "not found";
-		http.Response(404, "Not found");
+		TheWebEngine().Gateway(http);
 		return false;
 	}
 	return test_mode || SystemAuthService::AuthorizeRequest(http);

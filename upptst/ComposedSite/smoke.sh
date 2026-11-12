@@ -127,6 +127,11 @@ if grep -q 'class="portal-frame"' "$T/shell_guest.html" && grep -q "src=\"http:/
 # Public-read matrix (task 036): Science reads are public by contract, its writes are not;
 # every other composed root and every stock hub stays gated with the sign-in as its answer.
 check "science home is public" 200 "$SC_URL/"
+# Task 037 (Aria audit): the meta site's own /login was shadowed by the stock login route
+# (a bare 404 "not found" in the browser). It must reach the site's own sign-in form.
+check "meta sign-in form is served by its own route" 200 "$META_URL/login"
+if grep -q 'name="password"' "$T/body"; then pass "meta /login is the sign-in form"; else fail "meta /login is the sign-in form"; fi
+if grep -q 'href="/login?next=' "$T/shell_guest.html"; then fail "composed default shows no stock sign-in link"; else pass "composed default shows no stock sign-in link"; fi
 check "science paper list is public" 200 "$SC_URL/api/papers"
 check "science article write is refused without a session" 403 "$SC_URL/api/papers/x/article" -X POST -d '{}'
 for gated in "$ATL_URL/" "$PH_URL/" "$TF_URL/" "$META_URL/" "$CH_URL/" "$FIN_URL/"; do

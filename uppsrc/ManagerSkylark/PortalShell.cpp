@@ -93,9 +93,11 @@ String RenderShellAccountRow(const UserSession& sess, const String& return_url)
 		  << "<span class=\"portal-user\">" << EscapeHtml(sess.username) << "</span>"
 		  << "<a class=\"portal-account-link\" href=\"/logout\">Log out</a>";
 	}
-	else // the sign-in opens inside the frame, then returns to the selected webapp
+	else if(!return_url.IsEmpty()) // a stock webapp's sign-in opens inside the frame and returns to it;
 		h << "<a class=\"portal-account-link portal-login\" href=\"/login?next=" << EscapeHtml(UrlEncode(return_url))
 		  << "\" target=\"portal-frame\">Log in</a>";
+	// A composed webapp has its own sign-in inside its frame; a stock sign-in there would
+	// return to "/" inside the frame and nest the portal in itself (task 036 audit).
 	h << "</div>";
 	return h;
 }
@@ -212,7 +214,7 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 			panel << PortalLink(apps[i], i == sel, "portal-link");
 		}
 	rail << "</nav>";
-	panel << "<div class=\"portal-account\">" << RenderShellAccountRow(sess, apps[sel].url.StartsWith("/") ? apps[sel].url : String("/"))
+	panel << "<div class=\"portal-account\">" << RenderShellAccountRow(sess, apps[sel].url.StartsWith("/") ? apps[sel].url : String())
 	      << "</div>\n</nav>";
 
 	String main;

@@ -28,7 +28,8 @@ String PortalLinkHost(const String& host_header);
 Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineSiteListing>& sites);
 
 // The user row at the foot of the webapp list. A guest's "Log in" opens inside the
-// portal frame and returns to return_url (the selected webapp).
+// portal frame and returns to return_url (a stock webapp's path); an empty return_url
+// (a composed webapp, which signs in inside its own frame) shows no stock sign-in.
 String RenderShellAccountRow(const UserSession& sess, const String& return_url);
 
 // The portal page at "/": a two-rail meta-nav (an icon rail and a labelled list)

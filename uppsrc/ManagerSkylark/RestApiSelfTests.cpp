@@ -163,7 +163,8 @@ static bool PortalShellSelfTests()
 	   || atlas_page.Find("class=\"portal-rail\"") < 0 || atlas_page.Find("class=\"portal-panel\"") < 0
 	   || atlas_page.Find("data-app=\"atlas\" aria-current=\"page\"") < 0 || atlas_page.Find("class=\"wf-tree") >= 0
 	   || atlas_page.Find("class=\"wf-dock") >= 0 || atlas_page.Find("class=\"wf-template-sidebar\"") >= 0
-	   || atlas_page.Find("target=\"portal-frame\"") < 0 || atlas_page.Find("href=\"/?app=") >= 0) {
+	   || atlas_page.Find("target=\"portal-frame\"") < 0 || atlas_page.Find("href=\"/?app=") >= 0
+	   || atlas_page.Find("href=\"/login?next=") >= 0) { // a composed webapp shows no stock sign-in
 		Cerr() << "FAILED: the meta-nav is not two link rails targeting the frame, Atlas selected, with no tree widget\n";
 		return false;
 	}
