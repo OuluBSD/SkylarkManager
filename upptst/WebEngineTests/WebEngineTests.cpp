@@ -54,6 +54,7 @@ struct HttpReply {
 	int    status = 0;
 	String body;
 	int    content_length = -1;
+	String location;
 	Vector<String> set_cookies;
 };
 
@@ -70,7 +71,9 @@ static HttpReply HttpCallOnce(const String& method, int port, const String& path
 	}
 	StringBuffer req;
 	req << method << ' ' << path << " HTTP/1.1\r\n";
-	req << "Host: 127.0.0.1:" << port << "\r\n";
+	// The caller may name its own Host (task 032: a LAN authority over loopback).
+	if(headers.Find("Host") < 0)
+		req << "Host: 127.0.0.1:" << port << "\r\n";
 	req << "Connection: close\r\n";
 	req << "Content-Type: " << content_type << "\r\n";
 	for(int i = 0; i < headers.GetCount(); i++)
@@ -113,6 +116,8 @@ static HttpReply HttpCallOnce(const String& method, int port, const String& path
 			r.set_cookies.Add(TrimBoth(line.Mid(q + 1)));
 		else if(key == "content-length")
 			r.content_length = ScanInt(TrimBoth(line.Mid(q + 1)));
+		else if(key == "location")
+			r.location = TrimBoth(line.Mid(q + 1));
 	}
 	r.body = String(all);
 	if(r.content_length >= 0 && r.body.GetCount() < r.content_length) {
@@ -2344,6 +2349,64 @@ CONSOLE_APP_MAIN
 		HttpReply rff = HttpCall("GET", FINANCIALS_PORT, "/financials?fresh=1", fin_h, "");
 		setenv("COMPANY_SHIM_FAIL", "", 1);
 		Check(rff.status == 503, "a failing module answers with the unavailable page");
+	}
+
+	// --- LAN authority (task 032): the fence and the absolute URLs follow the Host the client used ---
+	{
+		String lan_host = Format("192.168.1.169:%d", ATLAS_PORT);
+		String lan_origin = "http://" + lan_host;
+		VectorMap<String, String> lo;
+		lo.Add("Origin", lan_origin);
+		lo.Add("Host", lan_host);
+		lo.Add("accept", "application/json");
+		VectorMap<String, String> lf;
+		lf.Add("username", "aadmin");
+		lf.Add("password", "pw-atl");
+		HttpReply rlan = HttpCall("POST", ATLAS_PORT, "/session/login", lo, FormEncode(lf));
+		String lan_csrf = (String)ParseJSON(rlan.body)["csrf"];
+		String lan_raw;
+		String lan_cookie = "wfs_atlas=" + CookieOf(rlan, "wfs_atlas", lan_raw);
+		Check(rlan.status == 200 && lan_csrf.GetCount() > 0, "a LAN-authority login POST succeeds with the Host it was sent to");
+
+		VectorMap<String, String> lh;
+		lh.Add("Origin", lan_origin);
+		lh.Add("Host", lan_host);
+		lh.Add("Cookie", lan_cookie);
+		VectorMap<String, String> lc;
+		lc.Add("map", "lan");
+		lc.Add("version", "v1");
+		lc.Add("title", "LAN");
+		lc.Add("__wf_csrf__", lan_csrf);
+		HttpReply rlc = HttpCall("POST", ATLAS_PORT, "/atlas/create", lh, FormEncode(lc));
+		Check(rlc.status == 302, "a LAN-authority mutation succeeds");
+		Check(rlc.location == Format("http://%s/atlas/lan-v1", lan_host),
+		      "the redirect Location uses the request's Host authority");
+		HttpReply rlm = HttpCall("GET", ATLAS_PORT, "/atlas/lan-v1", lh, "");
+		Check(rlm.status == 200 && rlm.body.Find(Format("href=\"http://%s/atlas\"", lan_host)) >= 0,
+		      "absolute links on a LAN page use the Host authority");
+
+		VectorMap<String, String> foreign;
+		foreign.Add("Origin", "http://evil.example:" + AsString(ATLAS_PORT));
+		foreign.Add("Host", lan_host);
+		foreign.Add("accept", "application/json");
+		Check(HttpCall("POST", ATLAS_PORT, "/session/login", foreign, FormEncode(lf)).status == 403,
+		      "a foreign Origin is refused on a LAN Host (the fence is still exact)");
+
+		VectorMap<String, String> mismatch;
+		mismatch.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		mismatch.Add("Host", lan_host);
+		mismatch.Add("accept", "application/json");
+		Check(HttpCall("POST", ATLAS_PORT, "/session/login", mismatch, FormEncode(lf)).status == 403,
+		      "an Origin that is not the request's own authority is refused");
+
+		// DNS names are never trusted as the served authority: a rebinding page
+		// would send Origin and Host with the same attacker name.
+		VectorMap<String, String> rebind;
+		rebind.Add("Origin", Format("http://attacker.example:%d", ATLAS_PORT));
+		rebind.Add("Host", Format("attacker.example:%d", ATLAS_PORT));
+		rebind.Add("accept", "application/json");
+		Check(HttpCall("POST", ATLAS_PORT, "/session/login", rebind, FormEncode(lf)).status == 403,
+		      "a DNS-name Host (rebinding) is refused, Origin equal to Host or not");
 	}
 
 	// --- Atlas map webapp (task 029): admin edits, viewer reads, every write revision-checked ---

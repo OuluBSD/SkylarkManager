@@ -104,6 +104,8 @@ static String OriginAuthorityOf(const Http& http)
 
 void WebEngine::Gateway(Http& http)
 {
+	// Absolute URLs and the fence are built on the authority the client used (task 032).
+	RequestHostScope host_scope(TrimBoth(http.GetHeader("host")));
 	EngineSite* site = FindSiteByPort(CurrentListenerPort());
 	if(!site) {
 		http << "no website is bound to this listener";
