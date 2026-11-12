@@ -5,7 +5,7 @@ NAMESPACE_UPP
 
 // The cross-project docs portal (design 020, task 021): a stock-app page over
 // a fixed allowlist of local repositories. Host session gated by the app
-// filter (test mode opens it); rendering is escaped preformatted markdown —
+// filter (test mode opens it); rendering is the markdown embed (escaped text in a textarea, converted client-side) —
 // no renderer, no scripts from repository content.
 
 static String Esc(const String& s)
@@ -101,8 +101,9 @@ SKYLARK(DocsFilePage, "docs/*/**")
 	}
 	b << "<p><a href=\"/docs/" << Esc(label) << "\">" << Esc(label) << "</a> / <code>" << Esc(String(rel))
 	  << "</code> · <a href=\"/docs/" << Esc(label) << "/" << Esc(String(rel)) << "?raw=1\">raw</a></p>"
-	  << "<pre style=\"white-space:pre-wrap;background:#111;color:#ddd;padding:12px;border-radius:6px;\">"
-	  << Esc(content) << "</pre>";
+	  << "<div class=\"markdown-render-box\">"
+	  << "<textarea class=\"raw-markdown\" style=\"display:none;\">" << Esc(content) << "</textarea>"
+	  << "<div class=\"markdown-body\"></div></div>";
 	http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage("Documentation: " + label, "docs", String(b), &http);
 }
 

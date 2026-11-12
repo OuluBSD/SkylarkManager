@@ -916,6 +916,14 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 			server_thread.Wait();
 			return false;
 		}
+		// The file is embedded for marked.js (the GitHub README pattern), not as a <pre>.
+		if(res_file.Find("<textarea class=\"raw-markdown\"") < 0 || res_file.Find("class=\"markdown-body\"") < 0
+		   || res_file.Find("<pre style=\"white-space:pre-wrap;background:#111") >= 0) {
+			Cerr() << "FAILED: docs file is not embedded for markdown rendering\n";
+			app.Quit();
+			server_thread.Wait();
+			return false;
+		}
 		HttpRequest req_raw(base_url + "/docs/DocsFix/docs/note.md?raw=1");
 		req_raw.Header("Authorization", "Bearer " + demo_token);
 		req_raw.Timeout(3000);
