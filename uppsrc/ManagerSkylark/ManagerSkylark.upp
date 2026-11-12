@@ -136,6 +136,8 @@ file
 	HostExec.cpp,
 	HostExec.h,
 	HostExecSelfTests.cpp,
+	MetaInboxSelfTests.cpp,
+	DocsPortalSelfTests.cpp,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,
 	ManagerSkylarkSetup.cpp,

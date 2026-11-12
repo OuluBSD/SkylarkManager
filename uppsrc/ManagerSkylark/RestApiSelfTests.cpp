@@ -124,6 +124,10 @@ static ValueMap TestPolicyConfiguration()
 // Automated Self-Test Verification Mode
 // ---------------------------------------------------------------------------
 
+// Pure unit sections (task 024), defined in MetaInboxSelfTests.cpp and DocsPortalSelfTests.cpp.
+bool RunMetaInboxSelfTests(const String& scratch_dir);
+bool RunDocsPortalSelfTests(const String& scratch_dir);
+
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
 	Cout() << "=== Running ManagerSkylark Automated Verification ===\n";
@@ -232,6 +236,14 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunHostExecSelfTests()) {
 		Cerr() << "FAILED: git argument allowlist synthetic tests\n";
+		return false;
+	}
+	if(!RunMetaInboxSelfTests(AppendFileName(fixture.path, "meta-inbox"))) {
+		Cerr() << "FAILED: meta inbox unit tests\n";
+		return false;
+	}
+	if(!RunDocsPortalSelfTests(AppendFileName(fixture.path, "docs-portal"))) {
+		Cerr() << "FAILED: docs portal resolver unit tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

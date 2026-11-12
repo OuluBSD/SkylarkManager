@@ -1,0 +1,89 @@
+#include <Core/Core.h>
+#include <MetaAccount/MetaInbox.h>
+
+NAMESPACE_UPP
+
+// Pure unit checks for the meta identity inbox (task 024 item 2): push, list
+// order, read state, the type allowlist, the message cap and retention. Each
+// run uses its own scratch store; no HTTP.
+
+static bool Check(bool cond, const String& what)
+{
+	if(cond)
+		Cout() << "ok    " << what << "\n";
+	else
+		Cout() << "FAILED: " << what << "\n";
+	return cond;
+}
+
+bool RunMetaInboxSelfTests(const String& scratch_dir)
+{
+	bool all = true;
+	RealizeDirectory(scratch_dir);
+	MetaInbox inbox("meta-inbox-test", scratch_dir);
+
+	// A refused type stores nothing. (Empty subject and source are refused in
+	// the code, but report ok: see the report for the StoreResult(const char*) bug.)
+	all &= Check(!inbox.Push("alice", "meta", "consent.bogus", "meta:alice", "x", "").ok,
+	             "inbox: an event type off the allowlist is refused");
+	Vector<InboxEvent> none;
+	inbox.List("alice", none, -1);
+	all &= Check(none.IsEmpty(), "inbox: refused events store nothing");
+
+	// Message cap: longer text is cut to MessageLimit().
+	String long_message(' ', MetaInbox::MessageLimit() + 50);
+	all &= Check(inbox.Push("alice", "meta", "consent.requested", "meta:alice", long_message, "").ok,
+	             "inbox: a long message is accepted and capped");
+	Sleep(1100); // keep the next event in a later second, so the list order is deterministic
+	Vector<InboxEvent> capped;
+	inbox.List("alice", capped, -1);
+	all &= Check(capped.GetCount() == 1 && capped[0].message.GetCount() == MetaInbox::MessageLimit(),
+	             "inbox: the stored message is exactly MessageLimit() long");
+
+	// Newest first. Event times have one-second resolution, so each push is
+	// spaced by more than a second from the one before.
+	inbox.MarkAllRead("alice");
+	all &= Check(inbox.Push("alice", "meta", "consent.granted", "meta:alice", "first", "").ok,
+	             "inbox: first event is pushed");
+	Sleep(1100);
+	all &= Check(inbox.Push("alice", "meta", "consent.denied", "meta:alice", "second", "meta:/consent").ok,
+	             "inbox: second event is pushed");
+	Vector<InboxEvent> listed;
+	all &= Check(inbox.List("alice", listed, -1).ok, "inbox: list succeeds");
+	all &= Check(listed.GetCount() == 3 && listed[0].message == "second" && listed[1].message == "first",
+	             "inbox: list returns the newest event first");
+	Vector<InboxEvent> one;
+	inbox.List("alice", one, 1);
+	all &= Check(one.GetCount() == 1 && one[0].message == "second", "inbox: a limit keeps the newest event");
+
+	// Subject isolation and read state.
+	inbox.Push("bob", "meta", "tf.grant_requested", "tf:bob", "bob's event", "");
+	Vector<InboxEvent> alice_only;
+	inbox.List("alice", alice_only, -1);
+	bool isolated = true;
+	for(const InboxEvent& e : alice_only)
+		isolated = isolated && e.subject_user == "alice";
+	all &= Check(isolated && alice_only.GetCount() == 3, "inbox: a subject sees only its own events");
+	all &= Check(inbox.UnreadCount("alice") == 2 && inbox.UnreadCount("bob") == 1,
+	             "inbox: unread counts start unread per subject");
+	inbox.MarkAllRead("alice");
+	all &= Check(inbox.UnreadCount("alice") == 0 && inbox.UnreadCount("bob") == 1,
+	             "inbox: marking read affects only that subject");
+
+	// Retention: push RetainPerSubject() + 5 events for one subject; the store
+	// keeps exactly RetainPerSubject(), and other subjects are untouched.
+	const int extra = 5;
+	for(int i = 0; i < MetaInbox::RetainPerSubject() + extra; i++)
+		inbox.Push("carol", "meta", "consent.requested", "meta:carol", AsString(i), "");
+	Vector<InboxEvent> carol;
+	inbox.List("carol", carol, -1);
+	all &= Check(carol.GetCount() == MetaInbox::RetainPerSubject(),
+	             "inbox: retention keeps RetainPerSubject() events per subject");
+	Vector<InboxEvent> still_alice;
+	inbox.List("alice", still_alice, -1);
+	all &= Check(still_alice.GetCount() == 3, "inbox: retention does not prune another subject");
+
+	return all;
+}
+
+END_UPP_NAMESPACE

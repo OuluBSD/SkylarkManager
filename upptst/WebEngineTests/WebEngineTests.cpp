@@ -657,6 +657,69 @@ static void Check(bool cond, const String& what)
 	Cout() << (cond ? "ok   " : "FAIL ") << what << "\n";
 }
 
+// AgentIpcClient unit section (task 024 item 3): the argv-only reader driven
+// directly over a canned shim. No HTTP; the shim's run count shows whether a
+// refused channel ever reached the child process.
+static void RunAgentIpcClientUnitChecks(const String& root)
+{
+	String count_path = AppendFileName(root, "channels-unit-count.txt");
+	String canned_path = AppendFileName(root, "channels-unit-canned.txt");
+	String shim_path = AppendFileName(root, "channels-unit-shim.sh");
+	FileOut shim(shim_path);
+	shim << "#!/bin/sh\n"
+	     << "echo run >> \"" << count_path << "\"\n"
+	     << "last=\"\"; for a in \"$@\"; do last=\"$a\"; done\n"
+	     << "case \"$last\" in\n"
+	     << "  FAILCHAN) echo 'shim failure' >&2; exit 3 ;;\n"
+	     << "esac\n"
+	     << "cat \"" << canned_path << "\"\n";
+	shim.Close();
+	system(~String("chmod +x \"" + shim_path + "\""));
+	FileOut canned(canned_path);
+	canned << "garbage line without a marker\n"
+	       << "#SKYLARK-MANAGER missing-bracket s1: x\n"
+	       << "#SKYLARK-MANAGER [2026-11-11T03:00:00Z] s1: TASK one\n"
+	       << "\n"
+	       << "#AGENTLAB [2026-11-11T03:01:00Z] a1: second\n"
+	       << "#SKYLARK-MANAGER [2026-11-11T03:02:00Z] s2: ACK three\n"
+	       << "#SKYLARK-MANAGER [2026-11-11T03:03:00Z] s1: four\n";
+	canned.Close();
+
+	Check(AgentIpcValidChannel("SKYLARK-MANAGER") && AgentIpcValidChannel("AGENTLAB.x_1-2"),
+	      "agentipc unit: a plain channel name is valid");
+	Check(!AgentIpcValidChannel("") && !AgentIpcValidChannel(String('A', 65)),
+	      "agentipc unit: an empty or over-long channel name is refused");
+	Check(!AgentIpcValidChannel("bad chan") && !AgentIpcValidChannel("a/b") && !AgentIpcValidChannel("a;b"),
+	      "agentipc unit: channel names with spaces, slashes or shell characters are refused");
+
+	AgentIpcConfig cfg;
+	cfg.client_argv.Add("/bin/sh");
+	cfg.client_argv.Add(shim_path);
+	cfg.password = "pw-unit";
+
+	int runs_before = LoadFile(count_path).GetCount();
+	AgentIpcReply refused = AgentIpcReadChannel(cfg, "bad chan", 10);
+	Check(!refused.ok && refused.error == "invalid channel name" && LoadFile(count_path).GetCount() == runs_before,
+	      "agentipc unit: a refused channel never starts the client");
+
+	AgentIpcReply all = AgentIpcReadChannel(cfg, "SKYLARK-MANAGER", 0);
+	Check(all.ok && all.exit_code == 0 && all.messages.GetCount() == 4,
+	      "agentipc unit: well-formed lines parse and malformed lines are skipped (4 of 7)");
+	Check(all.messages.GetCount() == 4 && all.messages[0].ts == "2026-11-11T03:00:00Z" &&
+	      all.messages[0].user == "s1" && all.messages[0].body == "TASK one" &&
+	      all.messages[1].user == "a1" && all.messages[1].body == "second",
+	      "agentipc unit: timestamp, user and body are split on the markers");
+
+	AgentIpcReply two = AgentIpcReadChannel(cfg, "SKYLARK-MANAGER", 2);
+	Check(two.ok && two.messages.GetCount() == 2 && two.messages[0].body == "ACK three" &&
+	      two.messages[1].body == "four",
+	      "agentipc unit: a limit keeps the last N messages, newest last");
+
+	AgentIpcReply failed = AgentIpcReadChannel(cfg, "FAILCHAN", 5);
+	Check(!failed.ok && failed.exit_code == 3 && failed.error.Find("shim failure") >= 0 && failed.messages.IsEmpty(),
+	      "agentipc unit: a client exit 3 maps to not-ok with the error text and no messages");
+}
+
 static bool ProbePort(int port)
 {
 	TcpSocket s;
@@ -1254,6 +1317,8 @@ CONSOLE_APP_MAIN
 		}
 	}
 
+
+	RunAgentIpcClientUnitChecks(s_root);
 
 	EngineTestHost host;
 	s_host = &host;
