@@ -664,6 +664,7 @@ static void MoveElement(WebRequest& r)
 void InstallAtlasSite(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
+	rt.Add("", MapList); // the root is the map list, gated like every Atlas read (task 036)
 	rt.Add("atlas", MapList);
 	rt.Add("POST", "atlas/create", CreateMap);
 	rt.Add("atlas/*", MapView);

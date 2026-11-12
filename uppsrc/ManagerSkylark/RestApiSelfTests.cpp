@@ -148,29 +148,41 @@ static bool PortalShellSelfTests()
 	sites.Add(pick(atlas));
 
 	Vector<PortalWebapp> apps = ListWebapps("192.168.1.169:8081", sites);
-	if(apps.GetCount() != 7 || apps[0].id != "ai" || apps[0].url != "/ai" || apps[4].id != "mesh"
-	   || apps[5].url != "http://192.168.1.169:18217/" || apps[6].id != "settings"
-	   || apps[6].url != "/host/settings" || apps[6].group != "settings") {
-		Cerr() << "FAILED: portal descriptors are not the five hubs, the site on the request host, then settings\n";
+	// Atlas leads the list (task 036), then the five hubs, then settings.
+	if(apps.GetCount() != 7 || apps[0].id != "atlas" || apps[0].url != "http://192.168.1.169:18217/"
+	   || apps[1].id != "ai" || apps[1].url != "/ai" || apps[5].id != "mesh"
+	   || apps[6].id != "settings" || apps[6].url != "/host/settings" || apps[6].group != "settings") {
+		Cerr() << "FAILED: portal descriptors are not Atlas, the five hubs, then settings\n";
 		return false;
 	}
 
+	// The meta-nav is two rails of links that target the frame; no tree widget (task 036).
 	UserSession guest;
 	String atlas_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
-	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("wf-template-sidebar") < 0
-	   || atlas_page.Find("/?app=atlas") < 0 || atlas_page.Find("wf-shell-account") < 0
-	   || atlas_page.Find("href=\"/login?next=http%3A%2F%2F") >= 0 || atlas_page.Find("name=\"portal-frame\"") < 0) {
-		Cerr() << "FAILED: ?app=atlas does not frame the Atlas site in the meta-shell\n";
+	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("name=\"portal-frame\"") < 0
+	   || atlas_page.Find("class=\"portal-rail\"") < 0 || atlas_page.Find("class=\"portal-panel\"") < 0
+	   || atlas_page.Find("data-app=\"atlas\" aria-current=\"page\"") < 0 || atlas_page.Find("class=\"wf-tree") >= 0
+	   || atlas_page.Find("class=\"wf-dock") >= 0 || atlas_page.Find("class=\"wf-template-sidebar\"") >= 0
+	   || atlas_page.Find("target=\"portal-frame\"") < 0 || atlas_page.Find("href=\"/?app=") >= 0) {
+		Cerr() << "FAILED: the meta-nav is not two link rails targeting the frame, Atlas selected, with no tree widget\n";
+		return false;
+	}
+	// The loading indicator, the timeout fallback and its controls are present.
+	if(atlas_page.Find("id=\"portal-status\"") < 0 || atlas_page.Find("This webapp is taking a while.") < 0
+	   || atlas_page.Find("id=\"portal-retry\"") < 0 || atlas_page.Find("Open in new tab") < 0
+	   || atlas_page.Find("15000") < 0 || atlas_page.Find("'load', clear") < 0 || atlas_page.Find("'error'") < 0) {
+		Cerr() << "FAILED: the frame has no loading indicator or timeout fallback\n";
 		return false;
 	}
 	String guest_row = RenderPortalShell("192.168.1.169:8081", "github", guest, sites);
-	if(guest_row.Find("href=\"/login?next=%2Fgithub\" target=\"portal-frame\"") < 0) {
+	if(guest_row.Find("href=\"/login?next=%2Fgithub\" target=\"portal-frame\"") < 0
+	   || guest_row.Find("data-app=\"github\" aria-current=\"page\"") < 0) {
 		Cerr() << "FAILED: a guest's log in does not open inside the frame and return to the selected hub\n";
 		return false;
 	}
 	String fallback = RenderPortalShell("", "no-such-app", guest, sites);
-	if(fallback.Find("src=\"/ai\"") < 0) {
-		Cerr() << "FAILED: an unknown app does not fall back to the Local AI Hub\n";
+	if(fallback.Find("src=\"http://127.0.0.1:18217/\"") < 0) {
+		Cerr() << "FAILED: an unknown app does not fall back to the first webapp\n";
 		return false;
 	}
 

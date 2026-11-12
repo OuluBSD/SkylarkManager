@@ -117,9 +117,24 @@ pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH
 # the Host it sends, so the session cookie is passed by hand.
 check "portal shell is public" 200 "$MAIN_URL/"
 curl -s "$MAIN_URL/" -o "$T/shell_guest.html"
-if grep -q 'class="portal-frame"' "$T/shell_guest.html" && grep -q 'src="/ai"' "$T/shell_guest.html" \
-   && grep -q 'target="portal-frame"' "$T/shell_guest.html"; then
-	pass "portal shell frames the Local AI Hub with a framed log in"; else fail "portal shell frames the Local AI Hub with a framed log in"; fi
+# Task 036: Atlas leads the list and is the default frame; the meta-nav is two link rails
+# that target the frame (no tree widget), with a loading and timeout fallback.
+if grep -q 'class="portal-frame"' "$T/shell_guest.html" && grep -q "src=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_guest.html" \
+   && grep -q 'target="portal-frame"' "$T/shell_guest.html" && grep -q 'class="portal-rail"' "$T/shell_guest.html" \
+   && grep -q 'data-app="atlas" aria-current="page"' "$T/shell_guest.html" && grep -q 'This webapp is taking a while' "$T/shell_guest.html" \
+   && ! grep -q 'class="wf-tree' "$T/shell_guest.html"; then
+	pass "portal shell: Atlas first, two-rail meta-nav targeting the frame, fallback present, no tree"; else fail "portal shell: Atlas first, two-rail meta-nav targeting the frame, fallback present, no tree"; fi
+# Public-read matrix (task 036): Science reads are public by contract, its writes are not;
+# every other composed root and every stock hub stays gated with the sign-in as its answer.
+check "science home is public" 200 "$SC_URL/"
+check "science paper list is public" 200 "$SC_URL/api/papers"
+check "science article write is refused without a session" 403 "$SC_URL/api/papers/x/article" -X POST -d '{}'
+for gated in "$ATL_URL/" "$PH_URL/" "$TF_URL/" "$META_URL/" "$CH_URL/" "$FIN_URL/"; do
+	check "gated root $gated redirects to sign-in" 302 "$gated"
+done
+for hub in ai github sourceforge host mesh home; do
+	check "gated stock hub /$hub redirects to sign-in" 302 "$MAIN_URL/$hub"
+done
 curl -s -c "$T/stock.jar" -o /dev/null --data "redirect=/&username=shell&password=pw-stock" "$MAIN_URL/login/submit"
 SESSION=$(awk '/wf_auth_session/ {print $7}' "$T/stock.jar")
 curl -s -b "$T/stock.jar" "$MAIN_URL/?app=github" -o "$T/shell_github.html"
@@ -152,6 +167,11 @@ check "unknown hub is a 404" 404 "$MAIN_URL/no-such-hub" -b "$T/stock.jar"
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock /issues redirects to login" 302 "$MAIN_URL/issues"
+
+# Task 036: signed in, every hub root reaches its landing page (no 404 or 500 in the frame).
+for landing in /chat /host /host/nodes /projects/topside/ /repo/SeppoPakonen /home; do
+	check "signed-in hub landing $landing answers without error" 200 "$MAIN_URL$landing" -b "$T/stock.jar"
+done
 
 # Command manifest (task 003): public, read-only, lists the sites that registered commands.
 check "manifest is public" 200 "$MAIN_URL/api/cli/manifest"
