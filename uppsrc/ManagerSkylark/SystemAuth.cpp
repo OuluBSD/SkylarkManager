@@ -99,6 +99,7 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 	if(ConfiguredDemoSite()) {
 		bool read_only_page = id == "HomePage" || id == "ProjectsPage" || id == "ProjectDetailPage" ||
 		                      id == "GoalsPage" || id == "GoalDetailPage" || id == "IssuesPage" ||
+		                      id == "CalendarPage" ||
 		                      id == "ReleasesPage" || id == "ApiProjects" || id == "ApiProjectDetail" ||
 		                      id == "ApiNextTask" || id == "ApiGoals" || id == "ApiIssues" ||
 		                      id == "ApiReleases" || id == "ManagerFrameworkSpec" ||

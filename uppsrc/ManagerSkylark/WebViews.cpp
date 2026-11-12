@@ -1,5 +1,6 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
+#include "V2Calendar.h"
 
 NAMESPACE_UPP
 
@@ -414,6 +415,11 @@ SKYLARK(GoalsPage, "goals")
 	http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage("Goals", "goals", b, &http);
 }
 
+static String V2DateText(const String& iso)
+{
+	return iso.IsEmpty() ? String("&mdash;") : iso;
+}
+
 SKYLARK(GoalDetailPage, "goal/**")
 {
 	ManagerSkylarkApp& app = ManagerSkylarkApp::Get();
@@ -436,7 +442,7 @@ SKYLARK(GoalDetailPage, "goal/**")
 	  << "  <div class=\"card-header\"><span>Goal: " << g->title << "</span><span class=\"badge-v2\">" << g->repo << "</span></div>\n"
 	  << "  <div style=\"margin-bottom:1.5rem;\">" << ManagerSkylarkApp::RenderProgressBar(g->GetProgressPercent()) << "</div>\n"
 	  << "  <h3 style=\"font-size:1.1rem; margin-bottom:0.75rem;\">Decomposition &amp; Tasks</h3>\n"
-	  << "  <table><thead><tr><th>Kind</th><th>Id</th><th>Title</th><th>Status</th><th>Gates</th><th>Sets</th></tr></thead><tbody>\n";
+	  << "  <table><thead><tr><th>Kind</th><th>Id</th><th>Title</th><th>Status</th><th>Due</th><th>Planned</th><th>Gates</th><th>Sets</th></tr></thead><tbody>\n";
 
 	for(int i = 0; i < g->tasks.GetCount(); i++) {
 		const V2GoalNode& n = g->tasks[i];
@@ -445,6 +451,8 @@ SKYLARK(GoalDetailPage, "goal/**")
 		  << "<td><code>" << n.id << "</code></td>"
 		  << "<td><strong>" << n.title << "</strong>" << (!n.notes.IsEmpty() ? ("<br><small style=\"color:#64748b;\">" + n.notes + "</small>") : "") << "</td>"
 		  << "<td>" << (n.kind == "task" ? ManagerSkylarkApp::RenderBadge(n.status) : "-") << "</td>"
+		  << "<td>" << V2DateText(n.due_at) << "</td>"
+		  << "<td>" << V2DateText(n.planned_at) << "</td>"
 		  << "<td><code style=\"font-size:11px;\">" << (n.gates.IsEmpty() ? "" : n.gates.GetKey(0)) << "</code></td>"
 		  << "<td><code style=\"font-size:11px;\">" << (n.sets.IsEmpty() ? "" : n.sets.GetKey(0)) << "</code></td>"
 		  << "</tr>\n";
@@ -499,7 +507,7 @@ SKYLARK(ReleasesPage, "releases")
 	String b;
 	b << "<div class=\"card\">\n"
 	  << "  <div class=\"card-header\"><span>v2 Releases</span></div>\n"
-	  << "  <table><thead><tr><th>Id</th><th>Title</th><th>Status</th><th>Goals Linked</th></tr></thead><tbody>\n";
+	  << "  <table><thead><tr><th>Id</th><th>Title</th><th>Status</th><th>Planned</th><th>Released</th><th>Goals Linked</th></tr></thead><tbody>\n";
 
 	const Vector<V2Release>& rels = v2.GetReleases();
 	for(int i = 0; i < rels.GetCount(); i++) {
@@ -508,12 +516,32 @@ SKYLARK(ReleasesPage, "releases")
 		  << "<td><code>" << r.id << "</code></td>"
 		  << "<td><strong>" << r.title << "</strong></td>"
 		  << "<td>" << ManagerSkylarkApp::RenderBadge(r.status) << "</td>"
+		  << "<td>" << V2DateText(r.planned_at) << "</td>"
+		  << "<td>" << V2DateText(r.released_at) << "</td>"
 		  << "<td>" << r.goals.GetCount() << "</td>"
 		  << "</tr>\n";
 	}
 	b << "</tbody></table>\n</div>\n";
 
 	http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage("Releases", "releases", b, &http);
+}
+
+SKYLARK(CalendarPage, "calendar")
+{
+	ManagerSkylarkApp& app = ManagerSkylarkApp::Get();
+	V2Store& v2 = app.GetV2Store();
+
+	// An absent or invalid ?m=YYYY-MM falls back to the current month.
+	int year = 0;
+	int month = 0;
+	if(!ParseV2Month(http["m"], year, month)) {
+		Date today = GetSysDate();
+		year = today.year;
+		month = today.month;
+	}
+
+	String b = RenderV2CalendarMonth(v2, year, month);
+	http.ContentType("text/html; charset=utf-8") << ManagerSkylarkApp::RenderHtmlPage("Calendar", "calendar", b, &http);
 }
 
 SKYLARK(SweAgentPage, "sweagent")

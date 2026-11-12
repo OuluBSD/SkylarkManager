@@ -5,6 +5,7 @@
 ## Features
 
 - **Multi-Repository Architecture**: Loads goals, phases, tasks, state vectors, issues, and releases adhering to `../Manager/v2` schemas (`v2/goals`, `v2/issues`, `v2/releases`, `v2/trackers`).
+- **v2 dates (read-only)**: releases carry optional `planned_at` and `released_at`; goal nodes carry optional `due_at` and `planned_at`. Values are ISO-8601 (`YYYY-MM-DD`, optionally followed by a time). Unset or invalid dates read as empty and show as an em-dash; `ParseV2Date` (in `V2Model.cpp`) is the single parser. The dates enter through the JSON files only; there is no in-app writer.
 - **Local Manager Integration**: Seamlessly inspects and modifies `./mgr/projects/` (`uppsrc/Manager` store) for local developer task management.
 - **REST & JSON APIs**: Endpoints for programmatic access, agent task dispatch (`/api/tasks/next`, `/api/tasks/claim`, `/api/tasks/done`), and model querying.
 - **SweAgent Web Runner & Inspector**: Web-based execution and trajectory viewing connecting directly to `uppsrc/SweAgent` OpenRouter runtime.
@@ -33,7 +34,8 @@
 | `GET /goals` | Manager v2 goals list across repositories |
 | `GET /goal/{repo}/{slug}` | Goal details: decomposition tree, gate dependencies, state vector |
 | `GET /issues` | Manager v2 issues view |
-| `GET /releases` | Manager v2 cross-domain releases view |
+| `GET /releases` | Manager v2 cross-domain releases view (planned and released dates when set) |
+| `GET /calendar` | Month grid of v2 release and goal-task dates; `?m=YYYY-MM` (invalid or absent falls back to the current month) |
 | `GET /sweagent` | SweAgent web runner and trajectory browser |
 | `GET /api/health` | Service health status |
 | `GET /api/projects` | JSON listing of projects and progress |

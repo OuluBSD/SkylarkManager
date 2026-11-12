@@ -11,6 +11,8 @@ struct V2GoalNode : Moveable<V2GoalNode> {
 	String                    title;
 	int                       order;
 	String                    status; // "planned", "active", "done", "blocked"
+	String                    due_at;     // ISO-8601, optional
+	String                    planned_at; // ISO-8601, optional
 	VectorMap<String, String> gates;
 	VectorMap<String, String> sets;
 	Vector<String>            children;
@@ -69,6 +71,8 @@ struct V2Release : Moveable<V2Release> {
 	String         kind; // "release"
 	String         title;
 	String         status; // "proposed", "planned", "active", "released", "retired"
+	String         planned_at;  // ISO-8601, optional
+	String         released_at; // ISO-8601, optional
 	Vector<String> goals;
 	Vector<String> issues;
 
@@ -80,6 +84,16 @@ struct V2Release : Moveable<V2Release> {
 	String ToJSON(bool pretty = true) const;
 	bool FromJSON(const String& json);
 };
+
+// Parses the date part of an ISO-8601 string ("YYYY-MM-DD" optionally followed by
+// "T..." or " ..."). date_key is YYYYMMDD; time_key is "HH:MM" when the string
+// carries one, else "". Returns false for empty, malformed or impossible dates.
+bool ParseV2Date(const String& iso, int& date_key, String& time_key);
+
+int V2DaysInMonth(int year, int month);
+
+// The month a "YYYY-MM" query parameter names. Returns false when it is not a valid month.
+bool ParseV2Month(const String& m, int& year, int& month);
 
 class V2Store {
 public:

@@ -75,6 +75,7 @@ NavigationModel ManagerSkylarkApp::BuildNavigation(const String& active_nav)
 	sec_ai_ops.Add("sweagent", "SweAgent", "/sweagent", "terminal", "Autonomous SWE-Agent runner and task execution").Active(active_nav == "sweagent");
 	sec_ai_ops.Add("projects", "Local Shadow Drafts", "/projects", "layers", "Local low-friction drafts, phases, and task execution").Active(active_nav == "projects");
 	sec_ai_ops.Add("goals", "Manager v2 Goals", "/goals", "flag", "High-level milestones and roadmaps").Active(active_nav == "goals");
+	sec_ai_ops.Add("calendar", "Calendar", "/calendar", "layout", "Release and milestone dates by month").Active(active_nav == "calendar");
 	sec_ai_ops.Add("data", "Data Catalog", "/data", "database", "Read-only schema-validated site data").Active(active_nav == "data");
 	sec_ai_ops.Add("docs", "Documentation", "/docs", "book", "Read-only repository documentation across projects").Active(active_nav == "docs");
 	sec_ai_ops.Add("research", "Research Library", "/research", "book", "Read-only paper metadata").Active(active_nav == "research");

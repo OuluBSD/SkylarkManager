@@ -127,6 +127,7 @@ static ValueMap TestPolicyConfiguration()
 // Pure unit sections (task 024), defined in MetaInboxSelfTests.cpp and DocsPortalSelfTests.cpp.
 bool RunMetaInboxSelfTests(const String& scratch_dir);
 bool RunDocsPortalSelfTests(const String& scratch_dir);
+bool RunV2CalendarSelfTests(const String& scratch_dir);
 
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
@@ -244,6 +245,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunDocsPortalSelfTests(AppendFileName(fixture.path, "docs-portal"))) {
 		Cerr() << "FAILED: docs portal resolver unit tests\n";
+		return false;
+	}
+	if(!RunV2CalendarSelfTests(AppendFileName(fixture.path, "v2-calendar"))) {
+		Cerr() << "FAILED: v2 calendar unit tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

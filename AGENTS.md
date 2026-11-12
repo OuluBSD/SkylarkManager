@@ -139,6 +139,7 @@ The `--test` flag boots an internal server instance on port 18080, runs automate
 | `/goal/{repo}/{slug}` | `GET` | Goal details, state vectors, gate checklist, and decomposition tree |
 | `/issues` | `GET` | `Manager/v2` multi-repository issue tracker |
 | `/releases` | `GET` | Cross-repository release milestones |
+| `/calendar` | `GET` | Month grid of release and task dates (`?m=YYYY-MM`) |
 | `/chat` | `GET` | Integrated AI pair-programming chat view |
 | `/webchat` | `GET` | Standalone AI chat application |
 | `/sweagent` | `GET` | SweAgent web runner and execution trajectory viewer |

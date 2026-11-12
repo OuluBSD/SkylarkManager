@@ -13,6 +13,8 @@ V2GoalNode::V2GoalNode(const V2GoalNode& o)
 	, title(o.title)
 	, order(o.order)
 	, status(o.status)
+	, due_at(o.due_at)
+	, planned_at(o.planned_at)
 	, gates(clone(o.gates))
 	, sets(clone(o.sets))
 	, children(clone(o.children))
@@ -28,6 +30,8 @@ V2GoalNode& V2GoalNode::operator=(const V2GoalNode& o)
 		title = o.title;
 		order = o.order;
 		status = o.status;
+		due_at = o.due_at;
+		planned_at = o.planned_at;
 		gates = clone(o.gates);
 		sets = clone(o.sets);
 		children = clone(o.children);
@@ -43,6 +47,8 @@ void V2GoalNode::Jsonize(JsonIO& io)
 	io("title", title);
 	io("order", order);
 	io("status", status);
+	io("due_at", due_at);
+	io("planned_at", planned_at);
 	io("gates", gates);
 	io("sets", sets);
 	io("children", children);
@@ -197,6 +203,8 @@ V2Release::V2Release(const V2Release& o)
 	, kind(o.kind)
 	, title(o.title)
 	, status(o.status)
+	, planned_at(o.planned_at)
+	, released_at(o.released_at)
 	, goals(clone(o.goals))
 	, issues(clone(o.issues))
 {
@@ -209,6 +217,8 @@ V2Release& V2Release::operator=(const V2Release& o)
 		kind = o.kind;
 		title = o.title;
 		status = o.status;
+		planned_at = o.planned_at;
+		released_at = o.released_at;
 		goals = clone(o.goals);
 		issues = clone(o.issues);
 	}
@@ -221,6 +231,8 @@ void V2Release::Jsonize(JsonIO& io)
 	io("kind", kind);
 	io("title", title);
 	io("status", status);
+	io("planned_at", planned_at);
+	io("released_at", released_at);
 	io("goals", goals);
 	io("issues", issues);
 }
@@ -234,6 +246,53 @@ String V2Release::ToJSON(bool pretty) const
 bool V2Release::FromJSON(const String& json)
 {
 	return LoadFromJson(*this, json);
+}
+
+// ---------------------------------------------------------------------------
+
+static bool AllDigits(const String& s, int from, int count)
+{
+	for(int i = from; i < from + count; i++)
+		if(i >= s.GetCount() || s[i] < '0' || s[i] > '9')
+			return false;
+	return true;
+}
+
+int V2DaysInMonth(int year, int month)
+{
+	static const int days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+	return month == 2 && leap ? 29 : days[month - 1];
+}
+
+bool ParseV2Date(const String& iso, int& date_key, String& time_key)
+{
+	date_key = 0;
+	time_key.Clear();
+	if(iso.GetCount() < 10 || !AllDigits(iso, 0, 4) || iso[4] != '-' || !AllDigits(iso, 5, 2) ||
+	   iso[7] != '-' || !AllDigits(iso, 8, 2))
+		return false;
+	int year = StrInt(iso.Mid(0, 4));
+	int month = StrInt(iso.Mid(5, 2));
+	int day = StrInt(iso.Mid(8, 2));
+	if(month < 1 || month > 12 || day < 1 || day > V2DaysInMonth(year, month))
+		return false;
+	date_key = year * 10000 + month * 100 + day;
+
+	// An optional time follows "T" or a space: HH:MM is kept, anything else is ignored.
+	if(iso.GetCount() >= 16 && (iso[10] == 'T' || iso[10] == ' ') && AllDigits(iso, 11, 2) &&
+	   iso[13] == ':' && AllDigits(iso, 14, 2))
+		time_key = iso.Mid(11, 5);
+	return true;
+}
+
+bool ParseV2Month(const String& m, int& year, int& month)
+{
+	if(m.GetCount() != 7 || !AllDigits(m, 0, 4) || m[4] != '-' || !AllDigits(m, 5, 2))
+		return false;
+	year = StrInt(m.Mid(0, 4));
+	month = StrInt(m.Mid(5, 2));
+	return month >= 1 && month <= 12;
 }
 
 // ---------------------------------------------------------------------------
