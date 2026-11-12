@@ -83,6 +83,8 @@ MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fin "$BIN" --site-dir "$T" --financials-ro
 if [ $? -eq 0 ]; then pass "provision Financials finance account"; else fail "provision Financials finance account"; fi
 MANAGERSKYLARK_ATLAS_PASSWORD=pw-atl "$BIN" --site-dir "$T" --atlas-role admin --set-atlas-user atlasadmin >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Atlas admin account"; else fail "provision Atlas admin account"; fi
+MANAGERSKYLARK_SITE_PASSWORD=pw-stock "$BIN" --site-dir "$T" --set-site-password shell >/dev/null 2>&1
+if [ $? -eq 0 ]; then pass "provision stock shell account"; else fail "provision stock shell account"; fi
 
 MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
 	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
@@ -109,6 +111,21 @@ if [ $ready -ne 1 ]; then
 	exit 1
 fi
 pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH_PORT, $FIN_PORT"
+
+# Portal shell (task 033): a signed-in stock page is the left-pane shell, and its
+# webapp links are built from the Host the page was requested with (task 032).
+curl -s -c "$T/stock.jar" -o /dev/null --data "redirect=/&username=shell&password=pw-stock" "$MAIN_URL/login/submit"
+check "stock page after login" 200 "$MAIN_URL/" -b "$T/stock.jar"
+curl -s -b "$T/stock.jar" "$MAIN_URL/" -o "$T/shell_loopback.html"
+if grep -q 'wf-template-sidebar' "$T/shell_loopback.html" && grep -q 'wf-shell-account' "$T/shell_loopback.html"; then
+	pass "stock page is the left-pane shell with a user row"; else fail "stock page is the left-pane shell with a user row"; fi
+if grep -q "href=\"http://127.0.0.1:$PH_PORT/\"" "$T/shell_loopback.html" && grep -q "href=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_loopback.html"; then
+	pass "webapp links use the loopback host"; else fail "webapp links use the loopback host"; fi
+# curl matches cookies against the Host it sends, so the session cookie is passed by hand.
+SESSION=$(awk '/wf_auth_session/ {print $7}' "$T/stock.jar")
+curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: 192.168.1.169:$MAIN" "$MAIN_URL/" -o "$T/shell_lan.html"
+if grep -q "href=\"http://192.168.1.169:$ATL_PORT/\"" "$T/shell_lan.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_lan.html"; then
+	pass "webapp links follow the LAN Host, not loopback"; else fail "webapp links follow the LAN Host, not loopback"; fi
 
 # Stock app: global login enforcement stays on the stock port.
 check "stock / redirects to login" 302 "$MAIN_URL/"

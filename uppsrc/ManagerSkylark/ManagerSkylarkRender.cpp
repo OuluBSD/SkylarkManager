@@ -41,30 +41,50 @@ String ManagerSkylarkApp::RenderProgressBar(double percent)
 	              percent, percent);
 }
 
+// The user row at the foot of the left pane (task 033): identity and log out for a
+// signed-in user, log in otherwise, with the stock settings page beside them.
+static String RenderShellAccountRow(const UserSession& sess)
+{
+	String h;
+	h << "<div class=\"wf-shell-account\" style=\"display:flex; flex-direction:column; gap:6px; font-size:0.85rem;\">\n";
+	if(sess.is_authenticated) {
+		h << "  <div style=\"display:flex; align-items:center; gap:8px;\">"
+		  << "<span style=\"width:24px; height:24px; border-radius:50%; background:linear-gradient(135deg,#00a1c5,#6d55aa); display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; color:#fff;\">"
+		  << EscapeHtml(ToUpper(sess.username.Left(1))) << "</span>"
+		  << "<strong>" << EscapeHtml(sess.username) << "</strong></div>\n"
+		  << "  <div><a href=\"/host/settings\">Settings</a> &middot; <a href=\"/logout\">Log out</a></div>\n";
+	}
+	else
+		h << "  <div><a href=\"/login\" class=\"wf-btn wf-btn-primary\">Log in</a></div>\n";
+	h << "</div>";
+	return h;
+}
+
 String ManagerSkylarkApp::RenderHtmlPage(const String& title, const String& active_nav, const String& body_content, const Http* http)
 {
-	NavigationModel nav = BuildNavigation(active_nav);
+	NavigationModel nav = BuildNavigation(active_nav, http);
+
+	// Every page but the full-width chat and the login form gets the left pane:
+	// the navigation tree on top, the user row pinned at the bottom (task 033).
+	bool sidebar_shell = active_nav != "chat" && active_nav != "login";
 
 	PageBuilder pb;
 	pb.Title(title + " - Manager Skylark")
 	  .Brand("Manager Skylark", "/", "cube")
 	  .Navigation(nav)
-	  .Template("megamenu")
+	  .Template(sidebar_shell ? "sidebar" : "megamenu")
 	  .Theme("vivid-dark")
 	  .Density(active_nav == "chat" ? DENSITY_NONE : DENSITY_COMFORTABLE)
 	  .Content(body_content);
 
-	// User auth menu in navbar
-	if(http) {
-		UserSession sess = SystemAuthService::GetCurrentSession(*http);
+	UserSession sess = http ? SystemAuthService::GetCurrentSession(*http) : UserSession();
+	if(sidebar_shell)
+		pb.SidebarFooter(RenderShellAccountRow(sess));
+	else
 		pb.NavActions(SystemAuthService::RenderUserMenu(sess));
-	} else {
-		UserSession guest;
-		pb.NavActions(SystemAuthService::RenderUserMenu(guest));
-	}
 
 	// Contextual Left Tree configuration
-	if(active_nav != "home" && active_nav != "chat" && active_nav != "login") {
+	if(active_nav != "chat" && active_nav != "login") {
 		TreeModel tree;
 		String tree_title = "Navigation";
 		String tree_id = "wf-tree";

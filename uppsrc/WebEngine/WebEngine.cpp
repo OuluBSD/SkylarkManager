@@ -102,6 +102,24 @@ static String OriginAuthorityOf(const Http& http)
 	return referer.Mid(0, e < 0 ? referer.GetCount() : e);
 }
 
+Vector<EngineSiteListing> WebEngine::ListSites()
+{
+	Vector<EngineSiteListing> out;
+	for(int i = 0; i < sites.GetCount(); i++) {
+		EngineSiteListing l;
+		l.id = sites[i]->id;
+		l.title = sites[i]->title;
+		for(int k = 0; k < port_site.GetCount(); k++)
+			if(port_site[k] == i) {
+				l.port = port_site.GetKey(k);
+				break;
+			}
+		if(l.port)
+			out.Add(pick(l));
+	}
+	return out;
+}
+
 void WebEngine::Gateway(Http& http)
 {
 	// Absolute URLs and the fence are built on the authority the client used (task 032).

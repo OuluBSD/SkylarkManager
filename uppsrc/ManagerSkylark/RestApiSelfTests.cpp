@@ -131,6 +131,28 @@ bool RunV2CalendarSelfTests(const String& scratch_dir);
 bool RunMarkdownSelfTests();
 bool RunAtlasSelfTests(const String& scratch_dir);
 
+// Portal shell (task 033): the link host and the left-pane page shell.
+static bool PortalShellSelfTests()
+{
+	if(PortalLinkHost("") != "127.0.0.1" || PortalLinkHost("192.168.1.169:8081") != "192.168.1.169"
+	   || PortalLinkHost("localhost") != "localhost" || PortalLinkHost("[::1]:8081") != "[::1]") {
+		Cerr() << "FAILED: portal link host is not the request's name without its port\n";
+		return false;
+	}
+	String page = ManagerSkylarkApp::RenderHtmlPage("Shell", "docs", "<p>body</p>");
+	if(page.Find("wf-template-sidebar") < 0 || page.Find("wf-shell-account") < 0
+	   || page.Find("/login") < 0) {
+		Cerr() << "FAILED: a guest page does not render the left-pane shell with a user row\n";
+		return false;
+	}
+	String chat = ManagerSkylarkApp::RenderHtmlPage("Chat", "chat", "<p>body</p>");
+	if(chat.Find("wf-template-sidebar") >= 0) {
+		Cerr() << "FAILED: the full-width chat page must not get the left pane\n";
+		return false;
+	}
+	return true;
+}
+
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
 	Cout() << "=== Running ManagerSkylark Automated Verification ===\n";
@@ -259,6 +281,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunAtlasSelfTests(AppendFileName(fixture.path, "atlas"))) {
 		Cerr() << "FAILED: Atlas map model and store tests\n";
+		return false;
+	}
+	if(!PortalShellSelfTests()) {
+		Cerr() << "FAILED: portal shell (left pane, user row, link host) tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));

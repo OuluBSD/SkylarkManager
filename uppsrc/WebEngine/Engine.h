@@ -15,6 +15,13 @@ NAMESPACE_UPP
 // process (mirroring the SkylarkApp singleton), but all per-site state lives
 // in EngineSite instances -- the engine itself holds no request-scoped
 // globals.
+// A site bound to a listener port, for portal listings (task 033).
+struct EngineSiteListing : Moveable<EngineSiteListing> {
+	String id;
+	String title;
+	int    port = 0;
+};
+
 class WebEngine {
 public:
 	EngineSite& AddSite(const String& id, const String& title, const String& external_origin,
@@ -24,6 +31,9 @@ public:
 
 	EngineSite* FindSite(const String& id);
 	EngineSite* FindSiteByPort(int port); // 0 = stock listener -> default binding
+
+	// Every site bound to a port, in creation order (task 033).
+	Vector<EngineSiteListing> ListSites();
 
 	WebBroker&  Broker()                  { return broker; }
 	CommandManifest& Manifest()           { return manifest; }
