@@ -17,7 +17,7 @@
 # Exit 0 when every check passes. Writes only under a mktemp directory.
 BIN=$1
 T=$(mktemp -d "${TMPDIR:-/tmp}/composed-site.XXXXXX") || exit 1
-MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225; FIN_PORT=18226; ATL_PORT=18227
+MAIN=18220; PH_PORT=18221; SC_PORT=18222; TF_PORT=18223; META_PORT=18224; CH_PORT=18225; FIN_PORT=18226; ATL_PORT=18227; YTP_PORT=18228
 MAIN_URL=http://127.0.0.1:$MAIN
 PH_URL=http://127.0.0.1:$PH_PORT
 SC_URL=http://127.0.0.1:$SC_PORT
@@ -26,6 +26,7 @@ META_URL=http://127.0.0.1:$META_PORT
 CH_URL=http://127.0.0.1:$CH_PORT
 FIN_URL=http://127.0.0.1:$FIN_PORT
 ATL_URL=http://127.0.0.1:$ATL_PORT
+YTP_URL=http://127.0.0.1:$YTP_PORT
 fails=0
 pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
@@ -93,7 +94,7 @@ if [ $? -eq 0 ]; then pass "provision stock shell account"; else fail "provision
 
 MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
 	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
-	--financials-port $FIN_PORT --atlas-port $ATL_PORT \
+	--financials-port $FIN_PORT --atlas-port $ATL_PORT --youtubeplanner-port $YTP_PORT \
 	--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
 	--company-root "$T/company" --company-repos acme/widget --science-corpus "$T/corpus" \
 	--privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
@@ -650,6 +651,29 @@ got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$DEV_JAR" -c "$
 	-H "Accept: text/html" --data-urlencode "__wf_csrf__=$dev_csrf" "$ATL_URL/session/logout")
 if [ "$got" = "302 $ATL_URL/session/login" ]; then pass "the sign-out form returns to the atlas sign-in"; else fail "the sign-out form returns to the atlas sign-in (got $got)"; fi
 check "after the sign-out form atlas refuses the session silently" 401 "$ATL_URL/session/whoami" -b "$DEV_JAR"
+
+# YouTubePlanner (task 040): the stub is public, shows all six levels in order, each level has its own
+# page, an unknown level is a 404, the pages hold no write control, and the portal lists it.
+check "youtubeplanner overview is public" 200 "$YTP_URL/"
+curl -s "$YTP_URL/" -o "$T/ytp_overview.html"
+ytp_ok=1
+for slug in screenwrite screenplay script mockup-image high-level-objective low-level-objective; do
+	code=$(curl -s -o "$T/ytp_level" -w '%{http_code}' "$YTP_URL/level/$slug")
+	[ "$code" = "200" ] || ytp_ok=0
+	grep -q 'aria-current="page"' "$T/ytp_level" || ytp_ok=0
+	grep -q "Nothing is saved on this page" "$T/ytp_level" || ytp_ok=0
+	if grep -Eq '<(form|input|textarea|button|select)' "$T/ytp_level"; then ytp_ok=0; fi
+done
+for name in "Screenwrite" "Screenplay" "Script" "Mockup Image" "High-Level Objective" "Low-Level Objective"; do
+	grep -q "$name" "$T/ytp_overview.html" || ytp_ok=0
+done
+if [ "$ytp_ok" = 1 ]; then pass "youtubeplanner: six levels, each with its own page, no write control"; else fail "youtubeplanner: six levels, each with its own page, no write control"; fi
+check "youtubeplanner: an unknown level is not found" 404 "$YTP_URL/level/nope"
+if grep -Eq '<(form|input|textarea|button|select)' "$T/ytp_overview.html"; then fail "youtubeplanner overview has no write control"; else pass "youtubeplanner overview has no write control"; fi
+curl -s "$MAIN_URL/" -o "$T/shell_ytp.html"
+if grep -q 'data-app="youtubeplanner"' "$T/shell_ytp.html" && grep -q "href=\"http://127.0.0.1:$YTP_PORT/\"" "$T/shell_ytp.html" \
+   && grep -q 'title="YouTubePlanner"' "$T/shell_ytp.html"; then
+	pass "portal meta-nav lists YouTubePlanner with its title and target"; else fail "portal meta-nav lists YouTubePlanner with its title and target"; fi
 
 # Engine diagnostics: the broker ledger holds one sanitized SSO outcome per decision, and the endpoint
 # serves it to the admin role only. Entries carry sites and codes, never account names or secrets.

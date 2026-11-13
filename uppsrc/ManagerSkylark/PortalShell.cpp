@@ -25,6 +25,7 @@ static String SiteIcon(const String& id)
 	if(id == "meta") return "user";
 	if(id == "channels") return "chat";
 	if(id == "financials") return "database";
+	if(id == "youtubeplanner") return "file-text";
 	return "layers";
 }
 

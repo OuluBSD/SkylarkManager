@@ -153,6 +153,15 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallSessionRoutes(atl);
 	InstallCommandConsole(atl);
 	host.BindSite(cfg.atlas_port, "atlas");
+	// The YouTubePlanner stub: the six planning levels, read-only (task 040). No data, no YouTube calls.
+	String ytp_root = AppendFileName(engine_root, "youtubeplanner");
+	RealizeDirectory(ytp_root);
+	EngineSite& ytp = TheWebEngine().AddSite("youtubeplanner", "YouTubePlanner",
+		Format("http://127.0.0.1:%d", cfg.youtubeplanner_port), ytp_root);
+	InstallYouTubePlannerSite(ytp);
+	InstallSessionRoutes(ytp);
+	InstallCommandConsole(ytp);
+	host.BindSite(cfg.youtubeplanner_port, "youtubeplanner");
 	RegisterComposedBrokerCommands();
 	return true;
 }

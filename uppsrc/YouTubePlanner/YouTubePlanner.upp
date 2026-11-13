@@ -1,0 +1,12 @@
+description "YouTubePlanner webapp: a navigable stub for planning a YouTube video at six levels (no persistence, no YouTube calls)\377";
+
+uses
+	Core,
+	Skylark,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	YouTubePlannerSite.h,
+	YouTubePlannerSite.cpp;

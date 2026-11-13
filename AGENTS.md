@@ -28,6 +28,7 @@
 | `uppsrc/Atlas` | Application / Site | Atlas topology map: a 2D map of the project on a virtual plane (continents, blocks with inside-maps, places; seas and roads), one revision-checked map document per project version; admin edits, other roles read. |
 | `uppsrc/Science` | Application / Site | arXiv-style Science webapp: read-only frontend over the flat paper corpus plus schema-validated structured article sidecars (`science/article-tree`), optimistic revisions, atomic writes. |
 | `uppsrc/TaskFoundry` | Application / Site | TaskFoundry webapp: candidates → evidence-backed proposals → validation → idempotent submission to Company via the WebBroker; evidence references Science papers and PrivateHub branches. |
+| `uppsrc/YouTubePlanner` | Application / Site | YouTubePlanner stub: a navigable planning overview of the six levels (Screenwrite, Screenplay, Script, Mockup Image, High-Level Objective, Low-Level Objective); no persistence, no YouTube calls, no write controls. |
 | `uppsrc/SiteCli` | Application / CLI | `skylarkctl`: agent-first CLI/REPL. Discovers commands dynamically from the connected server's `/api/cli/manifest`; `--json` and `--toon` output (TOON preferred for AI agents); session/bearer auth; per-section commands mirroring the web APIs. |
 | `upptst/WebEngineTests` | Test | Engine fence self-test host: multiple fenced sites with identical paths, site-stamped session isolation, CSRF/origin fence, broker diagnostics. Run the binary directly; exit 0 = all checks passed. |
 | `upptst/SiteCli` | Test | SiteCli self-tests + live check script (manifest fetch, login jar, JSON/TOON output). |
@@ -40,7 +41,7 @@
 
 The ManagerSkylark process composes fenced engine sites on separate ports
 (`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
-**MetaAccount**, **Channels**, **Financials**, **Atlas** (+ the Company module via
+**MetaAccount**, **Channels**, **Financials**, **Atlas**, **YouTubePlanner** (+ the Company module via
 `CompanyComposed` from the private CompanySkylark repo). The stock host site serves the manager
 dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and the
 `/docs` documentation portal.

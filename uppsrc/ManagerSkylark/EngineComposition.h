@@ -12,6 +12,7 @@
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
 #include <TaskFoundry/TaskFoundrySite.h>
+#include <YouTubePlanner/YouTubePlannerSite.h>
 #include <CompanyComposed/CompanyComposed.h>
 #include "PrivateHubService.h"
 
@@ -26,6 +27,7 @@ struct EngineComposition {
 	int    channels_port = 18215;
 	int    financials_port = 18216;
 	int    atlas_port = 18217;
+	int    youtubeplanner_port = 18218;
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the
 	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
 	String agentipc_direct = "127.0.0.1:7440";

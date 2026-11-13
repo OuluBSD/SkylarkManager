@@ -348,6 +348,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: Atlas map model and store tests\n";
 		return false;
 	}
+	if(!RunYouTubePlannerSelfTests()) {
+		Cerr() << "FAILED: YouTubePlanner stub tests\n";
+		return false;
+	}
 	if(!PortalShellSelfTests()) {
 		Cerr() << "FAILED: portal shell (left pane, user row, link host) tests\n";
 		return false;
