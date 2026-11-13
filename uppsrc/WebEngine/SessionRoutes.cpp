@@ -54,8 +54,13 @@ static void LoginForm(WebRequest& r)
 	String hidden = SsoReturnAllowed(r, next)
 		? "<input type=\"hidden\" name=\"next\" value=\"" + EscHtml(next) + "\">"
 		: String();
+	// A browser that still holds a session posts this form with that session's CSRF token, so the
+	// mutation fence accepts it; a guest form carries none (the fence has nothing to check).
+	String csrf = r.CsrfToken().IsEmpty()
+		? String()
+		: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
-	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden +
+	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden + csrf +
 	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
 	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
 	       "<p><button type=\"submit\">Sign in</button></p></form>"
