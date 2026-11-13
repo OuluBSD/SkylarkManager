@@ -75,6 +75,7 @@ MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos
 	--set-taskfoundry-user tfdev >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision TaskFoundry account"; else fail "provision TaskFoundry account"; fi
 MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfmeta >/dev/null 2>&1
+MANAGERSKYLARK_META_PASSWORD=pw-rd "$BIN" --site-dir "$T" --set-meta-user tfreader >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
 MANAGERSKYLARK_CHANNELS_PASSWORD=pw-chan "$BIN" --site-dir "$T" --set-channels-user cviewer >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Channels account"; fi
@@ -521,6 +522,30 @@ if [ "$got" = "$ATL_URL/" ]; then pass "a continue target off the site is replac
 got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=/%5Cevil")
 if [ "$got" = "$ATL_URL/" ]; then pass "a backslash continue target is replaced with the site root"; else fail "a backslash continue target is replaced with the site root (got $got)"; fi
 
+# Handoff: MetaAccount signs in once and returns to the app that asked (task 039). Runs before the
+# ambiguity step below, which links a second account and so must not affect this one.
+HO_JAR="$T/sso_handoff.jar"
+got=$(curl -s -o "$T/sso_handoff_form" -w '%{http_code}' -G --data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/session/login")
+if [ "$got" = "200" ] && grep -q 'name="next"' "$T/sso_handoff_form"; then pass "MetaAccount login form carries an allowlisted return target"; else fail "MetaAccount login form carries an allowlisted return target (got $got)"; fi
+
+rm -f "$T/sso_cont.jar"
+curl -s -c "$T/sso_cont.jar" -b "$T/sso_cont.jar" -o "$T/sso_cont" "$ATL_URL/session/sso?next=/"
+if grep -q "127.0.0.1:$META_PORT/session/login?next=" "$T/sso_cont"; then pass "unlinked continue links to MetaAccount with a return to this app"; else fail "unlinked continue links to MetaAccount with a return to this app"; fi
+
+got=$(curl -s -o /dev/null -w '%{redirect_url}' -c "$HO_JAR" -b "$HO_JAR" \
+	--data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
+	--data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/session/login")
+if [ "$got" = "$ATL_URL/session/sso?next=/" ]; then pass "MetaAccount sign-in returns to the atlas session route"; else fail "MetaAccount sign-in returns to the atlas session route (got $got)"; fi
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$HO_JAR" -c "$HO_JAR" "$ATL_URL/session/sso?next=/")
+if [ "$got" = "302 $ATL_URL/" ]; then pass "the return adopts the linked atlas account"; else fail "the return adopts the linked atlas account (got $got)"; fi
+check "after the handoff atlas opens for the linked account" 200 "$ATL_URL/" -b "$HO_JAR"
+
+for target in "http://127.0.0.1:$ATL_PORT@evil.example.invalid/" "http://evil.example.invalid:$ATL_PORT/session/sso?next=/" "http://127.0.0.1:9/x"; do
+	got=$(curl -s -o /dev/null -w '%{redirect_url}' --data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
+		--data-urlencode "next=$target" "$META_URL/session/login")
+	if [ "$got" = "$META_URL/" ]; then pass "MetaAccount refuses the return target $target"; else fail "MetaAccount refuses the return target $target (got $got)"; fi
+done
+
 # A second local account linked to the same central user makes the mapping ambiguous: refused.
 DEV_JAR="$T/sso_dev.jar"
 cp "$META_ONLY" "$DEV_JAR"
@@ -534,6 +559,39 @@ got=$(curl -s -o "$T/sso_dev_decide" -w '%{http_code}' -b "$SSO_JAR" -H "Origin:
 	-H "X-WF-CSRF: $sso_meta_csrf" --data "grant_id=$dev_gid&approve=1" "$META_URL/consent/decide")
 if [ -n "$dev_gid" ] && [ "$got" = "200" ]; then pass "a second local account is approved for the same central user"; else fail "a second local account is approved for the same central user (got $got)"; fi
 check "an ambiguous sign-in link denies the central session on atlas" 302 "$ATL_URL/" -b "$META_ONLY"
+
+# Roles: a central user linked to the reader account keeps the reader role after the handoff.
+# The reader can read but not edit; the linked admin still can edit (task 039 residual 6).
+RD_META="$T/sso_rd_meta.jar"
+RD_ATL="$T/sso_rd_atl.jar"
+RD_HO="$T/sso_rd_handoff.jar"
+curl -s -c "$RD_META" -o "$T/sso_rd" -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tfreader&password=pw-rd" "$META_URL/session/login" >/dev/null
+rd_meta_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_rd")
+cp "$RD_META" "$RD_ATL"
+curl -s -c "$RD_ATL" -b "$RD_ATL" -o "$T/sso_rd_atl_login" -H "Origin: $ATL_URL" -H "Accept: application/json" \
+	--data "username=atlasdev&password=pw-dev" "$ATL_URL/session/login" >/dev/null
+rd_atl_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_rd_atl_login")
+curl -s -b "$RD_ATL" -c "$RD_ATL" -o "$T/sso_rd_link" -H "Origin: $ATL_URL" -H "x-wf-csrf: $rd_atl_csrf" \
+	-H "Accept: application/json" -X POST "$ATL_URL/session/sso/link" >/dev/null
+rd_gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$T/sso_rd_link")
+got=$(curl -s -o /dev/null -w '%{http_code}' -b "$RD_META" -H "Origin: $META_URL" \
+	-H "X-WF-CSRF: $rd_meta_csrf" --data "grant_id=$rd_gid&approve=1" "$META_URL/consent/decide")
+if [ -n "$rd_gid" ] && [ "$got" = "200" ]; then pass "the reader account is linked by its own central user"; else fail "the reader account is linked by its own central user (got $got)"; fi
+
+cp "$RD_META" "$RD_HO"
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$RD_HO" -c "$RD_HO" "$ATL_URL/session/sso?next=/")
+if [ "$got" = "302 $ATL_URL/" ]; then pass "the reader's central user opens atlas through the handoff"; else fail "the reader's central user opens atlas through the handoff (got $got)"; fi
+rd_ho_csrf=$(curl -s -b "$RD_HO" -c "$RD_HO" -H "Accept: application/json" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
+got=$(curl -s -o "$T/sso_rd_create" -w '%{http_code}' -b "$RD_HO" -c "$RD_HO" -H "Origin: $ATL_URL" -H "x-wf-csrf: $rd_ho_csrf" \
+	-X POST --data "title=reader" "$ATL_URL/atlas/create")
+if [ "$got" = "403" ] && grep -q "needs the admin role" "$T/sso_rd_create"; then pass "the reader keeps the reader role: a map edit is refused"; else fail "the reader keeps the reader role: a map edit is refused (got $got)"; fi
+check "the reader can still read atlas" 200 "$ATL_URL/" -b "$RD_HO"
+
+got=$(curl -s -o "$T/sso_admin_create" -w '%{http_code}' -b "$HO_JAR" -c "$HO_JAR" -H "Origin: $ATL_URL" \
+	-H "x-wf-csrf: $(curl -s -b "$HO_JAR" -c "$HO_JAR" -H "Accept: application/json" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')" \
+	-X POST --data "title=admin" "$ATL_URL/atlas/create")
+if [ "$got" != "403" ]; then pass "the linked admin keeps the admin role: a map edit is not refused"; else fail "the linked admin keeps the admin role: a map edit is not refused (got $got)"; fi
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

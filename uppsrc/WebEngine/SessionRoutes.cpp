@@ -38,10 +38,18 @@ button { font: inherit; color: #ffffff; background: var(--link); border: 0; bord
 </style>)LOGIN";
 }
 
+static bool SsoReturnAllowed(WebRequest& r, const String& url);
+
 static void LoginForm(WebRequest& r)
 {
+	// A validated return target travels with the form, so a sign-in started from a webapp
+	// comes back to that webapp (task 039). An unlisted target is simply not carried.
+	String next = r.Param("next");
+	String hidden = SsoReturnAllowed(r, next)
+		? "<input type=\"hidden\" name=\"next\" value=\"" + EscHtml(next) + "\">"
+		: String();
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
-	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">"
+	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden +
 	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
 	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
 	       "<p><button type=\"submit\">Sign in</button></p></form>"
@@ -82,6 +90,65 @@ static String SsoSafeNext(const String& next)
 			return "/";
 	}
 	return next;
+}
+
+// The host this request was made to, without its port. Composed sites share the host and differ by
+// port, so a return target is checked against this host and a composed site's port.
+static String SsoRequestHost(WebRequest& r)
+{
+	String h = TrimBoth(r.Header("host"));
+	if(h.StartsWith("[")) {
+		int e = h.Find(']');
+		return e < 0 ? String() : h.Left(e + 1);
+	}
+	int c = h.Find(':');
+	return c < 0 ? h : h.Left(c);
+}
+
+static int SsoSitePort(const String& site_id)
+{
+	Vector<EngineSiteListing> sites = TheWebEngine().ListSites();
+	for(const EngineSiteListing& s : sites)
+		if(s.id == site_id)
+			return s.port;
+	return 0;
+}
+
+// "http://<request host>:<site port><path>" for a composed site, or "" when unknown.
+static String SsoSiteUrl(WebRequest& r, const String& site_id, const String& path)
+{
+	String host = SsoRequestHost(r);
+	int port = SsoSitePort(site_id);
+	if(host.IsEmpty() || port <= 0)
+		return String();
+	return "http://" + host + ":" + AsString(port) + path;
+}
+
+// A MetaAccount return target is accepted only when it is an http URL on this request's host, on the
+// port of a composed site, with a same-site path. Anything else (another host, an unlisted port, a
+// scheme, or a path that fails SsoSafeNext) is refused, so the caller falls back to "/".
+static bool SsoReturnAllowed(WebRequest& r, const String& url)
+{
+	String host = SsoRequestHost(r);
+	if(host.IsEmpty() || !url.StartsWith("http://" + host + ":"))
+		return false;
+	String rest = url.Mid(7 + host.GetCount());   // ":<port><path>"
+	String port_s;
+	int i = 1;
+	while(i < rest.GetCount() && IsDigit(rest[i]))
+		port_s.Cat(rest[i++]);
+	if(port_s.IsEmpty() || port_s.GetCount() > 5)
+		return false;
+	int port = ScanInt(port_s);
+	bool composed = false;
+	Vector<EngineSiteListing> sites = TheWebEngine().ListSites();
+	for(const EngineSiteListing& s : sites)
+		if(s.port == port)
+			composed = true;
+	if(!composed)
+		return false;
+	String path = rest.Mid(i);
+	return path.IsEmpty() || SsoSafeNext(path) == path;
 }
 
 // The central account behind this request's MetaAccount cookie, or false.
@@ -157,8 +224,12 @@ static void SsoContinue(WebRequest& r)
 		r.Redirect(next);
 		return;
 	}
-	EngineSite* meta = TheWebEngine().FindSite(SSO_IDP_SITE);
-	String login = meta ? meta->external_origin + "/login" : String("/");
+	// MetaAccount signs in once and returns here: its login carries this site's own
+	// session/sso URL as the return target, which MetaAccount accepts only on this host (task 039).
+	String back = SsoSiteUrl(r, r.Site().id, "/session/sso?next=" + UrlEncode(next));
+	String login = SsoSiteUrl(r, SSO_IDP_SITE, "/session/login");
+	if(login.GetCount() && back.GetCount())
+		login << "?next=" << UrlEncode(back);
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"
 	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>"
@@ -226,7 +297,9 @@ static void Login(WebRequest& r)
 	}
 	r.AdoptSession(sid);
 	if(r.Header("accept").Find("json") < 0 && r.Header("content-type").Find("json") < 0) {
-		r.Redirect("/");
+		// Back to the webapp that started the sign-in, only for an allowlisted target (task 039).
+		String next = r.Param("next");
+		r.Redirect(SsoReturnAllowed(r, next) ? next : String("/"));
 		return;
 	}
 	ValueMap m;
