@@ -1658,6 +1658,7 @@ CONSOLE_APP_MAIN
 		if(c.Find("HttpOnly") >= 0)
 			httponly = true;
 	Check(val_a.GetCount() > 0 && httponly, "session cookie is HttpOnly");
+	Check(SetCookieLine(rs_a, "wfs_alpha").Find("; Expires=") >= 0, "session cookie carries an Expires attribute");
 	{
 		Value v = ParseJSON(rs_a.body);
 		csrf_a = v.Is<ValueMap>() ? (String)((ValueMap)v).Get("csrf") : String();
@@ -1826,7 +1827,8 @@ CONSOLE_APP_MAIN
 	{
 		VectorMap<String, String> h_csrf2 = clone(h_alpha);
 		h_csrf2.Add("X-WF-CSRF", alpha_csrf);
-		HttpCall("POST", ALPHA_PORT, "/logout", h_csrf2, "");
+		HttpReply rl2 = HttpCall("POST", ALPHA_PORT, "/logout", h_csrf2, "");
+		Check(SetCookieLine(rl2, "wfs_alpha").Find("; Expires=") >= 0, "logout deletion cookie carries an Expires attribute");
 		HttpReply rw2 = HttpCall("GET", ALPHA_PORT, "/whoami", h_alpha, "");
 		Check(rw2.body.Find("alice") < 0, "logout invalidates session");
 	}
