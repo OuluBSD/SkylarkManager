@@ -55,8 +55,7 @@ String TotpSecretGenerate()
 
 int64 TotpUnixNow()
 {
-	// Upp counts seconds since year 1; Unix epoch starts 1970-01-01.
-	return GetUtcTime().Get() - 62135596800LL;
+	return GetUnixNow();
 }
 
 static String HmacSha256Hex(const String& key, const String& data)
