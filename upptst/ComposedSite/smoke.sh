@@ -95,7 +95,7 @@ if [ $? -eq 0 ]; then pass "provision stock shell account"; else fail "provision
 MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$T" --port $MAIN --privatehub-port $PH_PORT \
 	--science-port $SC_PORT --taskfoundry-port $TF_PORT --meta-port $META_PORT --channels-port $CH_PORT \
 	--financials-port $FIN_PORT --atlas-port $ATL_PORT --youtubeplanner-port $YTP_PORT \
-	--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
+	--enable-meta-sso --agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$T" \
 	--company-root "$T/company" --company-repos acme/widget --science-corpus "$T/corpus" \
 	--privatehub-workspace "$T/ws" > "$T/server.log" 2>&1 &
 pid=$!
@@ -693,6 +693,87 @@ check "the SSO diagnostics refuse a guest" 401 "$ATL_URL/session/sso/diagnostics
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null
+
+# SSO off by default (task 039 follow-up). A second server on its own site directory and ports. Phase 1
+# links an Atlas admin to a central user with --enable-meta-sso on; phase 2 restarts the same data with
+# the flag absent. The linked central session must then not adopt, no SSO route is served, no link control
+# is drawn, the sign-in form carries no return target, and per-site sign-in still works.
+OFF="$T/off"
+OFF_PORT_BASE=18230
+OFF_META=$((OFF_PORT_BASE + 4)); OFF_ATL=$((OFF_PORT_BASE + 7))
+OFF_META_URL=http://127.0.0.1:$OFF_META
+OFF_ATL_URL=http://127.0.0.1:$OFF_ATL
+mkdir -p "$OFF/corpus" "$OFF/ws/acme/widget" "$OFF/mesh" || exit 1
+MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$OFF" --set-meta-user tfmeta >/dev/null 2>&1
+MANAGERSKYLARK_ATLAS_PASSWORD=pw-atl "$BIN" --site-dir "$OFF" --atlas-role admin --set-atlas-user atlasadmin >/dev/null 2>&1
+# start_off [--enable-meta-sso]: the second server on the same site directory; sets off_pid.
+start_off() {
+	MANAGERSKYLARK_AGENTIPC_PASSWORD=123 "$BIN" --site-dir "$OFF" --port $OFF_PORT_BASE --privatehub-port $((OFF_PORT_BASE + 1)) \
+		--science-port $((OFF_PORT_BASE + 2)) --taskfoundry-port $((OFF_PORT_BASE + 3)) --meta-port $OFF_META \
+		--channels-port $((OFF_PORT_BASE + 5)) --financials-port $((OFF_PORT_BASE + 6)) --atlas-port $OFF_ATL \
+		--youtubeplanner-port $((OFF_PORT_BASE + 8)) $1 \
+		--agentipc-python /bin/sh --agentipc-client "$T/channels-shim.sh" --agentipc-home "$OFF" \
+		--company-root "$OFF/company" --company-repos acme/widget --science-corpus "$OFF/corpus" \
+		--privatehub-workspace "$OFF/ws" >> "$OFF/server.log" 2>&1 &
+	off_pid=$!
+	for i in $(seq 1 40); do
+		if [ "$(curl -s -o /dev/null -w '%{http_code}' $OFF_META_URL/)" != "000" ] && \
+		   [ "$(curl -s -o /dev/null -w '%{http_code}' $OFF_ATL_URL/)" != "000" ]; then return 0; fi
+		sleep 0.25
+	done
+	return 1
+}
+if start_off --enable-meta-sso; then
+	curl -s -c "$OFF/central.jar" -o "$OFF/off_meta" -H "Origin: $OFF_META_URL" -H "Accept: application/json" \
+		--data "username=tfmeta&password=pw-meta" "$OFF_META_URL/session/login" >/dev/null
+	off_meta_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$OFF/off_meta")
+	# The link request needs the central session as well as the local one, so both live in one jar.
+	cp "$OFF/central.jar" "$OFF/sso.jar"
+	curl -s -b "$OFF/sso.jar" -c "$OFF/sso.jar" -o "$OFF/off_atl" -H "Origin: $OFF_ATL_URL" -H "Accept: application/json" \
+		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login" >/dev/null
+	off_atl_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$OFF/off_atl")
+	curl -s -b "$OFF/sso.jar" -c "$OFF/sso.jar" -o "$OFF/off_link" -H "Origin: $OFF_ATL_URL" -H "x-wf-csrf: $off_atl_csrf" \
+		-H "Accept: application/json" -X POST "$OFF_ATL_URL/session/sso/link" >/dev/null
+	off_gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$OFF/off_link")
+	if [ -n "$off_gid" ]; then pass "SSO on: the Atlas link is requested before the flag is removed"; else fail "SSO on: the Atlas link is requested before the flag is removed"; fi
+	got=$(curl -s -o /dev/null -w '%{http_code}' -b "$OFF/central.jar" -H "Origin: $OFF_META_URL" \
+		-H "X-WF-CSRF: $off_meta_csrf" --data "grant_id=$off_gid&approve=1" "$OFF_META_URL/consent/decide")
+	if [ "$got" = "200" ]; then pass "SSO on: the central user approves the Atlas link"; else fail "SSO on: the central user approves the Atlas link (got $got)"; fi
+	check "SSO on: the linked central session opens Atlas (the link is real)" 200 "$OFF_ATL_URL/" -b "$OFF/central.jar"
+	kill $off_pid 2>/dev/null
+	wait $off_pid 2>/dev/null
+else
+	fail "SSO-on server for linking did not come up (see $OFF/server.log)"
+	kill $off_pid 2>/dev/null
+fi
+
+if start_off; then
+	pass "SSO-off server up on the same data ($OFF_META, $OFF_ATL)"
+	check "SSO off: the continue route is not served" 404 "$OFF_ATL_URL/session/sso"
+	check "SSO off: the link route is not served" 404 "$OFF_ATL_URL/session/sso/link" -X POST -H "Origin: $OFF_ATL_URL" -d ''
+	check "SSO off: the diagnostics route is not served" 404 "$OFF_ATL_URL/session/sso/diagnostics"
+	check "SSO off: the central session is still valid on MetaAccount" 200 "$OFF_META_URL/session/whoami" -b "$OFF/central.jar"
+	# The same link that opened Atlas in phase 1 must not open it now: the central session stays a guest.
+	check "SSO off: a linked central session does not sign a guest in to Atlas" 302 "$OFF_ATL_URL/" -b "$OFF/central.jar"
+	if curl -s "$OFF_ATL_URL/session/login?next=http://127.0.0.1:$OFF_META/" | grep -q 'name="next"'; then
+		fail "SSO off: the sign-in form carries no return target"; else pass "SSO off: the sign-in form carries no return target"; fi
+	curl -s -c "$OFF/atl2.jar" -o /dev/null -H "Origin: $OFF_ATL_URL" -H "Accept: application/json" \
+		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login"
+	check "SSO off: per-site sign-in still works" 200 "$OFF_ATL_URL/session/whoami" -b "$OFF/atl2.jar"
+	curl -s -b "$OFF/atl2.jar" "$OFF_ATL_URL/" -o "$OFF/atl_signed.html"
+	if grep -q 'id="wf-sign-out"' "$OFF/atl_signed.html" && ! grep -q 'id="wf-link-meta"' "$OFF/atl_signed.html"; then
+		pass "SSO off: the signed-in page has sign-out and no MetaAccount link"; else fail "SSO off: the signed-in page has sign-out and no MetaAccount link"; fi
+	off_csrf=$(curl -s -b "$OFF/atl2.jar" "$OFF_ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
+	off_code=$(curl -s -D "$OFF/logout.h" -o /dev/null -w '%{http_code}' -b "$OFF/atl2.jar" -H "Origin: $OFF_ATL_URL" \
+		-H "Accept: application/json" -H "x-wf-csrf: $off_csrf" -X POST "$OFF_ATL_URL/session/logout")
+	if [ "$off_code" = "200" ] && ! grep -qi '_sso_off' "$OFF/logout.h"; then
+		pass "SSO off: a local sign-out sets no sign-out marker"; else fail "SSO off: a local sign-out sets no sign-out marker (got $off_code)"; fi
+	kill $off_pid 2>/dev/null
+	wait $off_pid 2>/dev/null
+else
+	fail "SSO-off server did not come up (see $OFF/server.log)"
+	kill $off_pid 2>/dev/null
+fi
 
 echo "composed-site checks: $fails failed"
 [ $fails -eq 0 ]

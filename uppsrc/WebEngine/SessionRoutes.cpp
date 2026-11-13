@@ -51,7 +51,7 @@ static void LoginForm(WebRequest& r)
 	// A validated return target travels with the form, so a sign-in started from a webapp
 	// comes back to that webapp (task 039). An unlisted target is simply not carried.
 	String next = r.Param("next");
-	String hidden = SsoReturnAllowed(r, next)
+	String hidden = TheWebEngine().MetaSso() && SsoReturnAllowed(r, next)
 		? "<input type=\"hidden\" name=\"next\" value=\"" + EscHtml(next) + "\">"
 		: String();
 	// A browser that still holds a session posts this form with that session's CSRF token, so the
@@ -226,7 +226,7 @@ static bool SsoAdopt(WebRequest& r)
 // marker is signed in to this site. Mutations are never adopted here.
 void SsoAutoSignIn(WebRequest& r)
 {
-	if(r.HasUser() || r.IsMutation() || r.Site().id == SSO_IDP_SITE)
+	if(!TheWebEngine().MetaSso() || r.HasUser() || r.IsMutation() || r.Site().id == SSO_IDP_SITE)
 		return;
 	if(r.RequestCookie(SsoSuppressName(r.Site().id)).GetCount()) {
 		TheWebEngine().Broker().NoteOutcome(r.Site().id, SSO_IDP_SITE, "sso-adopt", "suppressed", false);
@@ -340,9 +340,9 @@ static void Login(WebRequest& r)
 	}
 	r.AdoptSession(sid);
 	if(!WantsJson(r)) {
-		// Back to the webapp that started the sign-in, only for an allowlisted target (task 039).
+		// Back to the webapp that started the sign-in, only for an allowlisted target (task 039, SSO on).
 		String next = r.Param("next");
-		r.Redirect(SsoReturnAllowed(r, next) ? next : String("/"));
+		r.Redirect(TheWebEngine().MetaSso() && SsoReturnAllowed(r, next) ? next : String("/"));
 		return;
 	}
 	ValueMap m;
@@ -376,7 +376,8 @@ static void Logout(WebRequest& r)
 	// This site stays signed out after a deliberate sign-out, even while the central
 	// MetaAccount session is open; session/sso clears the marker (task 039). The
 	// MetaAccount session and every other site are untouched.
-	r.SetCookieValue(SsoSuppressName(r.Site().id), "1", GetSysTime() + SSO_SUPPRESS_DAYS * 24 * 3600);
+	if(TheWebEngine().MetaSso())
+		r.SetCookieValue(SsoSuppressName(r.Site().id), "1", GetSysTime() + SSO_SUPPRESS_DAYS * 24 * 3600);
 	if(!WantsJson(r)) {
 		r.Redirect(r.Site().Url("session/login"));
 		return;
@@ -424,7 +425,7 @@ String SessionChromeHtml(WebRequest& r)
 	String out = "<span class=\"wf-session\">Signed in as " + EscHtml(r.User().username) + " "
 	             "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/logout")) + "\" class=\"wf-session-form\">" + csrf +
 	             "<button type=\"submit\" id=\"wf-sign-out\">Sign out</button></form>";
-	if(r.Site().id != SSO_IDP_SITE)
+	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE)
 		out << " <form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/link")) << "\" class=\"wf-session-form\">" << csrf
 		    << "<button type=\"submit\" id=\"wf-link-meta\">Link to MetaAccount</button></form>";
 	return out + "</span>";
@@ -436,9 +437,11 @@ void InstallSessionRoutes(EngineSite& site)
 	site.Router().Add("session/login:POST", Login);
 	site.Router().Add("session/logout:POST", Logout);
 	site.Router().Add("session/whoami", Whoami);
-	site.Router().Add("session/sso", SsoContinue);
-	site.Router().Add("session/sso/diagnostics", SsoDiagnostics);
-	site.Router().Add("session/sso/link:POST", SsoLink);
+	if(TheWebEngine().MetaSso()) {
+		site.Router().Add("session/sso", SsoContinue);
+		site.Router().Add("session/sso/diagnostics", SsoDiagnostics);
+		site.Router().Add("session/sso/link:POST", SsoLink);
+	}
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	cm.Add(site.id, site.title, HttpCommand("session-login", "POST", "session/login", "any account of this site",
@@ -448,8 +451,9 @@ void InstallSessionRoutes(EngineSite& site)
 	                                        "json", "Close the current session", {}));
 	cm.Add(site.id, site.title, HttpCommand("session-whoami", "GET", "session/whoami", "open session",
 	                                        "json", "Show the signed-in account", {}));
-	cm.Add(site.id, site.title, HttpCommand("session-sso-link", "POST", "session/sso/link", "open session",
-	                                        "json", "Ask MetaAccount to link this account to this site", {}));
+	if(TheWebEngine().MetaSso())
+		cm.Add(site.id, site.title, HttpCommand("session-sso-link", "POST", "session/sso/link", "open session",
+		                                        "json", "Ask MetaAccount to link this account to this site", {}));
 }
 
 END_UPP_NAMESPACE

@@ -28,6 +28,7 @@ struct EngineComposition {
 	int    financials_port = 18216;
 	int    atlas_port = 18217;
 	int    youtubeplanner_port = 18218;
+	bool   enable_meta_sso = false;   // --enable-meta-sso: opt-in MetaAccount SSO (task 039)
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the
 	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
 	String agentipc_direct = "127.0.0.1:7440";

@@ -36,6 +36,7 @@ private:
 bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
                         const EngineComposition& cfg, String& error)
 {
+	TheWebEngine().SetMetaSso(cfg.enable_meta_sso);
 	String engine_root = AppendFileName(site_dir, "engine");
 	RealizeDirectory(engine_root);
 

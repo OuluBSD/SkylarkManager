@@ -2619,6 +2619,8 @@ CONSOLE_APP_MAIN
 		      "argument specs parse name, type and required");
 	}
 	{
+		// The SSO routes exist only with the opt-in switch on (task 039 follow-up).
+		TheWebEngine().SetMetaSso(true);
 		EngineSite probe;
 		probe.id = "probe";
 		probe.title = "Probe";
@@ -2645,6 +2647,16 @@ CONSOLE_APP_MAIN
 		}
 		Check(posts == 3 && covered && cmds.GetCount() == 4,
 		      "session POST routes each have a manifest command with the same path and method");
+		TheWebEngine().SetMetaSso(false);
+		EngineSite quiet;
+		quiet.id = "quiet";
+		quiet.title = "Quiet";
+		InstallSessionRoutes(quiet);
+		int sso_routes = 0;
+		for(int i = 0; i < quiet.Router().GetCount(); i++)
+			if(quiet.Router()[i].pattern.Find("sso") >= 0)
+				sso_routes++;
+		Check(sso_routes == 0, "with SSO off no session/sso route is registered");
 	}
 
 	host.StopEngines();

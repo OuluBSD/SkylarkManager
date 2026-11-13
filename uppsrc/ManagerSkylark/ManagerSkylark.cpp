@@ -95,6 +95,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("financials-port", 0, "Financials engine site port (default 18216)", true, "port");
 	cla.AddArg("atlas-port", 0, "Atlas engine site port (default 18217)", true, "port");
 	cla.AddArg("youtubeplanner-port", 0, "YouTubePlanner engine site port (default 18218)", true, "port");
+	cla.AddArg("enable-meta-sso", 0, "Opt in to MetaAccount single sign-on across composed sites (default off)", false);
 	cla.AddArg("atlas-role", 0, "Role for --set-atlas-user (default admin: may edit maps; other roles read only)", true, "role");
 	cla.AddArg("set-atlas-user", 0, "Create/update an Atlas account with hidden prompt (or MANAGERSKYLARK_ATLAS_PASSWORD)", true, "username");
 	cla.AddArg("docs-repos", 0, "Documentation repositories for the /docs portal (label=path,...; default: SkylarkManager, CompanySkylark, AgentIPC)", true, "list");
@@ -236,6 +237,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.atlas_port = ScanInt(cla.GetArg("atlas-port"));
 		if(!cla.GetArg("youtubeplanner-port").IsEmpty())
 			cfg.youtubeplanner_port = ScanInt(cla.GetArg("youtubeplanner-port"));
+		cfg.enable_meta_sso = cla.IsArg("enable-meta-sso");
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
 			cfg.agentipc_direct = cla.GetArg("agentipc-direct");
 		if(!cla.GetArg("agentipc-server").IsEmpty())

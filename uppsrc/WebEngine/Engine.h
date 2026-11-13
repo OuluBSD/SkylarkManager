@@ -36,6 +36,11 @@ public:
 	Vector<EngineSiteListing> ListSites();
 
 	WebBroker&  Broker()                  { return broker; }
+
+	// Opt-in MetaAccount single sign-on (--enable-meta-sso). Off by default: no auto sign-in, no SSO
+	// routes, no link control and no sign-out marker, so per-site sign-in behaves as before SSO.
+	void SetMetaSso(bool on)              { meta_sso = on; }
+	bool MetaSso() const                  { return meta_sso; }
 	CommandManifest& Manifest()           { return manifest; }
 	String      DiagnosticsJSON(int max_entries = 100) { return broker.DiagnosticsJSON(max_entries); }
 
@@ -50,6 +55,7 @@ private:
 	VectorMap<int, int>     port_site;   // port -> sites index
 	int                     default_port_site = -1;
 	WebBroker               broker;
+	bool                    meta_sso = false;
 	CommandManifest         manifest;
 	Mutex                          mutex;
 };

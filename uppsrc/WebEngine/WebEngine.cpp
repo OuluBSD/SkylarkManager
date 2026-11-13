@@ -172,8 +172,9 @@ void WebEngine::Gateway(Http& http)
 		}
 	}
 
-	// Shared MetaAccount sign-in for a guest (task 039). In-process broker only.
-	SsoAutoSignIn(wr);
+	// Shared MetaAccount sign-in for a guest (task 039). In-process broker only, and only when enabled.
+	if(TheWebEngine().MetaSso())
+		SsoAutoSignIn(wr);
 
 	// Mutation fence: exact origin + server-side CSRF token.
 	if(wr.IsMutation()) {
