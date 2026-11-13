@@ -82,6 +82,7 @@ MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fin "$BIN" --site-dir "$T" --financials-ro
 	--set-financials-user ffin >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Financials finance account"; else fail "provision Financials finance account"; fi
 MANAGERSKYLARK_ATLAS_PASSWORD=pw-atl "$BIN" --site-dir "$T" --atlas-role admin --set-atlas-user atlasadmin >/dev/null 2>&1
+MANAGERSKYLARK_ATLAS_PASSWORD=pw-dev "$BIN" --site-dir "$T" --atlas-role reader --set-atlas-user atlasdev >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Atlas admin account"; else fail "provision Atlas admin account"; fi
 MANAGERSKYLARK_SITE_PASSWORD=pw-stock "$BIN" --site-dir "$T" --set-site-password shell >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision stock shell account"; else fail "provision stock shell account"; fi
@@ -519,6 +520,20 @@ got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/sessio
 if [ "$got" = "$ATL_URL/" ]; then pass "a continue target off the site is replaced with the site root"; else fail "a continue target off the site is replaced with the site root (got $got)"; fi
 got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=/%5Cevil")
 if [ "$got" = "$ATL_URL/" ]; then pass "a backslash continue target is replaced with the site root"; else fail "a backslash continue target is replaced with the site root (got $got)"; fi
+
+# A second local account linked to the same central user makes the mapping ambiguous: refused.
+DEV_JAR="$T/sso_dev.jar"
+cp "$META_ONLY" "$DEV_JAR"
+curl -s -c "$DEV_JAR" -b "$DEV_JAR" -o "$T/sso_dev" -H "Origin: $ATL_URL" -H "Accept: application/json" \
+	--data "username=atlasdev&password=pw-dev" "$ATL_URL/session/login" >/dev/null
+dev_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_dev")
+curl -s -b "$DEV_JAR" -c "$DEV_JAR" -o "$T/sso_dev_link" -H "Origin: $ATL_URL" -H "x-wf-csrf: $dev_csrf" \
+	-H "Accept: application/json" -X POST "$ATL_URL/session/sso/link" >/dev/null
+dev_gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$T/sso_dev_link")
+got=$(curl -s -o "$T/sso_dev_decide" -w '%{http_code}' -b "$SSO_JAR" -H "Origin: $META_URL" \
+	-H "X-WF-CSRF: $sso_meta_csrf" --data "grant_id=$dev_gid&approve=1" "$META_URL/consent/decide")
+if [ -n "$dev_gid" ] && [ "$got" = "200" ]; then pass "a second local account is approved for the same central user"; else fail "a second local account is approved for the same central user (got $got)"; fi
+check "an ambiguous sign-in link denies the central session on atlas" 302 "$ATL_URL/" -b "$META_ONLY"
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

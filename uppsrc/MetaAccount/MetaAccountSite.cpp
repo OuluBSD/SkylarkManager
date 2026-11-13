@@ -449,6 +449,30 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 		if(sv.Is<ValueArray>())
 			for(const Value& s : (ValueArray)sv)
 				scopes.Add((String)s);
+		// Sign-in links to two different local accounts on one site make the mapping
+		// undefined: refuse rather than pick one (task 039).
+		Vector<WebAccountGrant> linked;
+		grants.ListForSubject(subject, "granted", linked);
+		String first_local;
+		bool ambiguous = false;
+		for(int i = 0; i < linked.GetCount(); i++) {
+			const WebAccountGrant& m = linked[i];
+			bool sso = false;
+			for(int k = 0; k < m.scopes.GetCount(); k++)
+				if(m.scopes[k] == "sso")
+					sso = true;
+			if(!sso || m.client_site != client_site || m.client_user_id.IsEmpty())
+				continue;
+			if(first_local.IsEmpty())
+				first_local = m.client_user_id;
+			else if(m.client_user_id != first_local)
+				ambiguous = true;
+		}
+		if(ambiguous) {
+			r.status = 409;
+			r.error = "sign-in link is ambiguous for this subject";
+			return r;
+		}
 		WebAccountGrant g;
 		if(!grants.FindActive(subject, client_site, scopes, g)) {
 			r.ok = true;
