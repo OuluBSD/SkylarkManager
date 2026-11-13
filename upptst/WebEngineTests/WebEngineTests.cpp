@@ -863,6 +863,15 @@ CONSOLE_APP_MAIN
 		Cout() << "accounts err: " << st.error << "\n";
 	Check(st.ok, "WebAccounts self test");
 
+	// Task 047: TOTP time is POSIX seconds, so a code for the current time verifies.
+	{
+		int64 now = GetUnixNow();
+		int64 wall = (int64)time(NULL);
+		Check((now > wall ? now - wall : wall - now) < 5, "TOTP time is POSIX seconds");
+		String secret = TotpSecretGenerate();
+		Check(TotpVerify(secret, TotpCode(secret, now), now), "a TOTP code for the current time verifies");
+	}
+
 	// --- unit level: storage ---
 	{
 		JsonFileStore store("unit", AppendFileName(s_root, "storeunit"), "col");
