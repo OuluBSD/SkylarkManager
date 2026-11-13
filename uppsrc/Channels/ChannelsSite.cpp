@@ -62,7 +62,7 @@ static void Page(WebRequest& r, const String& title, const String& body)
 {
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
 	       "<title>" + Esc(title) + "</title></head><body>"
-	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Channels</a></nav>"
+	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Channels</a> " + SessionChromeHtml(r) + "</nav>"
 	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
 }
 

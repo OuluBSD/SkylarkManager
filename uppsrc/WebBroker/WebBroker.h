@@ -106,6 +106,10 @@ public:
 	Vector<BrokerDiagEntry>& Diagnostics() { return diag; }
 	String DiagnosticsJSON(int max_entries = 100);
 	void   ClearDiagnostics();
+	// Records an engine-level outcome in the same ledger, with no call made. The outcome is a fixed
+	// code, never an id, name or session value (task 039).
+	void   NoteOutcome(const String& from_site, const String& to_site, const String& op,
+	                   const String& outcome, bool ok);
 
 	static const char* TCP_NOT_IMPLEMENTED() { return "tcp broker transport is not implemented yet"; }
 

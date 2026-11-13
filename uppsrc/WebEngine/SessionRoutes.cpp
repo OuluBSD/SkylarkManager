@@ -20,6 +20,12 @@ static String EscHtml(const String& s)
 	return String(out);
 }
 
+// A browser form post gets a redirect or a page; an API caller gets JSON (task 039).
+static bool WantsJson(WebRequest& r)
+{
+	return r.Header("accept").Find("json") >= 0 || r.Header("content-type").Find("json") >= 0;
+}
+
 // The composed-site palette (the same tokens Atlas and Science use), so a sign-in inside a
 // webapp frame reads as part of that app rather than a bare page (task 038).
 static String LoginStylesheet()
@@ -169,7 +175,7 @@ static bool SsoCentralUser(WebRequest& r, BrokerCallContext& ctx, String& subjec
 
 // Adopts a site session for the linked account, if the grant is active. Returns
 // true when the request now has a user. Every refusal leaves the request a guest.
-static bool SsoAdopt(WebRequest& r)
+static bool SsoAdoptLinked(WebRequest& r)
 {
 	BrokerCallContext ctx;
 	ctx.from_site = r.Site().id;
@@ -199,6 +205,17 @@ static bool SsoAdopt(WebRequest& r)
 	return r.HasUser();
 }
 
+// Adopts the linked account and records one outcome code for the site. The record names the site
+// and the code only: no account id, username, session value or grant id (task 039).
+static bool SsoAdopt(WebRequest& r)
+{
+	const char *outcome = "no-central-session";
+	if(r.RequestCookie(SiteAccounts::CookieNameFor(SSO_IDP_SITE)).GetCount())
+		outcome = SsoAdoptLinked(r) ? "adopted" : "no-active-link";
+	TheWebEngine().Broker().NoteOutcome(r.Site().id, SSO_IDP_SITE, "sso-adopt", outcome, String(outcome) == "adopted");
+	return r.HasUser();
+}
+
 // Called for every composed request before its handler (WebEngine dispatch). A
 // safe request from a guest with a live central session and no local sign-out
 // marker is signed in to this site. Mutations are never adopted here.
@@ -206,8 +223,10 @@ void SsoAutoSignIn(WebRequest& r)
 {
 	if(r.HasUser() || r.IsMutation() || r.Site().id == SSO_IDP_SITE)
 		return;
-	if(r.RequestCookie(SsoSuppressName(r.Site().id)).GetCount())
+	if(r.RequestCookie(SsoSuppressName(r.Site().id)).GetCount()) {
+		TheWebEngine().Broker().NoteOutcome(r.Site().id, SSO_IDP_SITE, "sso-adopt", "suppressed", false);
 		return;
+	}
 	SsoAdopt(r);
 }
 
@@ -238,6 +257,25 @@ static void SsoContinue(WebRequest& r)
 	       "</body></html>");
 }
 
+// A browser form gets the MetaAccount consent page after a request, or a short page for a refusal.
+// An API caller gets the JSON reply (task 039).
+static void SsoReply(WebRequest& r, const ValueMap& m, int code)
+{
+	if(WantsJson(r)) {
+		r.Json(m, code);
+		return;
+	}
+	if((bool)m.Get("ok")) {
+		String consent = SsoSiteUrl(r, SSO_IDP_SITE, "/consent");
+		r.Redirect(consent.GetCount() ? consent : r.Site().Url(""));
+		return;
+	}
+	r.Status(code, "Error");
+	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Link not requested</title></head><body>"
+	       "<h1>Link not requested</h1><p>" + EscHtml((String)m.Get("error")) + "</p>"
+	       "<p><a href=\"" + EscHtml(r.Site().Url("")) + "\">Back to this site</a></p></body></html>");
+}
+
 // POST session/sso/link: a signed-in local user asks the central account to link
 // this site. The request is a consent the central user must approve on MetaAccount.
 static void SsoLink(WebRequest& r)
@@ -246,7 +284,7 @@ static void SsoLink(WebRequest& r)
 	if(!r.HasUser()) {
 		m.Add("ok", false);
 		m.Add("error", "sign in to this site first");
-		r.Json(m, 401);
+		SsoReply(r, m, 401);
 		return;
 	}
 	BrokerCallContext ctx;
@@ -256,7 +294,7 @@ static void SsoLink(WebRequest& r)
 	if(!SsoCentralUser(r, ctx, subject)) {
 		m.Add("ok", false);
 		m.Add("error", "no active MetaAccount session in this browser");
-		r.Json(m, 401);
+		SsoReply(r, m, 401);
 		return;
 	}
 	BrokerCall c;
@@ -272,13 +310,13 @@ static void SsoLink(WebRequest& r)
 	if(!cr.ok) {
 		m.Add("ok", false);
 		m.Add("error", cr.error);
-		r.Json(m, cr.status);
+		SsoReply(r, m, cr.status);
 		return;
 	}
 	m.Add("ok", true);
 	m.Add("status", "approval requested on the MetaAccount consent page");
 	m.Add("grant_id", cr.payload.Get("grant_id"));
-	r.Json(m);
+	SsoReply(r, m, 200);
 }
 
 static void Login(WebRequest& r)
@@ -296,7 +334,7 @@ static void Login(WebRequest& r)
 		return;
 	}
 	r.AdoptSession(sid);
-	if(r.Header("accept").Find("json") < 0 && r.Header("content-type").Find("json") < 0) {
+	if(!WantsJson(r)) {
 		// Back to the webapp that started the sign-in, only for an allowlisted target (task 039).
 		String next = r.Param("next");
 		r.Redirect(SsoReturnAllowed(r, next) ? next : String("/"));
@@ -334,9 +372,48 @@ static void Logout(WebRequest& r)
 	// MetaAccount session is open; session/sso clears the marker (task 039). The
 	// MetaAccount session and every other site are untouched.
 	r.SetCookieValue(SsoSuppressName(r.Site().id), "1", GetSysTime() + SSO_SUPPRESS_DAYS * 24 * 3600);
+	if(!WantsJson(r)) {
+		r.Redirect(r.Site().Url("session/login"));
+		return;
+	}
 	ValueMap m;
 	m.Add("ok", true);
 	r.Json(m);
+}
+
+// GET session/sso/diagnostics: the broker ledger, which carries the sanitized SSO outcomes next to the
+// broker calls. Signed-in accounts only. Entries hold sites, codes and times, never account ids, names
+// or session values (task 039).
+static void SsoDiagnostics(WebRequest& r)
+{
+	if(!r.HasUser()) {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "sign in first");
+		r.Json(m, 401);
+		return;
+	}
+	int max = r.IntParam("max");
+	if(max <= 0 || max > 1000)
+		max = 1000;
+	r.Plain(TheWebEngine().Broker().DiagnosticsJSON(max), "application/json; charset=UTF-8");
+}
+
+// The signed-in account and its session controls for a composed page's header. A guest gets a sign-in
+// link. A signed-in account gets its name, a sign-out form and, on an app, a form that asks MetaAccount
+// to link the account (task 039). Every form carries the session's CSRF token.
+String SessionChromeHtml(WebRequest& r)
+{
+	if(!r.HasUser())
+		return "<span class=\"wf-session\"><a href=\"" + EscHtml(r.Site().Url("session/login")) + "\">Sign in</a></span>";
+	String csrf = "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
+	String out = "<span class=\"wf-session\">Signed in as " + EscHtml(r.User().username) + " "
+	             "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/logout")) + "\" class=\"wf-session-form\">" + csrf +
+	             "<button type=\"submit\" id=\"wf-sign-out\">Sign out</button></form>";
+	if(r.Site().id != SSO_IDP_SITE)
+		out << " <form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/link")) << "\" class=\"wf-session-form\">" << csrf
+		    << "<button type=\"submit\" id=\"wf-link-meta\">Link to MetaAccount</button></form>";
+	return out + "</span>";
 }
 
 void InstallSessionRoutes(EngineSite& site)
@@ -346,6 +423,7 @@ void InstallSessionRoutes(EngineSite& site)
 	site.Router().Add("session/logout:POST", Logout);
 	site.Router().Add("session/whoami", Whoami);
 	site.Router().Add("session/sso", SsoContinue);
+	site.Router().Add("session/sso/diagnostics", SsoDiagnostics);
 	site.Router().Add("session/sso/link:POST", SsoLink);
 
 	CommandManifest& cm = TheWebEngine().Manifest();

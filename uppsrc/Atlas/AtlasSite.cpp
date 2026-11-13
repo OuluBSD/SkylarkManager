@@ -137,7 +137,7 @@ static void Page(WebRequest& r, const String& title, const String& body, const S
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 	       "<title>" + Esc(title) + " - Atlas</title>" + AtlasStylesheet() + "</head>"
 	       "<body" + body_attrs + ">"
-	       "<nav class=\"atlas-nav\"><a href=\"" + Esc(r.Site().Url("atlas")) + "\">Atlas</a></nav>"
+	       "<nav class=\"atlas-nav\"><a href=\"" + Esc(r.Site().Url("atlas")) + "\">Atlas</a> " + SessionChromeHtml(r) + "</nav>"
 	       "<main><h1>" + Esc(title) + "</h1>" + body + "</main></body></html>");
 }
 

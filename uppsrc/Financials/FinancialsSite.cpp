@@ -50,7 +50,7 @@ static void Page(WebRequest& r, const String& title, const String& body)
 	       "<title>" + Esc(title) + "</title></head><body>"
 	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Financials</a> "
 	       "<a href=\"" + Esc(r.Site().Url("ledger")) + "\">Ledger</a> "
-	       "<a href=\"" + Esc(r.Site().Url("contracts")) + "\">Contracts</a></nav>"
+	       "<a href=\"" + Esc(r.Site().Url("contracts")) + "\">Contracts</a> " + SessionChromeHtml(r) + "</nav>"
 	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
 }
 

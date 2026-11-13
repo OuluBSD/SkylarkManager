@@ -78,6 +78,7 @@ static void Page(WebRequest& r, const String& title, const String& body)
 {
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
 	       "<title>" + Esc(title) + "</title></head><body>"
+	       "<header>" + SessionChromeHtml(r) + "</header>"
 	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
 }
 

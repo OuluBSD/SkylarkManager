@@ -97,4 +97,21 @@ void WebBroker::ClearDiagnostics()
 	mutex.Leave();
 }
 
+void WebBroker::NoteOutcome(const String& from_site, const String& to_site, const String& op,
+                            const String& outcome, bool ok)
+{
+	mutex.Enter();
+	BrokerDiagEntry& e = diag.Add();
+	e.at = GetSysTime();
+	e.correlation_id = AsString(Uuid::Create());
+	e.from_site = from_site;
+	e.to_site = to_site;
+	e.op = op;
+	e.ok = ok;
+	e.error = outcome;
+	while(diag.GetCount() > DIAG_MAX)
+		diag.Remove(0);
+	mutex.Leave();
+}
+
 END_UPP_NAMESPACE

@@ -76,11 +76,14 @@ MANAGERSKYLARK_TASKFOUNDRY_PASSWORD=pw-tf "$BIN" --site-dir "$T" --company-repos
 if [ $? -eq 0 ]; then pass "provision TaskFoundry account"; else fail "provision TaskFoundry account"; fi
 MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfmeta >/dev/null 2>&1
 MANAGERSKYLARK_META_PASSWORD=pw-rd "$BIN" --site-dir "$T" --set-meta-user tfreader >/dev/null 2>&1
+MANAGERSKYLARK_META_PASSWORD=pw-fc "$BIN" --site-dir "$T" --set-meta-user tffin >/dev/null 2>&1
+MANAGERSKYLARK_META_PASSWORD=pw-tv "$BIN" --site-dir "$T" --set-meta-user tfview >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
 MANAGERSKYLARK_CHANNELS_PASSWORD=pw-chan "$BIN" --site-dir "$T" --set-channels-user cviewer >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Channels account"; fi
 MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fin "$BIN" --site-dir "$T" --financials-role finance \
 	--set-financials-user ffin >/dev/null 2>&1
+MANAGERSKYLARK_FINANCIALS_PASSWORD=pw-fv "$BIN" --site-dir "$T" --set-financials-user fview >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Financials finance account"; else fail "provision Financials finance account"; fi
 MANAGERSKYLARK_ATLAS_PASSWORD=pw-atl "$BIN" --site-dir "$T" --atlas-role admin --set-atlas-user atlasadmin >/dev/null 2>&1
 MANAGERSKYLARK_ATLAS_PASSWORD=pw-dev "$BIN" --site-dir "$T" --atlas-role reader --set-atlas-user atlasdev >/dev/null 2>&1
@@ -522,6 +525,27 @@ if [ "$got" = "$ATL_URL/" ]; then pass "a continue target off the site is replac
 got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=/%5Cevil")
 if [ "$got" = "$ATL_URL/" ]; then pass "a backslash continue target is replaced with the site root"; else fail "a backslash continue target is replaced with the site root (got $got)"; fi
 
+# Links a local account of one site to a central user, as a person does it: the local user asks for
+# the link and the central user approves it on MetaAccount's consent API (task 039).
+link_account() {
+	site=$1; local_user=$2; local_pw=$3; central=$4; central_pw=$5; name=$6
+	cj="$T/$name.central.jar"; lj="$T/$name.local.jar"
+	rm -f "$cj" "$lj"
+	curl -s -c "$cj" -o "$T/$name.central" -H "Origin: $META_URL" -H "Accept: application/json" \
+		--data "username=$central&password=$central_pw" "$META_URL/session/login" >/dev/null
+	ccsrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/$name.central")
+	cp "$cj" "$lj"
+	curl -s -c "$lj" -b "$lj" -o "$T/$name.local" -H "Origin: $site" -H "Accept: application/json" \
+		--data "username=$local_user&password=$local_pw" "$site/session/login" >/dev/null
+	lcsrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/$name.local")
+	curl -s -b "$lj" -c "$lj" -o "$T/$name.link" -H "Origin: $site" -H "x-wf-csrf: $lcsrf" \
+		-H "Accept: application/json" -X POST "$site/session/sso/link" >/dev/null
+	gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$T/$name.link")
+	got=$(curl -s -o /dev/null -w '%{http_code}' -b "$cj" -H "Origin: $META_URL" -H "X-WF-CSRF: $ccsrf" \
+		--data "grant_id=$gid&approve=1" "$META_URL/consent/decide")
+	if [ -n "$gid" ] && [ "$got" = "200" ]; then pass "$local_user on $site is linked to $central"; else fail "$local_user on $site is linked to $central (got $got)"; fi
+}
+
 # Handoff: MetaAccount signs in once and returns to the app that asked (task 039). Runs before the
 # ambiguity step below, which links a second account and so must not affect this one.
 HO_JAR="$T/sso_handoff.jar"
@@ -593,7 +617,44 @@ got=$(curl -s -o "$T/sso_admin_create" -w '%{http_code}' -b "$HO_JAR" -c "$HO_JA
 	-X POST --data "title=admin" "$ATL_URL/atlas/create")
 if [ "$got" != "403" ]; then pass "the linked admin keeps the admin role: a map edit is not refused"; else fail "the linked admin keeps the admin role: a map edit is not refused (got $got)"; fi
 
+# Financials roles through the handoff: the finance role reads the ledger, the viewer role is refused.
+link_account "$FIN_URL" ffin pw-fin tffin pw-fc fin-finance
+link_account "$FIN_URL" fview pw-fv tfview pw-tv fin-viewer
+check "a linked finance account reads the ledger through the handoff" 200 "$FIN_URL/ledger" -b "$T/fin-finance.central.jar"
+check "a linked viewer is refused the ledger through the handoff" 403 "$FIN_URL/ledger" -b "$T/fin-viewer.central.jar"
+if grep -q "needs the finance role" "$T/body"; then pass "the viewer refusal names the finance role"; else fail "the viewer refusal names the finance role"; fi
+
+# Channels through the handoff: a linked Channels account opens the app on the central session alone.
+link_account "$CH_URL" cviewer pw-chan tfmeta pw-meta chan-viewer
+check "a linked channels account opens channels through the handoff" 200 "$CH_URL/" -b "$T/chan-viewer.central.jar"
+
+# Visible controls: a signed-in atlas page offers sign-out and a MetaAccount link; a guest page offers
+# neither. The browser forms post with the session's CSRF token and get a redirect, not JSON.
+if curl -s -b "$DEV_JAR" -c "$DEV_JAR" "$ATL_URL/" | grep -q 'id="wf-sign-out"'; then pass "a signed-in atlas page shows the sign-out control"; else fail "a signed-in atlas page shows the sign-out control"; fi
+if curl -s -b "$DEV_JAR" -c "$DEV_JAR" "$ATL_URL/" | grep -q 'id="wf-link-meta"'; then pass "a signed-in atlas page offers the MetaAccount link"; else fail "a signed-in atlas page offers the MetaAccount link"; fi
+if curl -s "$ATL_URL/" | grep -q 'id="wf-sign-out"'; then fail "a guest atlas page shows no sign-out control"; else pass "a guest atlas page shows no sign-out control"; fi
+
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$DEV_JAR" -c "$DEV_JAR" -H "Origin: $ATL_URL" \
+	-H "Accept: text/html" --data-urlencode "__wf_csrf__=$dev_csrf" "$ATL_URL/session/sso/link")
+if [ "$got" = "302 $META_URL/consent" ]; then pass "the link form sends the browser to the MetaAccount consent page"; else fail "the link form sends the browser to the MetaAccount consent page (got $got)"; fi
+
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$DEV_JAR" -c "$DEV_JAR" -H "Origin: $ATL_URL" \
+	-H "Accept: text/html" --data-urlencode "__wf_csrf__=$dev_csrf" "$ATL_URL/session/logout")
+if [ "$got" = "302 $ATL_URL/session/login" ]; then pass "the sign-out form returns to the atlas sign-in"; else fail "the sign-out form returns to the atlas sign-in (got $got)"; fi
+check "after the sign-out form atlas refuses the session silently" 401 "$ATL_URL/session/whoami" -b "$DEV_JAR"
+
+# Engine diagnostics: the broker ledger holds one sanitized SSO outcome per decision, and the endpoint
+# serves it to a signed-in account only. Entries carry sites and codes, never account names or secrets.
+diag_json=$(curl -s -b "$RD_HO" -c "$RD_HO" "$ATL_URL/session/sso/diagnostics?max=1000")
+if printf '%s' "$diag_json" | grep -q 'sso-adopt'; then pass "the SSO diagnostics are served to a signed-in account"; else fail "the SSO diagnostics are served to a signed-in account"; fi
+for code in adopted no-active-link no-central-session suppressed; do
+	if printf '%s' "$diag_json" | grep -Eq "\"error\": ?\"$code\""; then pass "the SSO diagnostics record outcome $code"; else fail "the SSO diagnostics record outcome $code"; fi
+done
+if printf '%s' "$diag_json" | grep -Eq 'pw-|tfmeta|tfreader|tffin|tfview|atlasadmin|atlasdev|cviewer|ffin|fview'; then fail "the SSO diagnostics hold no account names or secrets"; else pass "the SSO diagnostics hold no account names or secrets"; fi
+check "the SSO diagnostics refuse a guest" 401 "$ATL_URL/session/sso/diagnostics"
+
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null
+
 echo "composed-site checks: $fails failed"
 [ $fails -eq 0 ]

@@ -17,6 +17,9 @@ class WebRequest;
 // composed request before its handler; GET and HEAD only.
 void SsoAutoSignIn(WebRequest& r);
 
+// The signed-in account and its sign-out and link controls, for a composed page's header (task 039).
+String SessionChromeHtml(WebRequest& r);
+
 END_UPP_NAMESPACE
 
 #endif
