@@ -52,10 +52,26 @@ static bool MayAuthor(WebRequest& r)
 	return g.HasScopes(Vector<String>() << String(SCIENCE_AUTHOR_SCOPE));
 }
 
+// The composed-site palette shared with Atlas (task 038: Science had no stylesheet).
+static String ScienceStylesheet()
+{
+	return R"SCIENCE(<style>
+:root { --bg: #f7f7f5; --fg: #1b1b1b; --muted: #5c5c5c; --line: #d0d0cc; --panel: #ffffff; --link: #1864ab; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
+}
+:root[data-theme="dark"] { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 1100px; }
+a { color: var(--link); }
+h1 { font-size: 1.5rem; margin: 8px 0; }
+li { margin: 4px 0; }
+</style>)SCIENCE";
+}
+
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
-	       "<title>" + title + "</title></head><body>"
+	r.Html("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+	       "<title>" + title + "</title>" + ScienceStylesheet() + "</head><body>"
 	       "<h1>" + title + "</h1>" + body + "</body></html>");
 }
 
