@@ -90,6 +90,29 @@ String WebBroker::DiagnosticsJSON(int max_entries)
 	return AsJSON(out, true);
 }
 
+String WebBroker::SanitizedDiagnosticsJSON(int max_entries, const Vector<String>& ops)
+{
+	ValueArray entries;
+	mutex.Enter();
+	for(int i = diag.GetCount() - 1; i >= 0 && entries.GetCount() < max_entries; i--) {
+		const BrokerDiagEntry& e = diag[i];
+		if(FindIndex(ops, e.op) < 0)
+			continue;
+		ValueMap row;
+		row.Add("at", AsString(e.at));
+		row.Add("from_site", e.from_site);
+		row.Add("to_site", e.to_site);
+		row.Add("op", e.op);
+		row.Add("ok", e.ok);
+		row.Add("error", e.error);
+		entries.Add(row);
+	}
+	mutex.Leave();
+	ValueMap out;
+	out.Add("entries", entries);
+	return AsJSON(out, true);
+}
+
 void WebBroker::ClearDiagnostics()
 {
 	mutex.Enter();

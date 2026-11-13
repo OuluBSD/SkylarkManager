@@ -386,9 +386,9 @@ static void Logout(WebRequest& r)
 	r.Json(m);
 }
 
-// GET session/sso/diagnostics: the broker ledger, which carries the sanitized SSO outcomes next to the
-// broker calls. Signed-in accounts only. Entries hold sites, codes and times, never account ids, names
-// or session values (task 039).
+// GET session/sso/diagnostics: the SSO outcomes in the broker ledger, for an account with the admin
+// role on this site. Only the SSO ops are returned, and each entry holds sites, op, ok and a code,
+// never caller ids, account names or session values (task 039 review).
 static void SsoDiagnostics(WebRequest& r)
 {
 	if(!r.HasUser()) {
@@ -398,10 +398,19 @@ static void SsoDiagnostics(WebRequest& r)
 		r.Json(m, 401);
 		return;
 	}
+	if(FindIndex(r.User().roles, String("admin")) < 0) {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "admin role required");
+		r.Json(m, 403);
+		return;
+	}
 	int max = r.IntParam("max");
 	if(max <= 0 || max > 1000)
 		max = 1000;
-	r.Plain(TheWebEngine().Broker().DiagnosticsJSON(max), "application/json; charset=UTF-8");
+	Vector<String> ops;
+	ops << "resolve-session" << "check-grant" << "request-consent" << "sso-adopt";
+	r.Plain(TheWebEngine().Broker().SanitizedDiagnosticsJSON(max, ops), "application/json; charset=UTF-8");
 }
 
 // The signed-in account and its session controls for a composed page's header. A guest gets a sign-in

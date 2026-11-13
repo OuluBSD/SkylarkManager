@@ -105,6 +105,9 @@ public:
 	// Diagnostics ledger (bounded ring buffer).
 	Vector<BrokerDiagEntry>& Diagnostics() { return diag; }
 	String DiagnosticsJSON(int max_entries = 100);
+	// The ledger narrowed to the given ops, with only at, sites, op, ok and error: no caller ids or
+	// correlation ids. A reader of this view sees outcomes, not who called what.
+	String SanitizedDiagnosticsJSON(int max_entries, const Vector<String>& ops);
 	void   ClearDiagnostics();
 	// Records an engine-level outcome in the same ledger, with no call made. The outcome is a fixed
 	// code, never an id, name or session value (task 039).

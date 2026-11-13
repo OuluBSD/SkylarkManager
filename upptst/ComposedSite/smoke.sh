@@ -652,9 +652,15 @@ if [ "$got" = "302 $ATL_URL/session/login" ]; then pass "the sign-out form retur
 check "after the sign-out form atlas refuses the session silently" 401 "$ATL_URL/session/whoami" -b "$DEV_JAR"
 
 # Engine diagnostics: the broker ledger holds one sanitized SSO outcome per decision, and the endpoint
-# serves it to a signed-in account only. Entries carry sites and codes, never account names or secrets.
-diag_json=$(curl -s -b "$RD_HO" -c "$RD_HO" "$ATL_URL/session/sso/diagnostics?max=1000")
-if printf '%s' "$diag_json" | grep -q 'sso-adopt'; then pass "the SSO diagnostics are served to a signed-in account"; else fail "the SSO diagnostics are served to a signed-in account"; fi
+# serves it to the admin role only. Entries carry sites and codes, never account names or secrets.
+DIAG_ADMIN="$T/diag_admin.jar"
+curl -s -c "$DIAG_ADMIN" -o /dev/null -H "Origin: $ATL_URL" -H "Accept: application/json" \
+	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
+diag_json=$(curl -s -b "$DIAG_ADMIN" -c "$DIAG_ADMIN" "$ATL_URL/session/sso/diagnostics?max=1000")
+if printf '%s' "$diag_json" | grep -q 'sso-adopt'; then pass "the SSO diagnostics are served to the admin role"; else fail "the SSO diagnostics are served to the admin role"; fi
+check "the SSO diagnostics refuse the linked reader (no admin role)" 403 "$ATL_URL/session/sso/diagnostics" -b "$RD_HO"
+check "the SSO diagnostics refuse a plain linked account" 403 "$ATL_URL/session/sso/diagnostics" -b "$RD_ATL"
+if printf '%s' "$diag_json" | grep -q 'caller\|correlation'; then fail "the SSO diagnostics omit caller and correlation ids"; else pass "the SSO diagnostics omit caller and correlation ids"; fi
 for code in adopted no-active-link no-central-session suppressed; do
 	if printf '%s' "$diag_json" | grep -Eq "\"error\": ?\"$code\""; then pass "the SSO diagnostics record outcome $code"; else fail "the SSO diagnostics record outcome $code"; fi
 done
