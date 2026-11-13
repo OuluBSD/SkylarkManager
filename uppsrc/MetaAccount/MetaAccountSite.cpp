@@ -460,6 +460,29 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 		r.status = 200;
 		r.payload.Add("active", true);
 		r.payload.Add("grant_id", g.grant_id);
+		// The linked client-site user, so a sign-in can map the identity (task 039).
+		r.payload.Add("client_user_id", g.client_user_id);
+		return r;
+	}
+	if(call.op == "resolve-session") {
+		// Validates a central MetaAccount session. The raw id stays inside this call; the
+		// reply names only the account, never the session value.
+		WebAccountSession s;
+		if(!accounts.ResolveSession(call.payload.Get("session_id"), s)) {
+			r.status = 401;
+			r.error = "no active central session";
+			return r;
+		}
+		WebAccountUser u;
+		if(!accounts.GetUser(s.user_id, u) || u.disabled) {
+			r.status = 401;
+			r.error = "central account is not available";
+			return r;
+		}
+		r.ok = true;
+		r.status = 200;
+		r.payload.Add("user_id", u.user_id);
+		r.payload.Add("username", u.username);
 		return r;
 	}
 	if(call.op == "revoke-grant") {

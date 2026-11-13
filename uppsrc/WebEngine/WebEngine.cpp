@@ -1,4 +1,5 @@
 #include "WebEngine.h"
+#include "SessionRoutes.h"
 
 NAMESPACE_UPP
 
@@ -170,6 +171,9 @@ void WebEngine::Gateway(Http& http)
 			}
 		}
 	}
+
+	// Shared MetaAccount sign-in for a guest (task 039). In-process broker only.
+	SsoAutoSignIn(wr);
 
 	// Mutation fence: exact origin + server-side CSRF token.
 	if(wr.IsMutation()) {

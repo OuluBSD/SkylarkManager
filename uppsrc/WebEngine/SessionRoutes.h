@@ -10,6 +10,13 @@ NAMESPACE_UPP
 // callers, redirect to / for browser forms) and session/logout:POST.
 void InstallSessionRoutes(EngineSite& site);
 
+class WebRequest;
+
+// Shared MetaAccount sign-in (task 039): signs a guest in from a live central session
+// when the account is linked to this site. Called by the engine dispatch for every
+// composed request before its handler; GET and HEAD only.
+void SsoAutoSignIn(WebRequest& r);
+
 END_UPP_NAMESPACE
 
 #endif

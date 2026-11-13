@@ -2643,7 +2643,7 @@ CONSOLE_APP_MAIN
 			}
 			covered = covered && found;
 		}
-		Check(posts == 2 && covered && cmds.GetCount() == 3,
+		Check(posts == 3 && covered && cmds.GetCount() == 4,
 		      "session POST routes each have a manifest command with the same path and method");
 	}
 

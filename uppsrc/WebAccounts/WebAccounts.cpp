@@ -18,15 +18,20 @@ SiteAccounts::SiteAccounts(const String& site_id, const String& data_root, int s
 	sessions_store.Create(site, root, "sessions");
 }
 
-String SiteAccounts::CookieName() const
+String SiteAccounts::CookieNameFor(const String& site_id)
 {
 	// Cookie names must be filesystem/HTTP safe; site ids are restricted ids.
 	StringBuffer sb;
-	sb << site;
+	sb << site_id;
 	for(int i = 0; i < sb.GetCount(); i++)
 		if(!IsAlpha(sb[i]) && !IsDigit(sb[i]) && sb[i] != '_' && sb[i] != '-')
 			sb[i] = '_';
 	return "wfs_" + String(sb);
+}
+
+String SiteAccounts::CookieName() const
+{
+	return CookieNameFor(site);
 }
 
 JsonFileStore& SiteAccounts::Users()      { return *users_store; }
@@ -249,6 +254,34 @@ StoreResult SiteAccounts::Login(const String& username, const String& password,
 	s.created = GetSysTime();
 	s.expires = s.created + ttl_hours * 3600;
 	s.data.Add("last_ip", ip);
+	String new_rev;
+	StoreResult r = Sessions().Put(s.session_id, StoreAsJson(s, true), String(), new_rev);
+	if(r.ok) {
+		session_id = s.session_id;
+		csrf_token = s.csrf_token;
+	}
+	else
+		error = r.error;
+	return r;
+}
+
+StoreResult SiteAccounts::AdoptUserSession(const String& user_id, const String& ip,
+                                           String& session_id, String& csrf_token, String& error)
+{
+	WebAccountUser u;
+	if(!GetUser(user_id, u) || u.disabled) {
+		error = "account is not available on this site";
+		return StoreResult(error);
+	}
+	WebAccountSession s;
+	s.session_id = "was_" + AsString(Uuid::Create());
+	s.site = site;
+	s.user_id = u.user_id;
+	s.csrf_token = WebAuthRandomBytes(32);
+	s.created = GetSysTime();
+	s.expires = s.created + ttl_hours * 3600;
+	s.data.Add("last_ip", ip);
+	s.data.Add("sign_in", "meta-account");
 	String new_rev;
 	StoreResult r = Sessions().Put(s.session_id, StoreAsJson(s, true), String(), new_rev);
 	if(r.ok) {
@@ -494,6 +527,23 @@ StoreResult RunAll(const String& root, String& report)
 
 	String guest, gcsrf;
 	all &= Check(rep, a.CreateGuestSession(guest, gcsrf).ok && gcsrf.GetCount() >= 32, "guest session with csrf token");
+
+	// Adoption (task 039): an enabled user gets a new site-stamped session without a password;
+	// an unknown or disabled user gets none; the adopted session resolves on its own site only.
+	WebAccountUser au;
+	all &= Check(rep, b.FindUserByUsername("alice", au), "alice exists on site B for adoption");
+	String adopt_sid, adopt_csrf, adopt_err;
+	all &= Check(rep, b.AdoptUserSession(au.user_id, "127.0.0.1", adopt_sid, adopt_csrf, adopt_err).ok
+	                  && adopt_sid.GetCount() > 0 && adopt_csrf.GetCount() >= 32,
+	             "adoption opens a site-stamped session for an enabled user");
+	all &= Check(rep, b.ResolveSession(adopt_sid, sess) && sess.user_id == au.user_id && sess.site == site_b,
+	             "adopted session resolves on its own site");
+	all &= Check(rep, !a.ResolveSession(adopt_sid, sess), "adopted session cookie rejected by another site");
+	all &= Check(rep, !b.AdoptUserSession("wau_no_such_user", "127.0.0.1", adopt_sid, adopt_csrf, adopt_err).ok,
+	             "adoption refuses an unknown user");
+	all &= Check(rep, b.SetDisabled(au.user_id, true).ok && !b.AdoptUserSession(au.user_id, "127.0.0.1", adopt_sid, adopt_csrf, adopt_err).ok,
+	             "adoption refuses a disabled user");
+	all &= Check(rep, b.SetDisabled(au.user_id, false).ok, "re-enable alice after the disabled check");
 
 	report = Join(rep, "");
 	return all ? StoreResult(true) : StoreResult("WebAccounts self test failures:\n" + report);

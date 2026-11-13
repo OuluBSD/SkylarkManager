@@ -99,6 +99,8 @@ public:
 
 	const String& Site() const           { return site; }
 	String        CookieName() const;
+	// The session cookie name for a site id, without opening its store (task 039).
+	static String CookieNameFor(const String& site_id);
 	int           SessionTtlHours() const { return ttl_hours; }
 
 	// --- users ---
@@ -117,6 +119,10 @@ public:
 	StoreResult Login(const String& username, const String& password,
 	                  const String& ip, String& session_id, String& csrf_token,
 	                  WebAccountUser& user, String& error);
+	// Opens a session for an existing, enabled user without a password. Used only after
+	// a central identity has been validated and mapped (task 039). Always a new id.
+	StoreResult AdoptUserSession(const String& user_id, const String& ip,
+	                             String& session_id, String& csrf_token, String& error);
 	bool        ResolveSession(const String& raw_session_id, WebAccountSession& out);
 	StoreResult Logout(const String& raw_session_id);
 	StoreResult SaveSessionData(const String& raw_session_id, const ValueMap& data);

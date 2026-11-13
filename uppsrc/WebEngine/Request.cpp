@@ -84,6 +84,17 @@ WebRequest& WebRequest::Status(int code, const String& text)
 	return *this;
 }
 
+String WebRequest::RequestCookie(const String& name)
+{
+	return http[~(String("@") + name)];
+}
+
+WebRequest& WebRequest::SetCookieValue(const String& name, const String& value, Time expires)
+{
+	http.SetRawCookie(~name, value, expires, "/", NULL, false, true, "Strict");
+	return *this;
+}
+
 WebRequest& WebRequest::Redirect(const String& url)
 {
 	http.Redirect(~url);

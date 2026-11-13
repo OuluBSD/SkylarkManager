@@ -25,7 +25,7 @@ public:
 
 	static bool SupportedOp(const String& op) {
 		return op == "ping" || op == "authenticate" || op == "request-consent"
-		    || op == "check-grant" || op == "revoke-grant" || op == "notify";
+		    || op == "check-grant" || op == "revoke-grant" || op == "notify" || op == "resolve-session";
 	}
 
 private:

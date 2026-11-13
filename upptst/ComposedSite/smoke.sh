@@ -474,6 +474,52 @@ check "taskfoundry board with an operator-approved grant" 200 "$TF_URL/" -b "$T/
 "$BIN" --site-dir "$T" --revoke-taskfoundry-grant "$gid2" >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "operator revokes the grant with the CLI (fallback)"; else fail "operator revokes the grant with the CLI (fallback)"; fi
 
+# --- shared MetaAccount sign-in (task 039): in-process broker, site-stamped sessions ---
+# The central cookie reaches every port on this host, so a meta-only jar is the browser case
+# "MetaAccount is signed in and this app is not in use yet".
+META_ONLY="$T/sso_meta_only.jar"
+SSO_JAR="$T/sso.jar"
+curl -s -c "$META_ONLY" -o "$T/sso_meta" -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tfmeta&password=pw-meta" "$META_URL/session/login" >/dev/null
+sso_meta_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_meta")
+cp "$META_ONLY" "$SSO_JAR"
+check "a central session alone does not open an unlinked app" 302 "$ATL_URL/" -b "$META_ONLY"
+check "a central session alone does not open an unlinked channels app" 302 "$CH_URL/" -b "$META_ONLY"
+
+curl -s -c "$SSO_JAR" -b "$SSO_JAR" -o "$T/sso_atl" -H "Origin: $ATL_URL" -H "Accept: application/json" \
+	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login" >/dev/null
+sso_atl_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_atl")
+if [ -n "$sso_atl_csrf" ]; then pass "atlas admin signs in locally before linking"; else fail "atlas admin signs in locally before linking"; fi
+
+check "a link without a csrf token is refused" 403 "$ATL_URL/session/sso/link" -X POST \
+	-b "$SSO_JAR" -H "Origin: $ATL_URL" --data ""
+curl -s -b "$SSO_JAR" -c "$SSO_JAR" -o "$T/sso_link" -H "Origin: $ATL_URL" -H "x-wf-csrf: $sso_atl_csrf" \
+	-H "Accept: application/json" -X POST "$ATL_URL/session/sso/link" >/dev/null
+sso_gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$T/sso_link")
+if [ -n "$sso_gid" ]; then pass "linking asks the central account for an approval"; else fail "linking asks the central account for an approval"; fi
+got=$(curl -s -o "$T/sso_decide" -w '%{http_code}' -b "$SSO_JAR" -H "Origin: $META_URL" \
+	-H "X-WF-CSRF: $sso_meta_csrf" --data "grant_id=$sso_gid&approve=1" "$META_URL/consent/decide")
+if [ "$got" = "200" ]; then pass "the central user approves the atlas link on MetaAccount"; else fail "the central user approves the atlas link on MetaAccount (got $got)"; fi
+
+check "a linked account opens atlas with the central session only" 200 "$ATL_URL/" -b "$META_ONLY"
+check "an atlas link does not open the channels app" 302 "$CH_URL/" -b "$META_ONLY"
+
+# Local sign-out: this app only; its marker keeps an automatic check from signing back in.
+out=$(curl -s -D - -o /dev/null -b "$SSO_JAR" -c "$SSO_JAR" -H "Origin: $ATL_URL" -H "x-wf-csrf: $sso_atl_csrf" \
+	-X POST "$ATL_URL/session/logout")
+if echo "$out" | grep -qi "wfs_atlas_sso_off="; then pass "atlas sign-out sets its own sign-out marker"; else fail "atlas sign-out sets its own sign-out marker"; fi
+check "after a local sign-out atlas does not sign back in silently" 302 "$ATL_URL/" -b "$SSO_JAR"
+check "the central session survives an atlas sign-out" 200 "$META_URL/consent" -b "$SSO_JAR"
+
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$SSO_JAR" -c "$SSO_JAR" "$ATL_URL/session/sso?next=/")
+if [ "${got%% *}" = "302" ] && [ "${got#* }" = "$ATL_URL/" ]; then pass "continue with MetaAccount returns to the app path"; else fail "continue with MetaAccount returns to the app path ($got)"; fi
+check "after continue atlas opens again with the central session" 200 "$ATL_URL/" -b "$SSO_JAR"
+
+got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=//evil.example.invalid/x")
+if [ "$got" = "$ATL_URL/" ]; then pass "a continue target off the site is replaced with the site root"; else fail "a continue target off the site is replaced with the site root (got $got)"; fi
+got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=/%5Cevil")
+if [ "$got" = "$ATL_URL/" ]; then pass "a backslash continue target is replaced with the site root"; else fail "a backslash continue target is replaced with the site root (got $got)"; fi
+
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null
 echo "composed-site checks: $fails failed"

@@ -51,6 +51,11 @@ public:
 	WebRequest& AdoptSession(const String& session_id); // site-stamped session (e.g. from login)
 	void        SetSessionData(const ValueMap& data);
 
+	// --- raw cookie helpers (task 039). The name is a stored (lowercase) cookie
+	// name; the value is never written to a URL, a log or a diagnostic entry. ---
+	String      RequestCookie(const String& name);
+	WebRequest& SetCookieValue(const String& name, const String& value, Time expires);
+
 private:
 	friend class WebEngine;
 	WebRequest(Http& http_, EngineSite& site_, const String& method_, const String& path_,
