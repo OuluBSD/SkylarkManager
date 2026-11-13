@@ -175,6 +175,16 @@ static bool PortalShellSelfTests()
 		Cerr() << "FAILED: the frame has no loading indicator or timeout fallback\n";
 		return false;
 	}
+	// The labelled list is an overlay at rest: a toggle for touch and keyboard, out of layout flow,
+	// hidden until hover, focus or the toggle opens it (task 038).
+	if(atlas_page.Find("id=\"portal-rail-toggle\" class=\"portal-rail-toggle\" aria-expanded=\"false\"") < 0
+	   || atlas_page.Find("aria-controls=\"portal-webapp-list\"") < 0 || atlas_page.Find("id=\"portal-webapp-list\" class=\"portal-panel\"") < 0
+	   || atlas_page.Find(".portal-panel { position: absolute;") < 0 || atlas_page.Find("visibility: hidden; opacity: 0;") < 0
+	   || atlas_page.Find(".portal-shell.portal-open .portal-panel") < 0 || atlas_page.Find("'Escape'") < 0
+	   || atlas_page.Find("setOpen(false);") < 0 || atlas_page.Find("'focusin'") < 0) {
+		Cerr() << "FAILED: the labelled webapp list is not a compact-rail overlay with a toggle\n";
+		return false;
+	}
 	String guest_row = RenderPortalShell("192.168.1.169:8081", "github", guest, sites);
 	if(guest_row.Find("href=\"/login?next=%2Fgithub\" target=\"portal-frame\"") < 0
 	   || guest_row.Find("data-app=\"github\" aria-current=\"page\"") < 0) {

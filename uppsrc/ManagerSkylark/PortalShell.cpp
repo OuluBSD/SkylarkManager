@@ -124,12 +124,17 @@ static String PortalShellStyles()
 	return
 		"<style>\n"
 		"  [hidden] { display: none !important; }\n"
-		"  .portal-shell { display: flex; gap: 0.75rem; height: calc(100vh - 3.5rem); min-height: 480px; padding: 0.75rem; box-sizing: border-box; }\n"
+		"  .portal-shell { position: relative; display: flex; gap: 0.75rem; height: calc(100vh - 3.5rem); min-height: 480px; padding: 0.75rem; box-sizing: border-box; }\n"
 		"  .portal-rail { width: 4rem; flex: 0 0 4rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.75rem 0; background: #171b33; border-radius: 16px; }\n"
 		"  .portal-rail-link { width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; border-radius: 12px; color: #aab3dc; text-decoration: none; }\n"
 		"  .portal-rail-link:hover { background: rgba(255,255,255,0.08); color: #ffffff; }\n"
 		"  .portal-rail-link[aria-current=\"page\"] { background: #4a4fb8; color: #ffffff; }\n"
-		"  .portal-panel { width: 10rem; flex: 0 0 10rem; display: flex; flex-direction: column; gap: 0.2rem; padding: 0.75rem 0.5rem; background: #1d2242; border-radius: 16px; overflow-y: auto; }\n"
+		"  .portal-rail-toggle { width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; background: transparent; color: #aab3dc; font: inherit; font-size: 1.25rem; cursor: pointer; }\n"
+		"  .portal-rail-toggle:hover, .portal-rail-toggle:focus-visible { background: rgba(255,255,255,0.08); color: #ffffff; }\n"
+		"  /* The labelled list is an overlay: it never takes layout space, so the frame does not resize. */\n"
+		"  .portal-panel { position: absolute; top: 0.75rem; bottom: 0.75rem; left: 5.5rem; z-index: 20; width: 10rem; display: flex; flex-direction: column; gap: 0.2rem; padding: 0.75rem 0.5rem; background: #1d2242; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); overflow-y: auto; visibility: hidden; opacity: 0; }\n"
+		"  .portal-panel::before { content: ''; position: absolute; top: 0; bottom: 0; right: 100%; width: 1.25rem; }\n"
+		"  .portal-rail:hover ~ .portal-panel, .portal-panel:hover, .portal-shell.portal-open .portal-panel { visibility: visible; opacity: 1; }\n"
 		"  .portal-group { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8b93c4; padding: 0.5rem 0.5rem 0.25rem; }\n"
 		"  .portal-link { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem; border-radius: 10px; color: #d6dcf5; text-decoration: none; font-size: 0.875rem; }\n"
 		"  .portal-link:hover { background: rgba(255,255,255,0.07); }\n"
@@ -144,7 +149,7 @@ static String PortalShellStyles()
 		"  .portal-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }\n"
 		"  .portal-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1rem; background: rgba(15,19,38,0.9); color: #d6dcf5; text-align: center; }\n"
 		"  .portal-status button, .portal-status a { padding: 0.4rem 0.9rem; border-radius: 8px; border: 0; background: #4a4fb8; color: #ffffff; text-decoration: none; cursor: pointer; font-size: 0.85rem; }\n"
-		"  @media (max-width: 640px) { .portal-panel { display: none; } .portal-rail { width: 3.25rem; flex-basis: 3.25rem; } }\n"
+		"  @media (max-width: 640px) { .portal-rail { width: 3.25rem; flex-basis: 3.25rem; } .portal-panel { left: 4.75rem; width: 9rem; } }\n"
 		"</style>\n";
 }
 
@@ -172,7 +177,23 @@ static String PortalShellScript(const String& first_src)
 		"  frame.addEventListener('load', clear);\n"
 		"  frame.addEventListener('error', function () { clearTimeout(timer); show('slow'); });\n"
 		"  retry.addEventListener('click', function () { arm(current); frame.src = current; });\n"
+		"  var shell = document.querySelector('.portal-shell');\n"
+		"  var toggle = document.getElementById('portal-rail-toggle');\n"
+		"  function setOpen(open) {\n"
+		"    shell.classList.toggle('portal-open', open);\n"
+		"    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n"
+		"    toggle.setAttribute('aria-label', open ? 'Hide webapp names' : 'Show webapp names');\n"
+		"  }\n"
+		"  toggle.addEventListener('click', function () { setOpen(!shell.classList.contains('portal-open')); });\n"
+		"  function inOverlay(node) { return !!(node && node.closest && (node.closest('.portal-rail') || node.closest('.portal-panel'))); }\n"
+		"  document.addEventListener('focusin', function (e) { setOpen(inOverlay(e.target)); });\n"
+		"  frame.addEventListener('focus', function () { setOpen(false); });\n"
+		"  window.addEventListener('blur', function () { setOpen(false); });\n"
+		"  document.addEventListener('keydown', function (e) {\n"
+		"    if (e.key === 'Escape' && shell.classList.contains('portal-open')) { toggle.focus(); setOpen(false); }\n"
+		"  });\n"
 		"  document.addEventListener('click', function (e) {\n"
+		"    if (!inOverlay(e.target)) setOpen(false);\n"
 		"    var a = e.target.closest ? e.target.closest('a[target=\"portal-frame\"]') : null;\n"
 		"    if (!a) return;\n"
 		"    var id = a.getAttribute('data-app');\n"
@@ -183,6 +204,8 @@ static String PortalShellScript(const String& first_src)
 		"      });\n"
 		"      try { history.replaceState(null, '', '/?app=' + encodeURIComponent(id)); } catch (err) {}\n"
 		"    }\n"
+		"    toggle.focus();\n"
+		"    setOpen(false);\n"
 		"    arm(a.getAttribute('href'));\n"
 		"  });\n"
 		"  arm(" + AsCString(first_src) + ");\n"
@@ -199,8 +222,10 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 			sel = i;
 
 	String rail, panel;
-	rail << "<nav class=\"portal-rail\" aria-label=\"Webapps\">\n";
-	panel << "<nav class=\"portal-panel\" aria-label=\"Webapp list\">\n"
+	rail << "<nav class=\"portal-rail\" aria-label=\"Webapps\">\n"
+	     << "<button type=\"button\" id=\"portal-rail-toggle\" class=\"portal-rail-toggle\" aria-expanded=\"false\""
+	     << " aria-controls=\"portal-webapp-list\" aria-label=\"Show webapp names\" title=\"Show webapp names\">&#9776;</button>\n";
+	panel << "<nav id=\"portal-webapp-list\" class=\"portal-panel\" aria-label=\"Webapp list\">\n"
 	      << "<div class=\"portal-group\">Webapps</div>\n";
 	for(int i = 0; i < apps.GetCount(); i++)
 		if(apps[i].group == "webapp") {
