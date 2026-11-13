@@ -399,6 +399,14 @@ if [ "$anon" = "302" ]; then pass "anonymous submit is refused"; else fail "anon
 got=$(curl -s -o "$T/meta_revoke" -w '%{http_code}' -b "$T/meta.jar" -H "Origin: $META_URL" \
 	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=0" "$META_URL/consent/decide")
 if [ "$got" = "200" ]; then pass "the meta user revokes the grant on the meta site"; else fail "the meta user revokes the grant on the meta site (got $got)"; fi
+
+# A browser form decision answers with a redirect back to the consent page, not a JSON page:
+# the browser stays on a normal page, so the next navigation keeps the session cookie (task 039).
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$T/meta.jar" -H "Origin: $META_URL" \
+	-H "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
+	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=0" "$META_URL/consent/decide")
+case "$got" in "302 "*/consent) pass "a browser decision redirects back to the consent page" ;; *) fail "a browser decision redirects back to the consent page (got $got)" ;; esac
+if curl -s -b "$T/meta.jar" "$META_URL/consent" | grep -q "Signed in as"; then pass "the session survives a browser decision"; else fail "the session survives a browser decision"; fi
 r=$(post_form "candidates/create" "title=After+revoke&summary=x&paper_id=2612.00002")
 if [ "${r%% *}" = "403" ]; then pass "taskfoundry write after revoke is refused (403)"; else fail "taskfoundry write after revoke is refused (got $r)"; fi
 loc=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$T/tf.jar" "$TF_URL/")

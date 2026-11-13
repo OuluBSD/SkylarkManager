@@ -261,16 +261,28 @@ static void MetaInboxPage(WebRequest& r)
 	HtmlPage(r, "Inbox", body);
 }
 
+// A browser form post (Accept: text/html) goes back to a page, so the next navigation is a
+// normal same-site request that carries the SameSite=Strict session cookie. A JSON reply left
+// the browser on a JSON document, and Firefox then withheld the cookie from the next page
+// (task 039). API callers keep the JSON reply.
+static void FormDone(WebRequest& r, const char *back, const Value& json, int code = 200)
+{
+	if(r.Header("accept").Find("text/html") >= 0)
+		r.Redirect(r.Site().Url(back));
+	else
+		r.Json(json, code);
+}
+
 static void MetaInboxReadAll(WebRequest& r)
 {
 	if(!r.HasUser()) {
-		r.Json(JsonOk(false, "sign in first"), 401);
+		FormDone(r, "login", JsonOk(false, "sign in first"), 401);
 		return;
 	}
 	MetaInbox *inbox = Inbox();
 	if(inbox)
 		inbox->MarkAllRead(r.User().user_id);
-	r.Json(JsonOk(true));
+	FormDone(r, "inbox", JsonOk(true));
 }
 
 static void ConsentEvent(const String& subject, const String& client_site,
@@ -286,19 +298,19 @@ static void ConsentEvent(const String& subject, const String& client_site,
 static void MetaConsentDecide(WebRequest& r)
 {
 	if(!r.HasUser()) {
-		r.Json(JsonOk(false, "sign in first"), 401);
+		FormDone(r, "login", JsonOk(false, "sign in first"), 401);
 		return;
 	}
 	String grant_id = r.Param("grant_id");
 	bool approve = r.Param("approve") == "1";
 	WebAccountGrant g;
 	if(grant_id.IsEmpty() || !Grants().GetGrant(grant_id, g)) {
-		r.Json(JsonOk(false, "unknown grant"), 404);
+		FormDone(r, "consent", JsonOk(false, "unknown grant"), 404);
 		return;
 	}
 	// The decider must be the grant's subject.
 	if(g.subject_user_id != r.User().user_id) {
-		r.Json(JsonOk(false, "not your grant"), 403);
+		FormDone(r, "consent", JsonOk(false, "not your grant"), 403);
 		return;
 	}
 	// Approve/deny only pending requests; revoke only active grants. (Deny on
@@ -311,13 +323,13 @@ static void MetaConsentDecide(WebRequest& r)
 	else
 		st = Grants().Revoke(grant_id);
 	if(!st.ok) {
-		r.Json(JsonOk(false, st.error), 409);
+		FormDone(r, "consent", JsonOk(false, st.error), 409);
 		return;
 	}
 	ConsentEvent(g.subject_user_id, g.client_site, "meta:" + r.User().username,
 	             approve ? "consent.granted"
 	                     : (g.state == "requested" ? "consent.denied" : "consent.revoked"));
-	r.Json(JsonOk(true));
+	FormDone(r, "consent", JsonOk(true));
 }
 
 void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
