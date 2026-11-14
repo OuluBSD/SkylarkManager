@@ -193,17 +193,60 @@ AtlasImportResult AtlasSeedMap(const String& data_root, const String& key, const
 	return out;
 }
 
-// The roadmap file (JSON): the family's versions in order, and each element's first version. Every element of
-// the seed must be named; "from" is the version it first appears in, and "note" is kept as a note event.
+// The roadmap file, format 2, written by scripts/roadmap.py in the BrownBear repository:
 //
-//   {"versions": ["0.0.1", "0.0.2", "1.0.0"],
-//    "elements": {"MainComputer": {"from": "0.0.1", "note": "desktop app root"}, ...}}
+//   {"format": 2,
+//    "versions": [{"label": "0.0.1", "requires": []}, ..., {"label": "1.0.0", "requires": ["done:Leaf"]}],
+//    "rules": {"initial": [...], "atoms": [{"name", "text", "gate"}],
+//              "actions": [{"name", "text", "requires", "effects"}],
+//              "constraints": [{"id", "text", "when", "must", "from_vid", "to_vid"}]},
+//    "events": [{"id", "at", "version", "type", "element" | "task", "name", "stage", "action", "text",
+//                "task_type", "title", "target", "link"}]}
 //
-// The last version is the head, which the project's version names. An element's creation at "from" makes it
-// present from that version onwards; a parent block may not start after its children. Everything is checked
-// before anything is written: the events are the replay's, validated against the head.
-static bool ReadRoadmap(const String& text, const String& head_label, const AtlasMap& head, AtlasFamily& f,
-                        Vector<AtlasEvent>& events, String& error)
+// Everything is checked before anything is written. The versions ascend and the last one is the project's version;
+// every event names a known version, element and task; each event is valid; and the replay of the rules over the
+// events reports no error and no warning. A roadmap that leaves a dependency out, or orders it wrongly, is refused
+// with the replay's messages, so a family that exists has been replayed clean.
+static bool ReadStrings(const ValueMap& m, const char *key, Vector<String>& out, String& error, const String& where)
+{
+	out.Clear();
+	Value v = m[key];
+	if(v.IsNull())
+		return true;
+	if(!v.Is<ValueArray>()) {
+		error = where + ": " + key + " must be a list";
+		return false;
+	}
+	ValueArray a = v;
+	for(int i = 0; i < a.GetCount(); i++) {
+		Value x = a[i];
+		if(!x.Is<String>()) {
+			error = where + ": " + key + " must hold strings";
+			return false;
+		}
+		out.Add((String)x);
+	}
+	return true;
+}
+
+static int FindVersionLabel(const Vector<String>& labels, const String& label)
+{
+	for(int i = 0; i < labels.GetCount(); i++)
+		if(labels[i] == label)
+			return i;
+	return -1;
+}
+
+static int FindHeadElement(const AtlasMap& head, const String& name)
+{
+	for(int i = 0; i < head.elements.GetCount(); i++)
+		if(head.elements[i].name == name)
+			return i;
+	return -1;
+}
+
+static bool ReadRoadmap(const String& text, const String& head_label, const AtlasMap& head,
+                        AtlasFamily& f, AtlasRules& rules, Vector<AtlasEvent>& events, String& error)
 {
 	Value root;
 	try {
@@ -218,24 +261,33 @@ static bool ReadRoadmap(const String& text, const String& head_label, const Atla
 		return false;
 	}
 	ValueMap top = root;
-	Value vl = top.Get("versions");
-	if(!vl.Is<ValueArray>() || ValueArray(vl).GetCount() == 0) {
-		error = "versions must be a non-empty list of labels";
+	Value format = top["format"];
+	if(!IsNumber(format) || (int)format != 2) {
+		error = "must be format 2 (regenerate it with scripts/roadmap.py)";
 		return false;
 	}
-	ValueArray labels_json = vl;
+
+	// Versions: ascending, the contracts listed, and the last one is the project's version.
+	Value vl = top["versions"];
+	if(!vl.Is<ValueArray>() || ValueArray(vl).GetCount() == 0) {
+		error = "versions must be a non-empty list";
+		return false;
+	}
+	ValueArray vers = vl;
 	Vector<String> labels;
+	f.versions.Clear();
 	int last_code = -1;
-	for(int i = 0; i < labels_json.GetCount(); i++) {
-		Value x = labels_json[i];
-		if(!x.Is<String>()) {
-			error = "versions must be strings";
+	for(int i = 0; i < vers.GetCount(); i++) {
+		Value x = vers[i];
+		if(!x.Is<ValueMap>()) {
+			error = "each version must be an object";
 			return false;
 		}
-		String label = (String)x;
+		ValueMap vm = x;
+		String label = JsonString(vm, "label");
 		int code = AtlasVersionCode(label);
 		if(code == ATLAS_VERSION_UNSET) {
-			error = "version " + label + " must read v<a.b.c>";
+			error = "version " + label + " must read a.b.c";
 			return false;
 		}
 		if(code <= last_code) {
@@ -243,103 +295,160 @@ static bool ReadRoadmap(const String& text, const String& head_label, const Atla
 			return false;
 		}
 		last_code = code;
+		AtlasVersion v;
+		v.vid = "v" + AsString(i + 1);
+		v.code = code;
+		if(!ReadStrings(vm, "requires", v.requires, error, "version " + label))
+			return false;
 		labels.Add(label);
+		f.versions.Add(pick(v));
 	}
 	if(AtlasVersionCode(labels.Top()) != AtlasVersionCode(head_label)) {
 		error = "the last version must be the project's version " + head_label;
 		return false;
 	}
-	Value el_json = top.Get("elements");
-	if(!el_json.Is<ValueMap>()) {
-		error = "elements must be an object keyed by element name";
+
+	// Rules: the atoms, the actions and the constraints the replay checks.
+	Value rv = top["rules"];
+	if(!rv.Is<ValueMap>()) {
+		error = "rules must be an object";
 		return false;
 	}
-	ValueMap elements_map = el_json;
-	auto LabelIndex = [&](const String& label) {
-		for(int i = 0; i < labels.GetCount(); i++)
-			if(labels[i] == label)
-				return i;
-		return -1;
-	};
-	// Every name in the file is an element of the head, and every element is named.
-	for(int i = 0; i < elements_map.GetCount(); i++) {
-		Value k = elements_map.GetKey(i);
-		String name = k.Is<String>() ? String((String)k) : String();
-		bool known = false;
-		for(const AtlasElement& e : head.elements)
-			if(e.name == name)
-				known = true;
-		if(!known) {
-			error = "element " + name + " is not in the goal map";
-			return false;
-		}
+	ValueMap rm = rv;
+	if(!ReadStrings(rm, "initial", rules.initial, error, "rules"))
+		return false;
+	rules.atoms.Clear();
+	rules.actions.Clear();
+	rules.constraints.Clear();
+	Value av = rm["atoms"];
+	Value acv = rm["actions"];
+	Value cv = rm["constraints"];
+	if(!av.Is<ValueArray>() || !acv.Is<ValueArray>() || !cv.Is<ValueArray>()) {
+		error = "rules needs the lists atoms, actions and constraints";
+		return false;
 	}
-	Vector<int> first;   // label index per head element
-	for(const AtlasElement& e : head.elements) {
-		Value entry = elements_map.Get(e.name);
-		if(!entry.Is<ValueMap>()) {
-			error = "element " + e.name + " has no entry";
-			return false;
-		}
-		ValueMap em = entry;
-		String from = JsonString(em, "from");
-		int idx = LabelIndex(from);
-		if(idx < 0) {
-			error = "element " + e.name + " names an unknown version: " + from;
-			return false;
-		}
-		first.Add(idx);
+	ValueArray atoms = av;
+	for(int i = 0; i < atoms.GetCount(); i++) {
+		ValueMap am = atoms[i];
+		AtlasAtomDef d;
+		d.name = JsonString(am, "name");
+		d.text = JsonString(am, "text");
+		Value g = am["gate"];
+		d.gate = !g.IsNull() && (bool)g;
+		rules.atoms.Add(pick(d));
 	}
-	for(int i = 0; i < head.elements.GetCount(); i++) {
-		const AtlasElement& e = head.elements[i];
-		int parent = head.FindElement(e.parent);
-		if(parent >= 0 && first[parent] > first[i]) {
-			error = "block " + head.elements[parent].name + " starts after its element " + e.name;
+	ValueArray actions = acv;
+	for(int i = 0; i < actions.GetCount(); i++) {
+		ValueMap xm = actions[i];
+		AtlasAction a;
+		a.name = JsonString(xm, "name");
+		a.text = JsonString(xm, "text");
+		if(!ReadStrings(xm, "requires", a.requires, error, "action " + a.name) ||
+		   !ReadStrings(xm, "effects", a.effects, error, "action " + a.name))
 			return false;
-		}
+		rules.actions.Add(pick(a));
+	}
+	ValueArray constraints = cv;
+	for(int i = 0; i < constraints.GetCount(); i++) {
+		ValueMap xm = constraints[i];
+		AtlasConstraint c;
+		c.id = JsonString(xm, "id");
+		c.text = JsonString(xm, "text");
+		c.from_vid = JsonString(xm, "from_vid");
+		c.to_vid = JsonString(xm, "to_vid");
+		if(!ReadStrings(xm, "when", c.when, error, "constraint " + c.id) ||
+		   !ReadStrings(xm, "must", c.must, error, "constraint " + c.id))
+			return false;
+		rules.constraints.Add(pick(c));
 	}
 
-	f.versions.Clear();
-	for(int i = 0; i < labels.GetCount(); i++) {
-		AtlasVersion v;
-		v.vid = "v" + AsString(i + 1);
-		v.code = AtlasVersionCode(labels[i]);
-		f.versions.Add(pick(v));
+	// Events: each names a known version and element (or task); targets and links are resolved to ids here.
+	Value evv = top["events"];
+	if(!evv.Is<ValueArray>()) {
+		error = "events must be a list";
+		return false;
 	}
+	ValueArray evs = evv;
 	events.Clear();
-	for(int i = 0; i < head.elements.GetCount(); i++) {
-		const AtlasElement& e = head.elements[i];
-		AtlasEvent created;
-		created.id = "ev-" + Format64Hex((int64)(Random64() & 0x7fffffffffffffffULL));
-		created.at = AtlasNowIso();
-		created.actor = "roadmap-import";
-		created.vid = f.versions[first[i]].vid;
-		created.subject_kind = "element";
-		created.subject_id = e.id;
-		created.type = "created";
-		created.name = e.name;
-		events.Add(pick(created));
-		String note = JsonString((ValueMap)elements_map.Get(e.name), "note");
-		if(note.GetCount()) {
-			AtlasEvent n;
-			n.id = "ev-" + Format64Hex((int64)(Random64() & 0x7fffffffffffffffULL));
-			n.at = AtlasNowIso();
-			n.actor = "roadmap-import";
-			n.vid = f.versions[first[i]].vid;
-			n.subject_kind = "element";
-			n.subject_id = e.id;
-			n.type = "note";
-			n.text = note;
-			events.Add(pick(n));
+	for(int i = 0; i < evs.GetCount(); i++) {
+		Value x = evs[i];
+		if(!x.Is<ValueMap>()) {
+			error = "each event must be an object";
+			return false;
 		}
+		ValueMap em = x;
+		String id = JsonString(em, "id");
+		String version = JsonString(em, "version");
+		int vi = FindVersionLabel(labels, version);
+		if(vi < 0) {
+			error = "event " + id + " names an unknown version " + version;
+			return false;
+		}
+		AtlasEvent e;
+		e.id = id;
+		e.at = JsonString(em, "at");
+		e.actor = "roadmap";
+		e.vid = f.versions[vi].vid;
+		String type = JsonString(em, "type");
+		if(type == "task") {
+			e.subject_kind = "task";
+			e.subject_id = JsonString(em, "task");
+			e.type = JsonString(em, "task_type");
+			if(e.type == "proposed") {
+				int ti = FindVersionLabel(labels, JsonString(em, "target"));
+				if(ti < 0) {
+					error = "task " + e.subject_id + " targets an unknown version";
+					return false;
+				}
+				e.name = JsonString(em, "title");
+				e.target = f.versions[ti].vid;
+				String link = JsonString(em, "link");
+				int hi = FindHeadElement(head, link);
+				if(hi < 0) {
+					error = "task " + e.subject_id + " links to " + link + ", which is not in the goal map";
+					return false;
+				}
+				e.link = "element:" + head.elements[hi].id;
+				e.text = JsonString(em, "text");
+			}
+		}
+		else {
+			String element = JsonString(em, "element");
+			int hi = FindHeadElement(head, element);
+			if(hi < 0) {
+				error = "event " + id + " names " + element + ", which is not in the goal map";
+				return false;
+			}
+			e.subject_kind = "element";
+			e.subject_id = head.elements[hi].id;
+			e.type = type;
+			e.name = JsonString(em, "name");
+			e.stage = JsonString(em, "stage");
+			e.action = JsonString(em, "action");
+			e.text = JsonString(em, "text");
+		}
+		events.Add(pick(e));
 	}
+
+	// Each event is valid on its own, and the replay over the whole family is clean: no error, no warning.
 	for(const AtlasEvent& e : events) {
 		AtlasCheck check;
 		AtlasValidateEvent(e, f, head, check);
 		if(!check.Ok()) {
-			error = Join(check.errors, "; ");
+			error = "event " + e.id + ": " + Join(check.errors, "; ");
 			return false;
 		}
+	}
+	AtlasSortEvents(events, f);
+	Vector<AtlasRoadmapMessage> messages;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	Vector<String> findings;
+	for(const AtlasRoadmapMessage& msg : messages)
+		findings.Add(msg.severity + " " + msg.vid + " " + msg.rule + ": " + msg.text);
+	if(findings.GetCount()) {
+		error = AsString(findings.GetCount()) + " finding(s) from the replay; the first: " + findings[0];
+		return false;
 	}
 	return true;
 }
@@ -351,7 +460,7 @@ AtlasImportResult AtlasImportProject(const String& data_root, const AtlasProject
 	if(AtlasLoadFamily(data_root, p.name, existing, frev, err))
 		return Fail(409, "the family " + p.name + " already exists");
 
-	// The seed and the roadmap are read and checked before anything is written, so a bad file leaves nothing behind.
+	// The seed, the roadmap and its replay are checked before anything is written, so a bad file leaves nothing behind.
 	String path = AppendFileName(p.repo, p.seed);
 	if(!FileExists(path))
 		return Fail(404, "seed not found: " + path);
@@ -366,12 +475,13 @@ AtlasImportResult AtlasImportProject(const String& data_root, const AtlasProject
 		return Fail(400, Join(check.errors, "\n"));
 
 	AtlasFamily f;
+	AtlasRules rules;
 	Vector<AtlasEvent> events;
 	if(p.roadmap.GetCount()) {
 		String roadmap_path = AppendFileName(p.repo, p.roadmap);
 		if(!FileExists(roadmap_path))
 			return Fail(404, "roadmap not found: " + roadmap_path);
-		if(!ReadRoadmap(LoadFile(roadmap_path), p.version, m, f, events, err))
+		if(!ReadRoadmap(LoadFile(roadmap_path), p.version, m, f, rules, events, err))
 			return Fail(400, "roadmap " + p.roadmap + ": " + err);
 	}
 	else {
@@ -388,8 +498,10 @@ AtlasImportResult AtlasImportProject(const String& data_root, const AtlasProject
 	out.roads = m.roads.GetCount();
 
 	f.head_key = out.key;
-	String rev;
+	String rev, rules_rev;
 	if(!AtlasCreateFamily(data_root, p.name, f, rev, err))
+		return Fail(500, err);
+	if(!AtlasSaveRules(data_root, p.name, rules, String(), rules_rev, err))
 		return Fail(500, err);
 	for(const AtlasEvent& e : events)
 		if(!AtlasPutEvent(data_root, p.name, e, err))

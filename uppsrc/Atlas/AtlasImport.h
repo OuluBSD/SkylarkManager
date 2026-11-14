@@ -11,9 +11,11 @@ NAMESPACE_UPP
 //   {"projects": [{"name": "pkr", "repo": "/home/me/BrownBear", "seed": "atlas/pkr/goal-map.seed",
 //                  "version": "v1.0.0", "title": "PKR goal map", "level": "private", "editors": ["alice"]}]}
 //
-// roadmap, when given, is a JSON file naming each element's first version: the family's versions and its
-// history are written from it, as events on the head map. level is the visibility of the imported map (public, protected or private); editors may edit the project's
-// maps without the admin role. The file is read on each use, so edits take effect without a restart.
+// roadmap, when given, is a format 2 JSON file (scripts/roadmap.py in the BrownBear repository writes it): versions
+// with their contracts, the rules (atoms, actions, constraints) and the events that place each element. The import
+// replays all of it and refuses on any finding, so a family that exists has been checked clean. level is the
+// visibility of the imported map (public, protected or private); editors may edit the project's maps without the
+// admin role. The file is read on each use, so edits take effect without a restart.
 struct AtlasProject : Moveable<AtlasProject> {
 	String         name;
 	String         repo;

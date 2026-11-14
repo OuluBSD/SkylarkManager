@@ -40,7 +40,7 @@ the file is missing, there are no projects.
 | `version` | yes | The version of the imported map, `v<a.b.c>`. Later versions are added in Atlas. |
 | `title` | no | The map's title. Defaults to `name`. |
 | `level` | no | `public`, `protected` or `private`. Default `private`. Applied when the import creates the map. |
-| `roadmap` | no | A JSON file, relative to `repo`, that gives the family's versions and each element's first version. Without it the import makes one version, the head. `..` and absolute paths are refused. See below. |
+| `roadmap` | no | A format 2 JSON file, relative to `repo`, that gives the family's versions, its rules and the history of each element. Without it the import makes one version, the head. `..` and absolute paths are refused. See below. |
 | `editors` | no | Account names that may edit this project's maps without the admin role. Matched without case. |
 
 A bad entry fails the whole file, and the project routes answer with the
@@ -77,17 +77,29 @@ repository`).
    - The seed in `atlas/managerskylark/map.seed` is a working example.
 2. **Register the project.** Add an entry to `projects.json` as above. Set
    `level` and `editors`. Leave the `repo` path absolute.
-   With a `roadmap`, the seed is the head topology and the roadmap is the history:
+   With a `roadmap`, the seed is the head topology and the roadmap is the history
+   and the rules. It is format 2, and the BrownBear repository writes it from
+   `atlas/brownbear/code-map.json` with `scripts/roadmap.py`:
 
-       {"versions": ["0.0.1", "0.0.2", "1.0.0"],
-        "elements": {"MainComputer": {"from": "0.0.1", "note": "desktop app root"},
-                     "Leaf": {"from": "0.0.2"}}}
+       {"format": 2,
+        "versions": [{"label": "0.0.1", "requires": []},
+                     {"label": "1.0.0", "requires": ["done:Base", "done:Next"]}],
+        "rules": {"initial": ["built:CFR"],
+                  "atoms": [{"name": "built:CFR", "text": "", "gate": true}],
+                  "actions": [{"name": "Base", "text": "", "requires": ["built:CFR"],
+                               "effects": ["done:Base"]}],
+                  "constraints": [{"id": "needs:Next:Base", "text": "", "when": ["stage:Next:implementation"],
+                                   "must": ["done:Base"], "from_vid": "", "to_vid": ""}]},
+        "events": [{"id": "ev-1", "at": "2026-11-01T00:01:00Z", "version": "0.0.1",
+                    "type": "created", "element": "Base", "name": "Base"}]}
 
-   Every element of the seed must be named, with `from`, the version it first
-   appears in. `versions` ascend, and the last one must be the project's
-   `version`. A block may not start after an element it contains. `note` is
-   optional and is kept as a note event. The import checks all of this before it
-   writes anything, so a bad roadmap leaves no family and no map behind.
+   `versions` ascend and the last one is the project's `version`. Each version
+   can require atoms (its contract). `rules` holds the atoms, the actions that set
+   them, and the constraints that must hold. `events` place each element: a
+   `created` event, then `stage` events (`planned`, `implementation_research`,
+   `implementation`, `trials`, `merge_to_master`) and a `note` with the action
+   that runs. The import replays the whole history and refuses it on any error
+   or warning, so a bad roadmap leaves no family and no map behind.
 3. **Import it.** A signed-in admin or editor runs, either from the Projects table
    on `/atlas` (an Import button, shown only to the people who may import the
    project) or with the account's session
@@ -116,10 +128,9 @@ family and its maps must be removed first, which only an operator can do.
 | `editing needs the admin role, or to be an editor of this map's project` (403) | The account is neither an admin nor listed under `editors`. |
 | `seed import needs an empty map` | The map already has elements; import starts from a new version. |
 | `projects file: ...` | The JSON is malformed or an entry is invalid; the message names the field. |
-| `roadmap <path>: versions must ascend ...` | The roadmap's versions are out of order or repeat. |
-| `roadmap <path>: element <name> is not in the goal map` | The roadmap names an element the seed does not have. |
-| `roadmap <path>: element <name> has no entry` | An element of the seed is missing from the roadmap. |
-| `roadmap <path>: block <name> starts after its element <name>` | A block's `from` is later than one of its elements. |
+| `roadmap <path>: must be format 2 ...` | The roadmap is an older format; regenerate it. |
+| `roadmap <path>: versions must ascend without repeats; ...` | The versions are out of order, repeat, or the last one is not the project's version. |
+| `roadmap <path>: N finding(s) from the replay; the first: ...` | The replay refused the history. The first finding names the version and element, for example `needs artifact:x on entry` (a contract that nothing makes before its version) or `needs LlmPlayer first` (an action that runs before what it needs). |
 
 ## Demo setup
 

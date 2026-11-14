@@ -289,98 +289,128 @@ static void ProjectChecks(const String& scratch)
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("not a JSON object") >= 0, "a projects file must be a JSON object");
 }
 
-// A roadmap import writes the family's versions and the element events, or nothing: every refusal leaves no family and no map.
-static void RoadmapChecks(const String& scratch)
+// Roadmap format 2: a small family with rules, contracts and events. A good one imports; each defect is refused by the
+// replay and leaves no family and no map behind.
+static String RmEvent(int n, const char *version, const char *type, const char *element, const char *more = "")
 {
-	String repo = AppendFileName(scratch, "roadmap-repo");
+	return Format("{\"id\":\"ev-%d\",\"at\":\"2026-11-01T00:%02d:00Z\",\"version\":\"%s\",\"type\":\"%s\",\"element\":\"%s\"%s}",
+	              n, n, version, type, element, more);
+}
+
+// One element's events in one version: created, planned, implementation research, the action's note, implementation,
+// trials, merge.
+static String RmLadder(int& n, const char *version, const char *element, const char *action)
+{
+	String out;
+	out << RmEvent(n++, version, "created", element, Format(",\"name\":\"%s\"", element));
+	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"planned\"");
+	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"implementation_research\"");
+	out << "," << RmEvent(n++, version, "note", element, Format(",\"action\":\"%s\",\"text\":\"done\"", action));
+	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"implementation\"");
+	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"trials\"");
+	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"merge_to_master\"");
+	return out;
+}
+
+// Base builds on CFR and makes artifact x; Next needs x; Top needs Next. Version 0.0.2 requires artifact x. Each
+// option breaks the model in one place.
+static String RmRoadmap(const char *base_effects, const char *next_requires, bool top_first = false,
+                        const char *head = "1.0.0", const char *top_element = "Top")
+{
+	int n = 1;
+	String events;
+	events << RmLadder(n, "0.0.1", "Base", "Base");
+	if(top_first) {
+		events << "," << RmLadder(n, "0.0.2", top_element, top_element);
+		events << "," << RmLadder(n, "0.0.2", "Next", "Next");
+	}
+	else {
+		events << "," << RmLadder(n, "0.0.2", "Next", "Next");
+		events << "," << RmLadder(n, "0.0.2", top_element, top_element);
+	}
+	String t;
+	t << "{\"format\":2,"
+	  << "\"versions\":[{\"label\":\"0.0.1\",\"requires\":[]},{\"label\":\"0.0.2\",\"requires\":[\"artifact:x\"]},"
+	  << "{\"label\":\"" << head << "\",\"requires\":[\"done:Base\",\"done:Next\",\"done:Top\"]}],"
+	  << "\"rules\":{\"initial\":[\"built:CFR\"],"
+	  << "\"atoms\":["
+	  << "{\"name\":\"built:CFR\",\"text\":\"package\",\"gate\":true},"
+	  << "{\"name\":\"artifact:x\",\"text\":\"x\",\"gate\":true},"
+	  << "{\"name\":\"done:Base\",\"text\":\"\",\"gate\":true},{\"name\":\"done:Next\",\"text\":\"\",\"gate\":true},"
+	  << "{\"name\":\"done:Top\",\"text\":\"\",\"gate\":true}],"
+	  << "\"actions\":["
+	  << "{\"name\":\"Base\",\"text\":\"\",\"requires\":[\"built:CFR\"],\"effects\":[" << base_effects << "]},"
+	  << "{\"name\":\"Next\",\"text\":\"\",\"requires\":[" << next_requires << "],\"effects\":[\"done:Next\"]},"
+	  << "{\"name\":\"Top\",\"text\":\"\",\"requires\":[\"done:Next\"],\"effects\":[\"done:Top\"]}],"
+	  << "\"constraints\":[{\"id\":\"needs:Next:Base\",\"text\":\"\",\"when\":[\"stage:Next:implementation\"],"
+	  << "\"must\":[\"done:Base\"],\"from_vid\":\"\",\"to_vid\":\"\"}]},"
+	  << "\"events\":[" << events << "]}";
+	return t;
+}
+
+// Writes the seed and the roadmap for one case, then imports the project into the data root under the case's name.
+static AtlasImportResult RmImport(const String& scratch, const char *name, const String& roadmap_text)
+{
+	String repo = AppendFileName(scratch, Format("rm-repo-%s", name));
 	String data = AppendFileName(scratch, "roadmap-data");
 	RealizeDirectory(AppendFileName(repo, "atlas"));
 	RealizeDirectory(data);
 	SaveFile(AppendFileName(repo, "atlas/map.seed"),
-	         "Plant | block | active | the root\n"
-	         "  Leaf | place | planned | a child\n"
-	         "Other | place | planned | a second root\n");
+	         "Base | place | planned | first\nNext | place | planned | second\nTop | place | planned | third\n");
+	SaveFile(AppendFileName(repo, "atlas/roadmap.json"), roadmap_text);
+	AtlasProject p;
+	p.name = name;
+	p.repo = repo;
+	p.seed = "atlas/map.seed";
+	p.roadmap = "atlas/roadmap.json";
+	p.version = "v1.0.0";
+	p.title = name;
+	p.level = "private";
+	return AtlasImportProject(data, p);
+}
 
-	auto Import = [&](const char *name, const char *roadmap_text, const char *version, AtlasImportResult& out) {
-		SaveFile(AppendFileName(repo, "atlas/roadmap.json"), roadmap_text);
-		AtlasProject p;
-		p.name = name;
-		p.repo = repo;
-		p.seed = "atlas/map.seed";
-		p.roadmap = "atlas/roadmap.json";
-		p.version = version;
-		p.title = name;
-		p.level = "private";
-		out = AtlasImportProject(data, p);
-	};
-	auto Nothing = [&](const char *name, const char *version) {
-		AtlasFamily f;
-		String rev, err;
-		AtlasMap m;
-		String mrev;
-		return !AtlasLoadFamily(data, name, f, rev, err) && !AtlasLoadMap(data, AtlasDocKey(name, version), m, mrev, err);
-	};
+// True when a refused import left neither a family nor its head map behind.
+static bool RmNothingStored(const String& scratch, const char *name)
+{
+	String data = AppendFileName(scratch, "roadmap-data");
+	AtlasFamily f;
+	AtlasMap m;
+	String rev, err;
+	return !AtlasLoadFamily(data, name, f, rev, err) && !AtlasLoadMap(data, AtlasDocKey(name, "v1.0.0"), m, rev, err);
+}
 
-	AtlasImportResult ok;
-	Import("rm-good", "{\"versions\": [\"0.0.1\", \"0.0.2\", \"1.0.0\"],"
-	       " \"elements\": {\"Plant\": {\"from\": \"0.0.1\", \"note\": \"the root exists first\"},"
-	       " \"Leaf\": {\"from\": \"0.0.2\"}, \"Other\": {\"from\": \"1.0.0\", \"note\": \"added last\"}}}",
-	       "v1.0.0", ok);
+static void RmRefused(const String& scratch, const char *name, const String& text, const char *fragment)
+{
+	AtlasImportResult r = RmImport(scratch, name, text);
+	Check(!r.Ok() && r.error.Find(fragment) >= 0 && RmNothingStored(scratch, name),
+	      Format("a roadmap with a defect (%s) is refused with %s and stores nothing", name, fragment));
+}
+
+static void RoadmapChecks(const String& scratch)
+{
+	const char *ok_base = "\"done:Base\",\"artifact:x\"";
+	AtlasImportResult good = RmImport(scratch, "rm-good", RmRoadmap(ok_base, "\"artifact:x\""));
 	AtlasFamily fam;
-	String frev, ferr;
-	AtlasLoadFamily(data, "rm-good", fam, frev, ferr);
+	AtlasRules rules;
+	String rev, err, data = AppendFileName(scratch, "roadmap-data");
 	Vector<AtlasEvent> evs;
-	AtlasLoadEvents(data, "rm-good", evs, ferr);
-	Check(ok.Ok() && ok.elements == 3 && fam.versions.GetCount() == 3 && evs.GetCount() == 5,
-	      "a roadmap imports three versions, one created event per element and one note per noted element");
-	Check(ok.Ok() && fam.Head() == 2 && AtlasVersionLabel(fam.versions[0].code) == "0.0.1" && AtlasVersionLabel(fam.versions[2].code) == "1.0.0",
-	      "the roadmap's versions run from 0.0.1 to the head");
+	AtlasLoadFamily(data, "rm-good", fam, rev, err);
+	AtlasLoadRules(data, "rm-good", rules, rev, err);
+	AtlasLoadEvents(data, "rm-good", evs, err);
+	Check(good.Ok() && fam.versions.GetCount() == 3 && AtlasVersionLabel(fam.versions[1].code) == "0.0.2",
+	      "a format 2 roadmap imports its versions in order");
+	Check(good.Ok() && fam.versions[1].requires.GetCount() == 1 && fam.versions[1].requires[0] == "artifact:x",
+	      "a version keeps its contract");
+	Check(good.Ok() && rules.atoms.GetCount() == 5 && rules.actions.GetCount() == 3 && rules.constraints.GetCount() == 1,
+	      "the rules are stored with the family: atoms, actions and constraints");
+	Check(good.Ok() && evs.GetCount() == 3 * 7, "each element writes its created, stage and note events");
 
-	AtlasImportResult bad;
-	Import("rm-unknown-name", "{\"versions\": [\"0.0.1\", \"1.0.0\"], \"elements\": {\"Plant\": {\"from\": \"0.0.1\"},"
-	       " \"Leaf\": {\"from\": \"0.0.1\"}, \"Other\": {\"from\": \"1.0.0\"}, \"Ghost\": {\"from\": \"0.0.1\"}}}", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("Ghost") >= 0 && Nothing("rm-unknown-name", "v1.0.0"),
-	      "a roadmap name that is not in the goal map is refused and writes nothing");
-
-	Import("rm-missing", "{\"versions\": [\"0.0.1\", \"1.0.0\"], \"elements\": {\"Plant\": {\"from\": \"0.0.1\"},"
-	       " \"Leaf\": {\"from\": \"0.0.1\"}}}", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("Other") >= 0 && Nothing("rm-missing", "v1.0.0"),
-	      "an element the roadmap leaves out is refused and writes nothing");
-
-	Import("rm-parent-late", "{\"versions\": [\"0.0.1\", \"1.0.0\"], \"elements\": {\"Plant\": {\"from\": \"1.0.0\"},"
-	       " \"Leaf\": {\"from\": \"0.0.1\"}, \"Other\": {\"from\": \"0.0.1\"}}}", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("Plant") >= 0 && Nothing("rm-parent-late", "v1.0.0"),
-	      "a block that starts after its child is refused and writes nothing");
-
-	Import("rm-not-ascending", "{\"versions\": [\"0.0.2\", \"0.0.1\", \"1.0.0\"], \"elements\": {\"Plant\": {\"from\": \"0.0.1\"},"
-	       " \"Leaf\": {\"from\": \"0.0.1\"}, \"Other\": {\"from\": \"0.0.1\"}}}", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("ascend") >= 0 && Nothing("rm-not-ascending", "v1.0.0"),
-	      "versions out of order are refused and write nothing");
-
-	Import("rm-wrong-head", "{\"versions\": [\"0.0.1\", \"0.0.2\"], \"elements\": {\"Plant\": {\"from\": \"0.0.1\"},"
-	       " \"Leaf\": {\"from\": \"0.0.1\"}, \"Other\": {\"from\": \"0.0.1\"}}}", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("1.0.0") >= 0 && Nothing("rm-wrong-head", "v1.0.0"),
-	      "a roadmap whose last version is not the project version is refused");
-
-	Import("rm-bad-json", "{\"versions\": [", "v1.0.0", bad);
-	Check(!bad.Ok() && bad.error.Find("JSON") >= 0 && Nothing("rm-bad-json", "v1.0.0"),
-	      "a roadmap that is not JSON is refused and writes nothing");
-
-	SaveFile(AppendFileName(repo, "atlas/roadmap.json"), "{}");
-	AtlasProject escape;
-	escape.name = "rm-escape";
-	escape.repo = repo;
-	escape.seed = "atlas/map.seed";
-	escape.version = "v1.0.0";
-	escape.level = "private";
-	escape.roadmap = "../roadmap.json";
-	String perr;
-	Vector<AtlasProject> none;
-	SaveFile(AppendFileName(data, "projects.json"),
-	         "{\"projects\": [{\"name\": \"rm-escape\", \"repo\": \"" + repo + "\", \"seed\": \"atlas/map.seed\","
-	         " \"version\": \"v1.0.0\", \"roadmap\": \"../roadmap.json\"}]}");
-	Check(!AtlasLoadProjects(data, none, perr) && perr.Find("roadmap") >= 0,
-	      "a roadmap path outside the repository is refused when the registry is read");
+	// Each defect is refused with its message, and nothing is stored.
+	RmRefused(scratch, "rm-no-producer", RmRoadmap("\"built:CFR\"", "\"artifact:x\""), "needs artifact:x on entry");
+	RmRefused(scratch, "rm-out-of-order", RmRoadmap(ok_base, "\"artifact:x\"", true), "done:Next");
+	RmRefused(scratch, "rm-undeclared", RmRoadmap(ok_base, "\"artifact:x\",\"built:Missing\""), "needs built:Missing first");
+	RmRefused(scratch, "rm-wrong-head", RmRoadmap(ok_base, "\"artifact:x\"", false, "0.0.2"), "versions must ascend");
+	RmRefused(scratch, "rm-unknown-element", RmRoadmap(ok_base, "\"artifact:x\"", false, "1.0.0", "Missing"), "Missing");
 }
 
 static void StoreChecks(const String& scratch)
