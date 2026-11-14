@@ -124,13 +124,13 @@ pass "composed server up on $MAIN, $PH_PORT, $SC_PORT, $TF_PORT, $META_PORT, $CH
 # the Host it sends, so the session cookie is passed by hand.
 check "portal shell is public" 200 "$MAIN_URL/"
 curl -s "$MAIN_URL/" -o "$T/shell_guest.html"
-# Task 036: Atlas leads the list and is the default frame; the meta-nav is two link rails
-# that target the frame (no tree widget), with a loading and timeout fallback.
+# Task 036: Atlas leads the list and is the default frame; the meta-nav is one link rail
+# that targets the frame (no tree widget), with a loading and timeout fallback.
 if grep -q 'class="portal-frame"' "$T/shell_guest.html" && grep -q "src=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_guest.html" \
    && grep -q 'target="portal-frame"' "$T/shell_guest.html" && grep -q 'class="portal-rail"' "$T/shell_guest.html" \
    && grep -q 'data-app="atlas" aria-current="page"' "$T/shell_guest.html" && grep -q 'This webapp is taking a while' "$T/shell_guest.html" \
    && ! grep -q 'class="wf-tree' "$T/shell_guest.html"; then
-	pass "portal shell: Atlas first, two-rail meta-nav targeting the frame, fallback present, no tree"; else fail "portal shell: Atlas first, two-rail meta-nav targeting the frame, fallback present, no tree"; fi
+	pass "portal shell: Atlas first, one-rail meta-nav targeting the frame, fallback present, no tree"; else fail "portal shell: Atlas first, one-rail meta-nav targeting the frame, fallback present, no tree"; fi
 # Public-read matrix (task 036): Science reads are public by contract, its writes are not;
 # every other composed root and every stock hub stays gated with the sign-in as its answer.
 check "science home is public" 200 "$SC_URL/"
