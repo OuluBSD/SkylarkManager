@@ -52,6 +52,7 @@ struct WebsiteShellLink : Moveable<WebsiteShellLink> {
 	String href;
 	String icon;      // shell icon id: home, map, list, clock, sliders, check, alert; empty for none
 	bool   active = false;
+	bool   separator_before = false;   // draws a rule above this link, to group the nav
 };
 
 struct WebsiteShell : Moveable<WebsiteShell> {
