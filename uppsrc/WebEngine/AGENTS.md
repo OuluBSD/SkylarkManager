@@ -79,39 +79,107 @@ http commands with wildcard-free paths render as runnable forms; wildcard
 paths and broker commands are documentation rows ("use skylarkctl"). Sites
 opt in by calling the installer.
 
-## Content visibility policy (task 053)
+## Website templates and theme preferences (task 055)
 
-`ContentPolicy.{h,cpp}` holds the model; `ContentPolicyRoutes.cpp` holds the
-admin page and routes. Each data site opts in with `InstallContentPolicyRoutes`.
+- `SessionRoutes.cpp` selects `engine-login` from `WebsiteTemplates` for shared
+  sign-in rendering and delegates preference attributes/head propagation to
+  that package. Theme/density cookie names, allowlists and task-052 same-host
+  `postMessage` behavior are preserved there.
+- Add shared page shells and styles in `uppsrc/WebsiteTemplates`; do not add
+  stylesheet literals or page-shell CSS to this package. Site packages select
+  a template by id and provide their page-specific values.
+
+## Content visibility policy (tasks 053/056)
+
+`ContentPolicy.{h,cpp}` holds the model and common request evaluator;
+`ContentPolicyRoutes.cpp` holds the admin page and routes. Every policy check is
+additional to the site's existing authentication, role, scope, broker, and grant
+checks. The evaluator never reads a link token from a URL; malformed policy
+stores return 503 and hidden records use 404 or are omitted from collections.
 
 Levels: `public` (everyone), `protected` (named user, group or secret link),
 `private` (named user, group or admin), `public-only` (anonymous visitors only).
-A group is a role. Visibility is `ContentVisible(effective, principal)`.
+A group is a role. Record, module, then site is the inheritance order; the first
+explicit policy wins. Missing stores use the existing site fallback. Science
+uses paper visibility as its fallback; papers without visibility/policy remain
+private. Other sites use `public` only after their existing authorization gates.
 
-Attachment: record, then module, then site. The first explicit policy in that
-order wins (`ContentResolve`); with none, the fallback applies. Sites pass their
-own fallback: Science uses the paper's `visibility` field, and a paper with no
-policy and no field is private.
+Storage is versioned `content_policy.json` (version 1), atomically replaced.
+Malformed objects, levels, grants, unknown fields and unsupported versions fail
+closed. Repair the file and restart to reload it.
 
-Storage: `content_policy.json` in the site data root, versioned (`version: 1`),
-saved through a temporary file and a rename. A link token is shown once when it
-is created and stored only as `ContentLinkHash` (a keyed hash). Tokens are never
-logged or shown on the settings page.
+The enforced sites install `/policy`, `api/policy*` and manifest commands
+`policy-show`, `policy-set`, `policy-grant`, `policy-revoke`, and admin-only
+`policy-link`. Anonymous callers get 401 and signed-in non-admins get 403.
+Secret-link creation requires an explicitly `protected` scope and a validated
+same-site target. The token is shown once as `/policy-access#wfcp=...&to=...`;
+the browser strips the fragment from history, then submits the token in the body
+of same-origin `POST /api/policy/exchange`. The exchange returns no token and
+sets a 15-minute opaque HttpOnly/SameSite=Strict cookie, Secure on accepted
+secure transports. The in-memory session is invalidated by process restart;
+the fragment link can be exchanged again until its grant is revoked. The server
+binds that session to the site, grant scope/resource and stored keyed hash; each
+read still applies the effective policy and the site's own authorization gates.
+`?key=` and path-token forms are never read. The access page and exchange use `no-store` and
+`Referrer-Policy: no-referrer`; destination paths must be local and query-free.
+Secure transport means the socket itself reports TLS, or the direct socket peer
+matches an explicitly trusted proxy peer and that peer asserts exactly
+`X-Forwarded-Proto: https`. `external_origin`, Host, `X-Forwarded-For`, and
+`X-Forwarded-Proto` alone do not confer trust. `Http::GetPeerAddr()` must not be
+used for this decision because it trusts `X-Forwarded-For`; the implementation
+compares the socket peer address directly.
 
-Admin surface: `/policy` (page), `api/policy*` (JSON), and manifest commands
-`policy-show`, `policy-set`, `policy-grant`, `policy-revoke`, `policy-link`.
-Anonymous callers get 401; signed-in non-admins get 403.
+For TLS termination, configure each Manager public origin with
+`MANAGERSKYLARK_ORIGIN_<SITE>=https://...` and separately configure
+`MANAGERSKYLARK_TRUSTED_PROXY_PEERS` as a comma-separated list of exact IPv4
+socket peer addresses (for example `127.0.0.1`). The list defaults empty; an
+HTTPS origin does not add to it. It accepts no CIDRs/hostnames and currently
+relies on Skylark's IPv4-only peer-address API. The proxy must strip
+client-supplied forwarded-proto headers and set one `X-Forwarded-Proto: https`
+value itself. Restrict backend listeners/firewall so only configured proxies
+can reach them; trusting loopback also trusts any local process able to connect
+to that listener. A direct public listener remains untrusted unless its actual
+socket is TLS. HTTP direct listeners show no link form and reject
+creation/exchange with 403, even when `external_origin` is configured as HTTPS.
 
-Per-site map (anonymous view):
-- Science: list, count, paper, article API honour paper visibility; a hidden
-  paper answers as not found.
-- Atlas: map list, map view, element view are public reads; edits need admin.
-- PrivateHub, TaskFoundry, Channels, Financials: public landing with a sign-in
-  link; their data routes need sign-in (workspace, grants, channel views,
-  ledger, contracts).
-- YouTubePlanner: public.
-- MetaAccount: root redirects to its sign-in page (the landing).
+Coverage matrix (stable module/record keys and fallback behavior):
+- Science: paper list/API, page/API, author page, article API, and home
+  aggregates use module `papers` and paper id. The author page checks paper
+  visibility before article-tree loading; article sidecars/counts follow the
+  parent paper. Hidden papers are 404; unreadable stores hide all papers and
+  contribute zero to aggregates.
+- Atlas: map list/map page use `maps`, record `<map>-<version>`; element policy
+  uses `elements`, record `<map>-<version>:element:<element-id>`. Element and
+  road lists, embedded map JSON, element counts, paths and roads are filtered.
+  The map index selects its empty state only after filtering/loading visible map
+  records, so an all-hidden collection is indistinguishable from no maps.
+  Hidden map/element routes return 404; corrupt stores return 503. Edit-role
+  checks remain independent.
+- PrivateHub: the anonymous root is only the existing sign-in landing. After
+  login, workspace uses `workspace`; repositories use `projects`, record
+  `<org>/<repo>`; issues/wiki/discussions/files use matching modules and record
+  `<org>/<repo>:<issue-id|slug|file-name>`. Lists filter before rendering;
+  comments/posts inherit the parent issue/topic. Member authoring checks remain.
+- TaskFoundry: anonymous board is only the existing landing. Candidate/proposal/
+  submission records use `candidates`, `proposals`, `submissions` and their
+  native IDs. Board rows filter before rendering; evidence/snapshots follow the
+  parent proposal/submission. Login and approved grant/scope checks run first.
+- Channels: anonymous overview is only the existing sign-in landing. Signed-in
+  metadata/messages use `channels`, record `<server>/<channel>`. Metadata is
+  filtered before rendering; policy runs before shared cache lookup or IPC.
+- Financials: anonymous summary is only the existing no-total landing. Authenticated
+  summary uses `summary`; finance-role ledger rows use `ledger`, record sequence;
+  contracts use `contracts`, record id. Finance role and Company broker scopes
+  run first; rows filter before rendering. Company summary is pre-aggregated, so
+  any restrictive `ledger` module or record policy suppresses it (404) rather than leaking hidden
+  rows through totals. Summary has no row-level policy claim.
+- YouTubePlanner remains public with no protected records. MetaAccount is not a
+  task-053 data site.
 
-Generation: writing a generated article never changes a paper's visibility. The
-article is served only when the paper's own policy allows the viewer. New content
-without a stated policy is private.
+All missing policy files preserve pre-policy behavior through the documented
+fallbacks; endpoint tests cover anonymous/authenticated behavior, record grants,
+hidden collection entries and corrupt-store 503 responses. Preserve the route
+inventory and tests before enabling policy administration on another site.
+
+Generation does not change a paper's visibility; article writes remain subject
+to the existing author and paper checks, and article reads follow paper policy.

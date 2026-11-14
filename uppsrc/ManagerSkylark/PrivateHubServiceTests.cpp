@@ -63,6 +63,10 @@ bool RunPrivateHubServiceSelfTests(const String& scratch_dir)
 	RealizeDirectory(data);
 
 	PrivateHubWorkspaceBackend backend(ws, data);
+	PrivateHubService audit_probe(backend, data);
+	ok &= PhExpect(audit_probe.AuditOperation("issue.create") == "issue.create" &&
+	              audit_probe.AuditOperation("issue.delete") == "unclassified",
+	              "audit operation mapping accepts registered codes only");
 	WebBroker broker;
 	String register_error;
 	ok &= PhExpect(RegisterPrivateHubService(broker, PH_SITE, backend, data, register_error),

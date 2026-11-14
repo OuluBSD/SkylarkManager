@@ -62,6 +62,7 @@ public:
 	                  int64 idempotency_ttl_seconds = PRIVATEHUB_IDEMPOTENCY_TTL);
 
 	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override;
+	String AuditOperation(const String& op) const override;
 
 	// Takes the owner lock on data_root. Refused when another process holds it.
 	bool AcquireDataRoot(String& error);

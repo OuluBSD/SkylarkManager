@@ -1,6 +1,7 @@
 description "YouTubePlanner webapp: a navigable stub for planning a YouTube video at six levels (no persistence, no YouTube calls)\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	Skylark,
 	WebAccounts,

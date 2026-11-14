@@ -1,6 +1,7 @@
 description "TaskFoundry: candidates, proposals, evidence, validation and submission to Company through the broker\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	WebBroker,
 	WebStorage,

@@ -9,10 +9,10 @@
 #include <WebChat/WebChat.h>
 #include <WebFramework/WebFramework.h>
 #include "V2Model.h"
-#include "DataStore.h"
-#include "ScopedPolicy.h"
+#include <DataStore/DataStore.h>
+#include <ScopedPolicy/ScopedPolicy.h>
 #include "CandidateLineage.h"
-#include "GitHubPlatform.h"
+#include <GitHubForge/GitHubPlatform.h>
 #include "SourceForgePlatform.h"
 #include "SystemAuth.h"
 #include "EngineComposition.h"
@@ -29,6 +29,7 @@ public:
 	bool Initialize(const Vector<String>& args);
 	void InitApp();
 	bool FilterHandler(Http& http) override;
+	void RequestComplete(Http& http, int duration_ms) override;
 
 	bool IsDemoSite() const { return demo_site; }
 	bool IsTestMode() const { return test_mode; }

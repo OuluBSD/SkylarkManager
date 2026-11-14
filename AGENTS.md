@@ -12,19 +12,21 @@
 |---|---|---|
 | `uppsrc/ManagerSkylark` | Application / Server | Core web app and REST API server following `Manager/v2` multi-repository schemas and local `./mgr/projects` tracking. |
 | `uppsrc/WebFramework` | Library | Reusable web framework: KDE Plasma-inspired themes, PageBuilder, mega-menu navigation, tree views, SVG icons, and audio feedback. |
-| `uppsrc/WebAuth` | Library | Shared, storage-agnostic session/bearer auth: password hashing, session/token resolution, login/settings view fragments. Reused by CompanySkylark's `CompanyAuth` and this repo's `ManagerSkylark`/`SystemAuth`. |
+| `uppsrc/WebAuth` | Library | Shared, storage-agnostic session/bearer auth: password hashing, session/token resolution, login/settings view fragments. Used by `uppsrc/Company` (identity and crypto primitives) and this repo's `ManagerSkylark`/`SystemAuth`. |
 | `uppsrc/WebChat` | Module / Subsystem | Real-time SSE streaming web chat view and session manager connecting to `SweAgent` LLM backends. |
 | `uppsrc/WebStorage` | Library | Generic site-scoped record persistence: JSON file stores (inter-process lock, atomic writes, quarantine, revisions), memory stores, schema registry. Core-only; no Skylark dependency. |
 | `uppsrc/WebBroker` | Library | Transport-independent communication bus between fenced websites: versioned request/result contracts, in-process transport, bounded diagnostics ledger; TCP transport is an explicit stub. |
 | `uppsrc/WebAccounts` | Library | Instance-scoped account layer for fenced websites: per-site users, site-stamped sessions, server-side CSRF tokens; crypto reuses `WebAuth` primitives. |
 | `uppsrc/WebEngine` | Library | Composable website engine: independently fenced virtual websites (own accounts, sessions, cookies, storage, routers) inside one Skylark process via per-port engine listeners and gateway catch-alls. |
 | `uppsrc/ForgeCore` | Library | Canonical forge domain suite: backend-qualified `ForgeRef` identity, issues/PRs/comments records, mandatory provenance (remote/local/snapshot/synthetic/unavailable), capability-declaring `IForgeBackend`. Core-only. |
-| `uppsrc/GitHubForge` | Library | Official-github adapter: `IForgeBackend` over argv-only `gh api` (`GitHubGhConnector`) or a C++ stateful emulation (`GitHubEmulatedBackend`, file-backed, flock, seeds — no fake gh executable). Config-selected. |
+| `uppsrc/GitHubForge` | Library | GitHub backend, route/UI, tests and witz templates; host-specific auth/navigation/store/Agent services are injected through `GitHubForgeHost`. Depends only on generic `Manager` and `WebFramework`, never on the `ManagerSkylark` executable. |
+| `uppsrc/WebDocs` | Library | Core-only allowlisted local documentation resolver, bounded repository walk, and traversal-safe documentation file resolution used by the ManagerSkylark docs portal. |
 | `uppsrc/SourceForgeForge` | Library | Official-SourceForge adapter: `IForgeBackend` over the Allura REST API with injectable transport; writes gated on API credentials. |
 | `uppsrc/PrivateHubWorkspace` | Library | PrivateHub backend: live local-repo inspection via argv-only git, strict path containment, site-scoped JSON issues/comments. |
 | `uppsrc/MetaAccount` | Application / Site | Meta-account webapp (the ecosystem's "Google login"): ecosystem identities, real TOTP second factor (RFC 6238 SHA256) with single-use recovery codes, consent grants for client webapps; broker service (`authenticate`, `request-consent`, `check-grant`, `revoke-grant`). |
 | `uppsrc/Channels` | Application / Site | Read-only AgentIPC frontend: the composed channels webapp reads the AgentIPC node's channel metadata and recent messages through the argv-only `agentipc` client; no writes. |
 | `uppsrc/Financials` | Application / Site | Read-only Financials portal: ledger summary, recent entries and client contracts from the Company module, read through scope-checked broker ops; finance role gates the rows. |
+| `uppsrc/Company` | Application / Site | Company webapp: proposals, work items, reviews, ledger, contracts and projects on WebStorage records; composed in ManagerSkylark as the `company` site (`--company-port`, default 18219) with the `company` broker service. Replaces the standalone CompanySkylark app, which is no longer part of this port. See `uppsrc/Company/AGENTS.md`. |
 | `uppsrc/Atlas` | Application / Site | Atlas topology map: a 2D map of the project on a virtual plane (continents, blocks with inside-maps, places; seas and roads), one revision-checked map document per project version; admin edits, other roles read. |
 | `uppsrc/Science` | Application / Site | arXiv-style Science webapp: read-only frontend over the flat paper corpus plus schema-validated structured article sidecars (`science/article-tree`), optimistic revisions, atomic writes. |
 | `uppsrc/TaskFoundry` | Application / Site | TaskFoundry webapp: candidates → evidence-backed proposals → validation → idempotent submission to Company via the WebBroker; evidence references Science papers and PrivateHub branches. |
@@ -41,10 +43,24 @@
 
 The ManagerSkylark process composes fenced engine sites on separate ports
 (`EngineComposition.cpp`): **PrivateHub**, **Science**, **TaskFoundry**,
-**MetaAccount**, **Channels**, **Financials**, **Atlas**, **YouTubePlanner** (+ the Company module via
-`CompanyComposed` from the private CompanySkylark repo). The stock host site serves the manager
+**MetaAccount**, **Channels**, **Financials**, **Atlas**, **YouTubePlanner**, and **Company** (`uppsrc/Company`,
+composed through `CompanyComposed.h`; site on `--company-port`, default 18219). The stock host site serves the manager
 dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and the
 `/docs` documentation portal.
+
+### LAN access and the portal loading indicator
+
+- The portal shell listens on `8081`; composed apps listen separately on `18211-18219` (see `EngineComposition.h`). The shell builds iframe URLs using the request host and each app port. A LAN browser must be able to reach both `8081` and the composed-app ports.
+- If UFW allows `8081` but blocks `18211-18219`, the shell can load while iframe requests are blocked; the browser may remain on **Loading...** even though the apps work from localhost. Diagnose this in Firefox/Chrome from a second LAN device and check the firewall before changing iframe code.
+- On Gen7, the approved LAN-only UFW rule is:
+
+  ```sh
+  sudo ufw allow from 192.168.1.0/24 to any port 18211:18219 proto tcp comment 'ManagerSkylark composed apps LAN'
+  ```
+
+  Do not expose this port range to all interfaces/internet; keep the source restricted to the trusted LAN subnet. Verify with `sudo ufw status verbose` and by opening the portal from another LAN device.
+- Site links (navigator, site `public_url`) use the public host, never loopback. Resolution order: `--public-host <address>`, then `MANAGERSKYLARK_PUBLIC_HOST`, then the detected LAN IPv4. Startup fails if only loopback is available. `MANAGERSKYLARK_ORIGIN_<SITE>` and `MANAGERSKYLARK_ORIGIN_PORTAL` still override a single origin.
+- MetaAccount single sign-on is opt-in at process startup with `--enable-meta-sso`; omitting the flag preserves per-site login. The live Gen7 instance requires this flag when SSO is intended to be active.
 
 ### MetaAccount sign-in when SSO is on
 

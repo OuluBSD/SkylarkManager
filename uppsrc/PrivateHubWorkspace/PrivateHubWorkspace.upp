@@ -1,6 +1,7 @@
 description "PrivateHub workspace backend: live local-repo inspection via argv-only git, site-scoped JSON issue records, strict path containment\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	ForgeCore,
 	WebStorage,

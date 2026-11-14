@@ -106,4 +106,11 @@ BrokerResult ScienceService::Handle(const BrokerCallContext& ctx, const BrokerCa
 	return Refuse(400, "unknown science op: " + call.op);
 }
 
+String ScienceService::AuditOperation(const String& op) const
+{
+	if(op == "list-papers" || op == "get-paper" || op == "get-article" || op == "put-article")
+		return op;
+	return "unclassified";
+}
+
 END_UPP_NAMESPACE

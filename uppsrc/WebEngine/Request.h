@@ -26,6 +26,7 @@ public:
 	String Cookie(const char *name) const;
 	String ClientIp() const;
 	bool   IsMutation() const;                            // POST/PUT/PATCH/DELETE
+	bool   IsSecureTransport() const;                      // TLS socket or HTTPS from an explicitly trusted peer
 
 	EngineSite& Site() const { return *site; } // handlers manage their own site (accounts etc.)
 
@@ -44,17 +45,18 @@ public:
 	WebRequest& Status(int code, const String& text);
 	WebRequest& Redirect(const String& url);
 	WebRequest& SetHeader(const char *h, const char *v) { http.SetHeader(h, v); return *this; }
+	int ResponseStatus() const { return response_status; }
 
 	// --- session cookie helpers ---
 	WebRequest& EnsureSession();  // creates a guest session + sets the site cookie
 	WebRequest& DropSession();    // logs out + clears the site cookie
-	WebRequest& AdoptSession(const String& session_id); // site-stamped session (e.g. from login)
+	WebRequest& AdoptSession(const String& session_id, const String& source = String()); // site-stamped session
 	void        SetSessionData(const ValueMap& data);
 
 	// --- raw cookie helpers (task 039). The name is a stored (lowercase) cookie
 	// name; the value is never written to a URL, a log or a diagnostic entry. ---
 	String      RequestCookie(const String& name);
-	WebRequest& SetCookieValue(const String& name, const String& value, Time expires);
+	WebRequest& SetCookieValue(const String& name, const String& value, Time expires, bool secure = false);
 
 private:
 	friend class WebEngine;
@@ -70,6 +72,7 @@ private:
 	bool         has_session = false;
 	WebAccountUser user;
 	bool         has_user = false;
+	int          response_status = 200;
 };
 
 END_UPP_NAMESPACE

@@ -21,6 +21,20 @@ bool& ConfiguredDemoSite()
 	return demo;
 }
 
+One<WebAuditLog>& PortalAudit()
+{
+	static One<WebAuditLog> log;
+	return log;
+}
+
+struct RootAuditRequestContext {
+	const Http *http = NULL;
+	UserSession session;
+	bool allowed = true;
+};
+
+thread__ RootAuditRequestContext t_root_audit_context;
+
 StaticMutex& SessionMutex()
 {
 	static StaticMutex mutex;
@@ -32,12 +46,74 @@ String NewSessionToken()
 	return WebAuthRandomBytes(32, true);
 }
 
+String PortalUserId(const String& username)
+{
+	return username.IsEmpty() ? String() : "portal_u_" + SHA256String(username).Left(32);
+}
+
+void RecordPortalEvent(const String& kind, const String& route, const String& method,
+                       const String& outcome, int status, const String& operation,
+                       const UserSession *session = NULL)
+{
+	if(!PortalAudit()) return;
+	WebAuditEvent e;
+	e.at = GetSysTime(); e.site = "portal"; e.kind = kind; e.route = route;
+	e.method = method; e.outcome = outcome; e.status = status; e.operation = operation;
+	if(session && session->is_authenticated) {
+		e.actor_user_id = PortalUserId(session->username);
+		e.session_ref = session->audit_ref;
+	}
+	PortalAudit()->Record(e);
+}
+
+bool PortalSecureTransport(Http& http)
+{
+	TcpSocket *socket = http.GetSocket();
+	if(socket && socket->IsSSL()) return true;
+	if(!socket) return false;
+	if(!IsTrustedManagerProxyPeer(socket->GetPeerAddr())) return false;
+	return ToLower(TrimBoth(http.GetHeader("x-forwarded-proto"))) == "https";
+}
+
 }
 
 void SystemAuthService::ConfigureSite(const String& site_dir, bool demo_site)
 {
 	ConfiguredSiteDir() = site_dir;
 	ConfiguredDemoSite() = demo_site;
+	PortalAudit().Create("portal", AppendFileName(site_dir, "portal-audit"));
+}
+
+WebAuditLog& SystemAuthService::AuditLog()
+{
+	if(!PortalAudit())
+		PortalAudit().Create("portal", AppendFileName(ConfiguredSiteDir(), "portal-audit"));
+	return *PortalAudit();
+}
+
+StoreResult SystemAuthService::ListAuditSessions(int offset, int limit, Vector<PortalAuditSessionSnapshot>& out)
+{
+	out.Clear();
+	if(offset < 0 || offset > 10000 || limit < 1 || limit > 200)
+		return StoreResult("invalid snapshot limit");
+	Vector<PortalAuditSessionSnapshot> active;
+	Time now = GetSysTime();
+	{
+		Mutex::Lock lock(SessionMutex());
+		for(int i = 0; i < Sessions().GetCount(); i++) {
+			const UserSession& s = Sessions()[i];
+			if(!s.is_authenticated || s.expires_at <= now || s.is_demo != ConfiguredDemoSite()) continue;
+			PortalAuditSessionSnapshot snapshot;
+			snapshot.user_id = PortalUserId(s.username);
+			snapshot.session_ref = s.audit_ref;
+			snapshot.created = s.created_at;
+			snapshot.expires = s.expires_at;
+			active.Add(pick(snapshot));
+		}
+	}
+	for(int i = active.GetCount() - 1 - offset; i >= 0 && out.GetCount() < limit; i--)
+		out.Add(active[i]);
+	return StoreResult(true);
 }
 
 bool SystemAuthService::SetSitePassword(const String& site_dir, const String& username, const String& password)
@@ -74,20 +150,24 @@ VectorMap<String, UserSession>& SystemAuthService::Sessions()
 	return s;
 }
 
-bool SystemAuthService::AuthorizeRequest(Http& http)
+bool SystemAuthService::AuthorizeRequest(Http& http, const UserSession *resolved, int *rejection_status)
 {
+	if(rejection_status) *rejection_status = 0;
 	String id = http.GetHandlerId();
 	bool public_route = id == "LoginPage" || id == "LoginPost" || id == "LogoutHandler" || id == "HostSsoContinue" ||
 	                    id == "PortalShellPage" || // the portal shell is public; gated webapps frame the login
+	                    id == "PortalAuditPage" || id == "PortalAuditEvents" ||
+	                    id == "PortalAuditSessions" || id == "PortalAuditHealth" ||
 	                    id == "ApiHealth" || id == "ApiAuthStatus" || id == "ApiAuthLogin" ||
 	                    id == "ApiCliManifest" || id == "ApiCliManifestSite" || // public, read-only command manifest
 	                    IsEngineGatewayHandler(id); // engine sites authenticate with their own sessions
 	if(public_route)
 		return true;
 
-	UserSession session = GetCurrentSession(http);
+	UserSession session = resolved ? *resolved : GetCurrentSession(http);
 	if(!session.is_authenticated) {
 		if(id.StartsWith("Api") || id.StartsWith("Manager")) {
+			if(rejection_status) *rejection_status = 401;
 			http.Content("application/json; charset=utf-8", "{\"error\":\"authentication_required\"}");
 			http.Response(401, "Unauthorized");
 		}
@@ -95,6 +175,7 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 			// A page request returns to the page it asked for once signed in (task 035).
 			String uri = http.GetRequestURI();
 			bool back = http.GetMethod() == "GET" && uri.StartsWith("/") && !uri.StartsWith("//");
+			if(rejection_status) *rejection_status = 302;
 			http.Content("text/plain; charset=utf-8", "Authentication required");
 			http.Response(302, "Found");
 			http.Redirect(back ? "/login?next=" + UrlEncode(uri) : String("/login"));
@@ -117,12 +198,59 @@ bool SystemAuthService::AuthorizeRequest(Http& http)
 	                      id == "ApiReviewPackage" || id == "ApiReviewRelated" ||
 	                      id == "DocsPage" || id == "DocsRepoPage" || id == "DocsFilePage";
 		if(http.GetMethod() != "GET" || !read_only_page) {
+			if(rejection_status) *rejection_status = 403;
 			http.Content("text/plain; charset=utf-8", "This synthetic demo site is read-only.");
 			http.Response(403, "Forbidden");
 			return false;
 		}
 	}
 	return true;
+}
+
+void SystemAuthService::SetRootAuditContext(const Http& http, const UserSession& session, bool allowed)
+{
+	t_root_audit_context.http = &http;
+	t_root_audit_context.session = session;
+	t_root_audit_context.allowed = allowed;
+}
+
+void SystemAuthService::RecordRootRequestComplete(const Http& http, int duration_ms)
+{
+	String id = http.GetHandlerId();
+	UserSession session;
+	bool authorized = true;
+	if(t_root_audit_context.http == &http) {
+		session = t_root_audit_context.session;
+		authorized = t_root_audit_context.allowed;
+		t_root_audit_context = RootAuditRequestContext();
+	}
+	else {
+		t_root_audit_context = RootAuditRequestContext();
+		session = GetCurrentSession(http);
+	}
+	if(id == "PortalAuditEvents" || id == "PortalAuditSessions" || id == "PortalAuditHealth" ||
+	   id == "PortalAuditPage")
+		return;
+	bool not_found = (id.IsEmpty() || IsEngineGatewayHandler(id)) && http.GetResponseCode() == 404;
+	String route = not_found || id.GetCount() > 150 ? "host:unmatched" : "host:" + id;
+	String method = http.GetMethod();
+	if(method == "POST_RAW") method = "POST";
+	if(method.GetCount() > 8) method = "OTHER";
+	WebAuditEvent e;
+	e.at = GetSysTime(); e.site = "portal"; e.kind = "request"; e.route = route;
+	e.method = method;
+	e.status = http.GetResponseCode();
+	e.duration_ms = duration_ms < 0 ? 0 : duration_ms > 3600000 ? 3600000 : duration_ms;
+	e.outcome = not_found ? "not_found" :
+	            (!authorized ? "blocked" : e.status >= 500 ? "error" :
+	             e.status >= 400 ? "http_error" : e.status >= 300 ? "redirect" : "ok");
+	if(session.is_authenticated) e.actor_user_id = PortalUserId(session.username);
+	if(!session.audit_ref.IsEmpty()) e.session_ref = session.audit_ref;
+	AuditLog().Record(e);
+	if(method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE") {
+		e.kind = "action";
+		AuditLog().Record(e);
+	}
 }
 
 String SystemAuthService::ExtractCookie(const Http& http, const char* name)
@@ -153,9 +281,9 @@ static const char *HOST_SSO_SUPPRESS = "wf_host_sso_suppress";
 void SystemAuthService::SetHostSsoSuppressed(Http& http, bool on)
 {
 	if(on)
-		http.SetCookie(HOST_SSO_SUPPRESS, "1", GetSysTime() + 30 * 24 * 3600, "/", NULL, false, true);
+		http.SetCookie(HOST_SSO_SUPPRESS, "1", GetSysTime() + 30 * 24 * 3600, "/", NULL, PortalSecureTransport(http), true);
 	else
-		http.SetCookie(HOST_SSO_SUPPRESS, "", GetSysTime() - 3600, "/", NULL, false, true);
+		http.SetCookie(HOST_SSO_SUPPRESS, "", GetSysTime() - 3600, "/", NULL, PortalSecureTransport(http), true);
 }
 
 UserSession SystemAuthService::BridgeMetaSession(Http& http, bool ignore_suppression, String* central_user)
@@ -167,22 +295,32 @@ UserSession SystemAuthService::BridgeMetaSession(Http& http, bool ignore_suppres
 		return none;
 	String central = ExtractCookie(http, SsoCentralCookieName());
 	String username;
-	if(central.IsEmpty() || !SsoCentralUsername(central, username))
+	if(central.IsEmpty())
 		return none;
+	if(!SsoCentralUsername(central, username)) {
+		RecordPortalEvent("session", "session:resolve", "GET", "failed_resolution", 0, "sso");
+		return none;
+	}
 	if(central_user)
 		*central_user = username;
-	UserSession sess = AdoptHostAccount(username);
-	if(sess.is_authenticated)
-		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, false, true);
+	UserSession sess = AdoptHostAccount(username, "sso");
+	if(sess.is_authenticated) {
+		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, PortalSecureTransport(http), true);
+	}
+	else
+		RecordPortalEvent("login", "host:sso_bridge", "GET", "failure", 401, "sso_no_account");
 	return sess;
 }
 
 // A host session for an existing host account. It never creates an account.
-UserSession SystemAuthService::AdoptHostAccount(const String& username)
+UserSession SystemAuthService::AdoptHostAccount(const String& username, const String& source)
 {
 	if(!HasSiteAccount(username))
 		return UserSession();
-	return CreateSession(username);
+	UserSession session = CreateSession(username, source);
+	if(session.is_authenticated && source == "sso")
+		RecordPortalEvent("login", "host:sso_bridge", "GET", "success", 200, "sso", &session);
+	return session;
 }
 
 bool SystemAuthService::VerifySystemPassword(const String& username, const String& password)
@@ -215,7 +353,7 @@ bool SystemAuthService::VerifySystemPassword(const String& username, const Strin
 	return false;
 }
 
-UserSession SystemAuthService::CreateSession(const String& username)
+UserSession SystemAuthService::CreateSession(const String& username, const String& source)
 {
 	UserSession s;
 	s.username = username;
@@ -228,8 +366,12 @@ UserSession SystemAuthService::CreateSession(const String& username)
 
 	s.token = NewSessionToken();
 	if(s.token.IsEmpty()) return UserSession();
-	Mutex::Lock lock(SessionMutex());
-	Sessions().GetAdd(s.token) = s;
+	s.audit_ref = WebAuditSessionRef();
+	{
+		Mutex::Lock lock(SessionMutex());
+		Sessions().GetAdd(s.token) = s;
+	}
+	RecordPortalEvent("session", "session:create", "POST", "created", 0, source, &s);
 	return s;
 }
 
@@ -243,15 +385,25 @@ UserSession SystemAuthService::GetCurrentSession(const Http& http)
 	}
 
 	if(!token.IsEmpty()) {
-		Mutex::Lock lock(SessionMutex());
-		VectorMap<String, UserSession>& map = Sessions();
-		int q = map.Find(token);
-		if(q >= 0) {
-			UserSession session = map[q];
-			if(session.expires_at > GetSysTime() && session.is_demo == ConfiguredDemoSite())
-				return session;
-			map.Remove(q);
+		UserSession expired;
+		bool found = false;
+		{
+			Mutex::Lock lock(SessionMutex());
+			VectorMap<String, UserSession>& map = Sessions();
+			int q = map.Find(token);
+			if(q >= 0) {
+				UserSession session = map[q];
+				if(session.expires_at > GetSysTime() && session.is_demo == ConfiguredDemoSite())
+					return session;
+				expired = session;
+				found = true;
+				map.Remove(q);
+			}
 		}
+		if(found)
+			RecordPortalEvent("session", "session:resolve", "GET", "expired", 0, "host", &expired);
+		else
+			RecordPortalEvent("session", "session:resolve", "GET", "failed_resolution", 0, "host");
 	}
 
 	// Default unauthenticated guest
@@ -272,7 +424,7 @@ bool SystemAuthService::Login(Http& http, const String& username, const String& 
 UserSession SystemAuthService::LoginSession(Http& http, const String& username, const String& password)
 {
 	if(VerifySystemPassword(username, password)) {
-		UserSession sess = CreateSession(username);
+		UserSession sess = CreateSession(username, "password");
 		if(!sess.is_authenticated)
 			return sess;
 		// SetHeader("Set-Cookie", ...) is silently dropped on a redirect
@@ -280,9 +432,11 @@ UserSession SystemAuthService::LoginSession(Http& http, const String& username, 
 		// `cookies` vector, not generic headers, when `redirect` is set) --
 		// SetCookie populates that vector, so the cookie survives the
 		// post-login redirect.
-		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, false, true);
+		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, PortalSecureTransport(http), true);
+		RecordPortalEvent("login", "host:login", "POST", "success", 200, "password", &sess);
 		return sess;
 	}
+	RecordPortalEvent("login", "host:login", "POST", "failure", 401, "password");
 	UserSession failed;
 	failed.username = username;
 	failed.is_authenticated = false;
@@ -292,11 +446,17 @@ UserSession SystemAuthService::LoginSession(Http& http, const String& username, 
 void SystemAuthService::Logout(Http& http)
 {
 	String token = ExtractCookie(http, "wf_auth_session");
+	UserSession revoked;
+	bool had_session = false;
 	if(!token.IsEmpty()) {
 		Mutex::Lock lock(SessionMutex());
+		int q = Sessions().Find(token);
+		if(q >= 0) { revoked = Sessions()[q]; had_session = true; }
 		Sessions().RemoveKey(token);
 	}
-	http.SetCookie("wf_auth_session", "", GetSysTime() - 3600, "/", NULL, false, true);
+	if(had_session)
+		RecordPortalEvent("session", "session:logout", "GET", "revoked", 302, "logout", &revoked);
+	http.SetCookie("wf_auth_session", "", GetSysTime() - 3600, "/", NULL, PortalSecureTransport(http), true);
 	// Signing out of the portal drops only the host session; the MetaAccount session is untouched (task 050).
 	if(TheWebEngine().MetaSso())
 		SetHostSsoSuppressed(http, true);
@@ -421,16 +581,22 @@ SKYLARK(LoginPost, "login/submit:POST_RAW")
 	String user = form.Get("username", "");
 	String pass = form.Get("password", "");
 	String redir = form.Get("redirect", "/");
-	if(redir.IsEmpty() || !redir.StartsWith("/") || redir.StartsWith("//") ||
-	   redir.Find('\r') >= 0 || redir.Find('\n') >= 0 || redir.StartsWith("/login"))
+	bool redirect_rejected = redir.IsEmpty() || !redir.StartsWith("/") || redir.StartsWith("//") ||
+	                        redir.Find('\\') >= 0 ||
+	                        redir.Find('\r') >= 0 || redir.Find('\n') >= 0 || redir.StartsWith("/login");
+	if(redirect_rejected)
 		redir = "/";
+	if(redirect_rejected)
+		RecordPortalEvent("redirect", "host:redirect", "POST", "rejected", 302, "local");
 
 	if(SystemAuthService::Login(http, user, pass)) {
+		RecordPortalEvent("redirect", "host:redirect", "POST", "approved_local", 302, "local");
 		http.Redirect(redir);
 	} else {
 		String back = "/login?err=" + UrlEncode("Authentication failed. Invalid site username or password.");
 		if(redir != "/")
 			back << "&next=" << UrlEncode(redir);
+		RecordPortalEvent("redirect", "host:redirect", "POST", "approved_local", 302, "local");
 		http.Redirect(back);
 	}
 }
@@ -441,10 +607,15 @@ SKYLARK(LoginPost, "login/submit:POST_RAW")
 SKYLARK(HostSsoContinue, "sso/meta")
 {
 	String next = http["next"];
-	if(next.IsEmpty() || !next.StartsWith("/") || next.StartsWith("//") || next.Find('\r') >= 0 || next.Find('\n') >= 0 ||
-	   next.StartsWith("/login") || next.StartsWith("/sso/meta"))
+	bool redirect_rejected = next.IsEmpty() || !next.StartsWith("/") || next.StartsWith("//") ||
+	                         next.Find('\\') >= 0 || next.Find('\r') >= 0 || next.Find('\n') >= 0 ||
+	                         next.StartsWith("/login") || next.StartsWith("/sso/meta");
+	if(redirect_rejected)
 		next = "/";
+	if(redirect_rejected)
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "rejected", 302, "sso");
 	if(!TheWebEngine().MetaSso()) {
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_local", 302, "local");
 		http.Redirect("/login");
 		return;
 	}
@@ -452,23 +623,31 @@ SKYLARK(HostSsoContinue, "sso/meta")
 	String central_user;
 	UserSession s = SystemAuthService::BridgeMetaSession(http, true, &central_user);
 	if(s.is_authenticated) {
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_local", 302, "sso", &s);
 		http.Redirect(next);
 		return;
 	}
 	if(central_user.GetCount()) {
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_local", 302, "sso");
 		http.Redirect("/login?err=" + UrlEncode("MetaAccount signed in as " + central_user + ", but this portal has no account for it. Sign in with a portal account."));
 		return;
 	}
-	int meta_port = 0;
-	for(const EngineSiteListing& site : TheWebEngine().ListSites())
-		if(site.id == "meta")
-			meta_port = site.port;
-	if(meta_port == 0) {
+	EngineSite *meta_site = TheWebEngine().FindSite("meta");
+	String portal_origin = TheWebEngine().PortalOrigin();
+	if(!meta_site || portal_origin.IsEmpty()) {
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_local", 302, "sso");
 		http.Redirect("/login?err=" + UrlEncode("MetaAccount is not running here."));
 		return;
 	}
-	String back = "http://" + http.GetHeader("host") + "/sso/meta?next=" + UrlEncode(next);
-	http.Redirect(Format("http://%s:%d/login?next=%s", PortalLinkHost(http.GetHeader("host")), meta_port, UrlEncode(back)));
+	String back = portal_origin + "/sso/meta?next=" + UrlEncode(next);
+	String target = meta_site->PublicUrl("/login?next=" + UrlEncode(back));
+	if(target.IsEmpty()) {
+		RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_local", 302, "sso");
+		http.Redirect("/login?err=" + UrlEncode("MetaAccount public origin is unavailable."));
+		return;
+	}
+	RecordPortalEvent("redirect", "host:sso_redirect", "GET", "approved_sso", 302, "sso");
+	http.Redirect(target);
 }
 
 SKYLARK(LogoutHandler, "logout")
@@ -511,6 +690,127 @@ SKYLARK(ApiAuthLogin, "api/auth/login:POST_RAW")
 	http.ContentType("application/json") << "{\"error\":\"invalid_credentials\"}";
 }
 
+static void PortalAuditNoStore(Http& http)
+{
+	http.SetHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+	http.SetHeader("Pragma", "no-cache");
+}
+
+static bool PortalAuditAdmin(Http& http)
+{
+	UserSession session = SystemAuthService::GetCurrentSession(http);
+	if(!session.is_authenticated) {
+		http.Response(401, "Unauthorized");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"authentication_required\"}";
+		return false;
+	}
+	if(!session.is_admin) {
+		http.Response(403, "Forbidden");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"admin_required\"}";
+		return false;
+	}
+	return true;
+}
+
+static bool PortalAuditInt(const String& value, int fallback, int min_value, int max_value, int& out)
+{
+	if(value.IsEmpty()) { out = fallback; return true; }
+	if(value.GetCount() > 10) return false;
+	for(int i = 0; i < value.GetCount(); i++)
+		if(!IsDigit(value[i])) return false;
+	out = ScanInt(value);
+	return out >= min_value && out <= max_value;
+}
+
+SKYLARK(PortalAuditEvents, "api/audit/events")
+{
+	PortalAuditNoStore(http);
+	if(!PortalAuditAdmin(http)) return;
+	int offset, limit;
+	if(!PortalAuditInt(http["offset"], 0, 0, 10000, offset) ||
+	   !PortalAuditInt(http["limit"], 100, 1, 200, limit)) {
+		http.Response(400, "Bad Request");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"invalid_pagination\"}";
+		return;
+	}
+	String from_arg = http["from"], to_arg = http["to"];
+	Time to = to_arg.IsEmpty() ? GetSysTime() : ScanTime(~to_arg);
+	Time from = from_arg.IsEmpty() ? to - 24 * 60 * 60 : ScanTime(~from_arg);
+	Vector<ValueMap> rows;
+	StoreResult result = SystemAuthService::AuditLog().List(from, to, offset, limit, rows);
+	if(!result) {
+		http.Response(result.error == "invalid audit range" ? 400 : 503,
+		              result.error == "invalid audit range" ? "Bad Request" : "Unavailable");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"audit_history_unavailable\"}";
+		return;
+	}
+	ValueArray events;
+	for(const ValueMap& row : rows) events.Add(row);
+	ValueMap response; response.Add("ok", true); response.Add("site", "portal");
+	response.Add("offset", offset); response.Add("limit", limit); response.Add("events", events);
+	http.ContentType("application/json; charset=utf-8") << AsJSON(response, true);
+}
+
+SKYLARK(PortalAuditSessions, "api/audit/sessions")
+{
+	PortalAuditNoStore(http);
+	if(!PortalAuditAdmin(http)) return;
+	int offset, limit;
+	if(!PortalAuditInt(http["offset"], 0, 0, 10000, offset) ||
+	   !PortalAuditInt(http["limit"], 100, 1, 200, limit)) {
+		http.Response(400, "Bad Request");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"invalid_pagination\"}";
+		return;
+	}
+	Vector<PortalAuditSessionSnapshot> snapshots;
+	StoreResult result = SystemAuthService::ListAuditSessions(offset, limit, snapshots);
+	if(!result) {
+		http.Response(400, "Bad Request");
+		http.ContentType("application/json; charset=utf-8") << "{\"ok\":false,\"error\":\"invalid_pagination\"}";
+		return;
+	}
+	ValueArray sessions;
+	for(const PortalAuditSessionSnapshot& s : snapshots) {
+		ValueMap item; item.Add("user_id", s.user_id); item.Add("session_ref", s.session_ref);
+		item.Add("created", AsString(s.created)); item.Add("expires", AsString(s.expires));
+		sessions.Add(item);
+	}
+	ValueMap response; response.Add("ok", true); response.Add("site", "portal");
+	response.Add("offset", offset); response.Add("limit", limit); response.Add("sessions", sessions);
+	http.ContentType("application/json; charset=utf-8") << AsJSON(response, true);
+}
+
+SKYLARK(PortalAuditHealth, "api/audit/health")
+{
+	PortalAuditNoStore(http);
+	if(!PortalAuditAdmin(http)) return;
+	ValueMap response; response.Add("ok", true); response.Add("site", "portal");
+	response.Add("audit_write_healthy", SystemAuthService::AuditLog().Healthy());
+	response.Add("durable_ledger", "webstorage");
+	response.Add("broker_diagnostics", "operational_only; communications_are_durable_in_WebAudit");
+	http.ContentType("application/json; charset=utf-8") << AsJSON(response, true);
+}
+
+SKYLARK(PortalAuditPage, "audit")
+{
+	PortalAuditNoStore(http);
+	if(!PortalAuditAdmin(http)) return;
+	String scopes;
+	for(const EngineSiteListing& site : TheWebEngine().ListSites())
+		if(!site.public_url.IsEmpty())
+			scopes << "<li><a rel=\"noopener\" href=\"" << EscapeHtml(site.public_url + "audit")
+			       << "\">" << EscapeHtml(site.id) << " audit scope</a></li>";
+	http.ContentType("text/html; charset=utf-8")
+		<< "<!doctype html><meta charset=utf-8><title>Portal audit</title><h1>Portal audit: portal</h1>"
+		   "<p>Host portal scope only. Composed-site scopes require authorization on each site.</p><ul>"
+		<< scopes
+		<< "</ul><h2>Diagnostics</h2><pre id=health></pre><h2>Active sessions</h2><pre id=sessions></pre>"
+		   "<h2>Recent events</h2><pre id=events></pre><script>"
+		   "for(const id of ['health','sessions','events']){const p=id==='health'?'api/audit/health':id==='sessions'?'api/audit/sessions':'api/audit/events';"
+		   "fetch('/'+p,{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(x=>document.getElementById(id).textContent=JSON.stringify(x,null,2)).catch(()=>document.getElementById(id).textContent='Unavailable');}"
+		   "</script>";
+}
+
 // Self-tests for the portal bridge's pure parts (task 050): the host account lookup and adoption, which
 // never create an account, and the return-port allowance. The cookie and central-session halves run
 // only on a live request and are covered by the scratch Aria matrix.
@@ -530,10 +830,48 @@ bool SystemAuthSelfTests(const String& scratch_dir)
 		if(!ok) failed++;
 		Cout() << (ok ? "ok   " : "FAIL ") << what << "\n";
 	};
+	{
+		Http response;
+		response.Content("text/plain", "completed-response-body");
+		response.Response(503, "Unavailable");
+		int code = response.GetResponseCode();
+		String body = response.GetResponse();
+		bool called = false;
+		CallRequestCompleteObserver([&] { called = true; throw Exc("observer failure fixture"); });
+		check(called && response.GetResponseCode() == code && response.GetResponse() == body,
+		      "throwing completion observer is swallowed without changing the response object");
+	}
 
 	check(SystemAuthService::HasSiteAccount("seppo"), "a host account in auth.json is found by its username");
 	UserSession adopted = SystemAuthService::AdoptHostAccount("seppo");
 	check(adopted.is_authenticated && adopted.username == "seppo", "adopting an existing host account gives its session");
+	UserSession sso_adopted = SystemAuthService::AdoptHostAccount("seppo", "sso");
+	check(sso_adopted.is_authenticated && sso_adopted.audit_ref.StartsWith("as_") &&
+	      sso_adopted.audit_ref != sso_adopted.token,
+	      "SSO adoption carries a non-bearer opaque root-session reference");
+	Vector<PortalAuditSessionSnapshot> host_sessions;
+	StoreResult host_sessions_result = SystemAuthService::ListAuditSessions(0, 20, host_sessions);
+	bool sso_snapshot_seen = false;
+	for(const PortalAuditSessionSnapshot& session : host_sessions)
+		sso_snapshot_seen |= session.session_ref == sso_adopted.audit_ref && session.user_id.StartsWith("portal_u_");
+	Vector<ValueMap> portal_events;
+	StoreResult portal_events_result = SystemAuthService::AuditLog().List(
+		GetSysTime() - 60, GetSysTime() + 1, 0, 100, portal_events);
+	ValueArray portal_event_values;
+	bool sso_create_seen = false, sso_login_seen = false;
+	for(const ValueMap& event : portal_events) {
+		portal_event_values.Add(event);
+		sso_create_seen |= (String)event.Get("kind") == "session" &&
+		                   (String)event.Get("outcome") == "created" && (String)event.Get("operation") == "sso";
+		sso_login_seen |= (String)event.Get("kind") == "login" &&
+		                  (String)event.Get("route") == "host:sso_bridge" &&
+		                  (String)event.Get("outcome") == "success";
+	}
+	String portal_event_json = AsJSON(portal_event_values, true);
+	check(host_sessions_result.ok && sso_snapshot_seen && portal_events_result.ok && sso_create_seen && sso_login_seen &&
+	      portal_event_json.Find(adopted.token) < 0 && portal_event_json.Find(sso_adopted.token) < 0 &&
+	      portal_event_json.Find("seppo") < 0,
+	      "portal root store/snapshots keep SSO session token and username out of audit records");
 	check(!SystemAuthService::HasSiteAccount("mallory"), "a username with no host account is not found");
 	UserSession refused = SystemAuthService::AdoptHostAccount("mallory");
 	check(!refused.is_authenticated, "adopting a username with no host account gives no session");
@@ -545,6 +883,28 @@ bool SystemAuthSelfTests(const String& scratch_dir)
 	check(SsoPortAllowed(8081), "the stock host port is an allowed MetaAccount return");
 	check(!SsoPortAllowed(9999), "a port that is neither the host nor a composed site is refused");
 	TheWebEngine().SetHostPort(saved_host);
+	String previous_portal_origin = GetEnv("MANAGERSKYLARK_ORIGIN_PORTAL");
+	SetEnv("MANAGERSKYLARK_ORIGIN_PORTAL", "https://portal.example:8443");
+	String portal_origin, origin_error;
+	check(ResolvePortalExternalOrigin("192.168.1.169", 8081, portal_origin, origin_error) &&
+	      portal_origin == "https://portal.example:8443",
+	      "portal SSO origin uses the configured HTTPS public origin");
+	SetEnv("MANAGERSKYLARK_ORIGIN_PORTAL", "");
+	check(ResolvePortalExternalOrigin("192.168.1.169", 8081, portal_origin, origin_error) &&
+	      portal_origin == "http://192.168.1.169:8081",
+	      "portal origin defaults to the public host, not loopback");
+	String public_host, public_host_error;
+	check(!ResolvePublicHost("localhost", public_host, public_host_error) &&
+	      !ResolvePublicHost("127.0.0.1", public_host, public_host_error) &&
+	      ResolvePublicHost("203.0.113.7", public_host, public_host_error) && public_host == "203.0.113.7",
+	      "public host refuses loopback and accepts an explicit public address");
+	SetEnv("MANAGERSKYLARK_ORIGIN_PORTAL", previous_portal_origin);
+	String previous_proxy_peers = GetEnv("MANAGERSKYLARK_TRUSTED_PROXY_PEERS");
+	SetEnv("MANAGERSKYLARK_TRUSTED_PROXY_PEERS", "127.0.0.1");
+	check(IsTrustedManagerProxyPeer("127.0.0.1") && !IsTrustedManagerProxyPeer("127.0.0.2") &&
+	      !IsTrustedManagerProxyPeer("proxy.example"),
+	      "portal Secure-cookie proxy trust uses the same exact IPv4 peer allowlist");
+	SetEnv("MANAGERSKYLARK_TRUSTED_PROXY_PEERS", previous_proxy_peers);
 
 	SystemAuthService::ConfigureSite(saved_dir, saved_demo);
 	Cout() << "\nSystem auth bridge self-tests: " << (checks - failed) << "/" << checks << "\n";

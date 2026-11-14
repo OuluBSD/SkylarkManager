@@ -16,6 +16,7 @@ public:
 	explicit ScienceService(ScienceCorpus& corpus) : corpus(corpus) {}
 
 	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override;
+	String AuditOperation(const String& op) const override;
 
 	static const char *READ_SCOPE()   { return "science.read"; }
 	static const char *AUTHOR_SCOPE() { return "science.author"; }

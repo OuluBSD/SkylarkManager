@@ -1,7 +1,8 @@
 # GitHubForge Package Guide
 
-`uppsrc/GitHubForge` is the GitHub forge contract. `GitHubForgeBackend` is an
-abstract interface over `IForgeBackend` with two implementations, chosen per
+`uppsrc/GitHubForge` owns the GitHub backend, host-integrated routes and views,
+their tests, and the witz templates. `GitHubForgeBackend` is an abstract
+interface over `IForgeBackend` with two implementations, chosen per
 process by `GitHubForgeBackend::Configure` (ManagerSkylark `--github-backend`
 `gh|emulated`, default `gh`) and obtained through `GitHubForgeBackend::Create()`.
 
@@ -12,6 +13,10 @@ process by `GitHubForgeBackend::Configure` (ManagerSkylark `--github-backend`
 | `GitHubForge.h/.cpp` | Abstract `GitHubForgeBackend`: full op surface (issues, pull requests, repos, runs), process-wide `Config`, `Create()` factory, GitHub JSON mapping, ISO-8601 time parsing, repo-slug / login / branch validation |
 | `GitHubGhConnector.h/.cpp` | `GitHubGhConnector`: github.com through the argv-only `gh` CLI (`GhRun` over `LocalProcess::Start2`) |
 | `GitHubEmulatedBackend.h/.cpp` | `GitHubEmulatedBackend`: stateful local emulation, no network, no gh executable; JSON store with flock and atomic replace |
+| `GitHubPlatform.*`, `GitHubActions.cpp`, `GitHubRepo*.cpp/.h`, `GitHubRoutes.cpp`, `GitHubWorkflowViews.cpp`, `GitHubUserView.cpp` | GitHub web routes, service mapping, and page views |
+| `GitHubForgeHost.h/.cpp` | Injected navigation, auth/menu, markdown, ManagerStore, and Agent dashboard callbacks; the package has no dependency on ManagerSkylark |
+| `GitHub*Tests.cpp` | Adapter and backend contract tests run as part of `ManagerSkylark --test` |
+| `GitHubTemplates.*`, `github-*.witz`, `deploy-templates.sh` | Template renderer, view templates, and executable-directory deployment script |
 
 ## Binding rules
 
@@ -33,5 +38,5 @@ process by `GitHubForgeBackend::Configure` (ManagerSkylark `--github-backend`
    `flock` on `github-emulated.lock` for its whole read-modify-write; mutations
    replace `github-emulated.json` through a temp file, fsync and rename. Without
    POSIX locks the emulation refuses to run.
-7. **Shared contract**: `ManagerSkylark/GitHubBackendContractTests.cpp` runs one
+7. **Shared contract**: `GitHubBackendContractTests.cpp` runs one
    body of expectations against both implementations on the fixture.

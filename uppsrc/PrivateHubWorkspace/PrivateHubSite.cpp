@@ -1,4 +1,5 @@
 #include "PrivateHubSite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -55,6 +56,35 @@ static bool RequireUser(WebRequest& r)
 	return false;
 }
 
+static void Failed(WebRequest& r, int code, const String& message);
+
+static bool PolicyRead(WebRequest& r, const String& module, const String& record)
+{
+	int status = ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC);
+	if(status == 0)
+		return true;
+	Failed(r, status, status == 503 ? "content policy is unavailable" : "content not found");
+	return false;
+}
+
+static String ProjectPolicyId(WebRequest& r, const String& id)
+{
+	return Project(r) + ":" + id;
+}
+
+static bool PolicyListVisible(WebRequest& r, const String& module, const String& record)
+{
+	return ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC) == 0;
+}
+
+static bool PolicyStoreHealthy(WebRequest& r)
+{
+	if(ContentPolicyFor(r.Site().data_root).LoadError().IsEmpty())
+		return true;
+	Failed(r, 503, "content policy is unavailable");
+	return false;
+}
+
 static const char *AUTHOR_ROLE = "member";
 
 static bool CanAuthor(WebRequest& r)
@@ -76,10 +106,10 @@ static String CsrfField(WebRequest& r)
 
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<title>" + Esc(title) + "</title></head><body>"
-	       "<header>" + SessionChromeHtml(r) + "</header>"
-	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
+	       "<header>" + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</header>"
+	       "<h1>" + Esc(title) + "</h1>" + body + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static void Failed(WebRequest& r, int code, const String& message)
@@ -109,6 +139,8 @@ static void PrivateHubHome(WebRequest& r)
 	}
 	if(!RequireUser(r))
 		return;
+	if(!PolicyStoreHealthy(r) || !PolicyRead(r, "workspace", String()))
+		return;
 	Vector<String> orgs;
 	if(!Backend().ListOrganizations(orgs)) {
 		Page(r, "PrivateHub", "<p>Workspace root is not readable.</p>");
@@ -119,13 +151,16 @@ static void PrivateHubHome(WebRequest& r)
 	for(const String& org : orgs) {
 		Vector<String> repos;
 		Backend().ListRepositories(org, repos);
-		body << "<li>" << Esc(org) << "<ul>";
+		StringBuffer visible_repos;
 		for(const String& repo : repos) {
+			if(!PolicyListVisible(r, "projects", org + "/" + repo))
+				continue;
 			Vector<Value> args;
 			args << Value(org) << Value(repo);
-			body << "<li><a href=\"" << Esc(r.Site().Url("privatehub/*/*", args)) << "\">" << Esc(repo) << "</a></li>";
+			visible_repos << "<li><a href=\"" << Esc(r.Site().Url("privatehub/*/*", args)) << "\">" << Esc(repo) << "</a></li>";
 		}
-		body << "</ul></li>";
+		if(visible_repos.GetCount())
+			body << "<li>" << Esc(org) << "<ul>" << String(visible_repos) << "</ul></li>";
 	}
 	body << "</ul>";
 	Page(r, "PrivateHub", String(body));
@@ -134,6 +169,8 @@ static void PrivateHubHome(WebRequest& r)
 static void ProjectHome(WebRequest& r)
 {
 	if(!RequireUser(r))
+		return;
+	if(!PolicyRead(r, "projects", Project(r)))
 		return;
 	Page(r, Project(r), ProjectNav(r) + "<p>Issues, wiki pages, discussion topics and release files for this project.</p>");
 }
@@ -144,6 +181,8 @@ static void IssuesList(WebRequest& r)
 {
 	if(!RequireUser(r))
 		return;
+	if(!PolicyStoreHealthy(r))
+		return;
 	Vector<ForgeIssue> issues;
 	ForgeResult res = Backend().ListIssues(Project(r), issues);
 	if(!res.ok) {
@@ -153,6 +192,8 @@ static void IssuesList(WebRequest& r)
 	StringBuffer b;
 	b << ProjectNav(r) << "<table><tr><th>Issue</th><th>State</th><th>Author</th><th>Comments</th></tr>";
 	for(const ForgeIssue& i : issues) {
+		if(!PolicyListVisible(r, "issues", ProjectPolicyId(r, i.issue_id)))
+			continue;
 		Vector<Value> args = ArgsOf(r, 2);
 		args << Value(i.issue_id);
 		b << "<tr><td><a href=\"" << Esc(r.Site().Url("privatehub/*/*/issues/*", args)) << "\">" << Esc(i.title) << "</a></td>"
@@ -217,6 +258,8 @@ static void IssueDetail(WebRequest& r)
 		Failed(r, 404, "issue not found");
 		return;
 	}
+	if(!PolicyRead(r, "issues", ProjectPolicyId(r, issue.issue_id)))
+		return;
 	Vector<ForgeComment> comments;
 	Backend().ListComments(Project(r), r.PathArg(2), comments);
 	StringBuffer b;
@@ -234,6 +277,8 @@ static void IssueDetail(WebRequest& r)
 static void IssueComment(WebRequest& r)
 {
 	if(!RequireAuthor(r))
+		return;
+	if(!PolicyRead(r, "issues", ProjectPolicyId(r, r.PathArg(2))))
 		return;
 	String body = r.Param("body");
 	if(body.IsEmpty()) {
@@ -259,6 +304,8 @@ static void WikiList(WebRequest& r)
 {
 	if(!RequireUser(r))
 		return;
+	if(!PolicyStoreHealthy(r))
+		return;
 	Vector<PrivateHubWikiPage> pages;
 	ForgeResult res = Backend().ListWikiPages(Project(r), pages);
 	if(!res.ok) {
@@ -268,6 +315,8 @@ static void WikiList(WebRequest& r)
 	StringBuffer b;
 	b << ProjectNav(r) << "<ul>";
 	for(const PrivateHubWikiPage& p : pages) {
+		if(!PolicyListVisible(r, "wiki", ProjectPolicyId(r, p.slug)))
+			continue;
 		Vector<Value> args = ArgsOf(r, 2);
 		args << Value(p.slug);
 		b << "<li><a href=\"" << Esc(r.Site().Url("privatehub/*/*/wiki/*", args)) << "\">" << Esc(p.title) << "</a></li>";
@@ -287,6 +336,8 @@ static void WikiPage(WebRequest& r)
 		Failed(r, 404, "wiki page not found");
 		return;
 	}
+	if(!PolicyRead(r, "wiki", ProjectPolicyId(r, page.slug)))
+		return;
 	String edit;
 	if(CanAuthor(r))
 		edit = "<p><a href=\"" + Esc(r.Site().Url("privatehub/*/*/wiki/*/edit", ArgsOf(r, 3))) + "\">Edit</a></p>";
@@ -299,6 +350,8 @@ static void TopicList(WebRequest& r)
 {
 	if(!RequireUser(r))
 		return;
+	if(!PolicyStoreHealthy(r))
+		return;
 	Vector<PrivateHubDiscussionTopic> topics;
 	ForgeResult res = Backend().ListDiscussionTopics(Project(r), topics);
 	if(!res.ok) {
@@ -308,6 +361,8 @@ static void TopicList(WebRequest& r)
 	StringBuffer b;
 	b << ProjectNav(r) << "<ul>";
 	for(const PrivateHubDiscussionTopic& t : topics) {
+		if(!PolicyListVisible(r, "discussions", ProjectPolicyId(r, t.slug)))
+			continue;
 		Vector<Value> args = ArgsOf(r, 2);
 		args << Value(t.slug);
 		b << "<li><a href=\"" << Esc(r.Site().Url("privatehub/*/*/discussions/*", args)) << "\">" << Esc(t.title)
@@ -333,6 +388,8 @@ static void TopicDetail(WebRequest& r)
 		Failed(r, 404, "discussion topic not found");
 		return;
 	}
+	if(!PolicyRead(r, "discussions", ProjectPolicyId(r, topic.slug)))
+		return;
 	Vector<PrivateHubPost> posts;
 	Backend().ListDiscussionPosts(Project(r), r.PathArg(2), posts);
 	StringBuffer b;
@@ -349,6 +406,8 @@ static void TopicDetail(WebRequest& r)
 static void TopicPost(WebRequest& r)
 {
 	if(!RequireAuthor(r))
+		return;
+	if(!PolicyRead(r, "discussions", ProjectPolicyId(r, r.PathArg(2))))
 		return;
 	String body = r.Param("body");
 	if(body.IsEmpty()) {
@@ -376,6 +435,8 @@ static void FileList(WebRequest& r)
 {
 	if(!RequireUser(r))
 		return;
+	if(!PolicyStoreHealthy(r))
+		return;
 	Vector<PrivateHubReleaseFile> files;
 	ForgeResult res = Backend().ListReleaseFiles(Project(r), files);
 	if(!res.ok) {
@@ -385,6 +446,8 @@ static void FileList(WebRequest& r)
 	StringBuffer b;
 	b << ProjectNav(r) << "<table><tr><th>File</th><th>Release</th><th>Bytes</th></tr>";
 	for(const PrivateHubReleaseFile& f : files) {
+		if(!PolicyListVisible(r, "files", ProjectPolicyId(r, f.name)))
+			continue;
 		Vector<Value> args = ArgsOf(r, 2);
 		args << Value(f.name);
 		b << "<tr><td><a href=\"" << Esc(r.Site().Url("privatehub/*/*/files/*", args)) << "\">" << Esc(f.name) << "</a></td>"
@@ -413,6 +476,8 @@ static void FileDetail(WebRequest& r)
 		Failed(r, 404, "release file not found");
 		return;
 	}
+	if(!PolicyRead(r, "files", ProjectPolicyId(r, file.name)))
+		return;
 	Page(r, file.name, ProjectNav(r) +
 	     "<dl><dt>Release</dt><dd>" + Esc(file.release) + "</dd>"
 	     "<dt>Bytes</dt><dd>" + AsString(file.size_bytes) + "</dd>"
@@ -504,6 +569,8 @@ static void WikiEdit(WebRequest& r)
 		Failed(r, 404, "wiki page not found");
 		return;
 	}
+	if(!PolicyRead(r, "wiki", ProjectPolicyId(r, page.slug)))
+		return;
 	Page(r, "Edit " + page.title, ProjectNav(r) +
 	     WikiForm(r, r.Site().Url("privatehub/*/*/wiki/*/save", ArgsOf(r, 3)), page, true));
 }
@@ -517,6 +584,8 @@ static void WikiSave(WebRequest& r)
 		Failed(r, 404, "wiki page not found");
 		return;
 	}
+	if(!PolicyRead(r, "wiki", ProjectPolicyId(r, page.slug)))
+		return;
 	String expected = r.Param("expected_revision");
 	if(expected.IsEmpty()) {
 		Failed(r, 400, "the edit does not name the revision it was made from");

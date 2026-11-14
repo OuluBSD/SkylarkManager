@@ -3,7 +3,7 @@
 `uppsrc/WebAuth` is a shared, storage-agnostic session/bearer authentication
 library: password hashing, session- and scoped-token resolution, and login/
 settings view fragments, reusable by any app in this assembly (currently
-CompanySkylark's `CompanyAuth` and ManagerSkylark's `SystemAuth`).
+the Company site in `uppsrc/Company` and ManagerSkylark's `SystemAuth`).
 
 ## File Map
 

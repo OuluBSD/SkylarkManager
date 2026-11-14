@@ -5,7 +5,8 @@ uses
 	Skylark,
 	WebStorage,
 	WebAccounts,
-	WebEngine;
+	WebEngine,
+	WebsiteTemplates;
 
 file
 	AGENTS.md,

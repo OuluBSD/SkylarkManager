@@ -8,7 +8,7 @@ NAMESPACE_UPP
 // forms post to the real routes, so every call runs as the signed-in user
 // under the site's existing role, CSRF and origin fences.
 
-static String Esc(const String& s)
+static String ConsoleHtmlEscape(const String& s)
 {
 	StringBuffer out;
 	for(int i = 0; i < s.GetCount(); i++) {
@@ -27,7 +27,7 @@ static String Esc(const String& s)
 
 static String HiddenField(WebRequest& r)
 {
-	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
+	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + ConsoleHtmlEscape(r.CsrfToken()) + "\">";
 }
 
 // A command's api_path carries no wildcard when the form can post straight
@@ -76,9 +76,9 @@ static void ConsolePage(WebRequest& r)
 			String description = (String)c.Get("description", "");
 			Vector<CommandDesc> unused;
 			(void)unused;
-			b << "<tr><td><b>" << Esc(name) << "</b><br><small>" << Esc(method) << " "
-			  << Esc(api_path) << " · " << Esc(transport) << " · " << Esc(response)
-			  << " · auth: " << Esc(auth) << "<br>" << Esc(description) << "</small></td><td>";
+			b << "<tr><td><b>" << ConsoleHtmlEscape(name) << "</b><br><small>" << ConsoleHtmlEscape(method) << " "
+			  << ConsoleHtmlEscape(api_path) << " · " << ConsoleHtmlEscape(transport) << " · " << ConsoleHtmlEscape(response)
+			  << " · auth: " << ConsoleHtmlEscape(auth) << "<br>" << ConsoleHtmlEscape(description) << "</small></td><td>";
 			if(transport != "http" || !RunnablePath(api_path)) {
 				b << "<small>use skylarkctl</small></td></tr>";
 				continue;
@@ -94,18 +94,18 @@ static void ConsolePage(WebRequest& r)
 				ValueMap am = a;
 				String an = (String)am.Get("name", "");
 				String req = (bool)am.Get("required", false) ? " required" : "";
-				fields << "<input name=\"" << Esc(an) << "\" placeholder=\"" << Esc(an)
+				fields << "<input name=\"" << ConsoleHtmlEscape(an) << "\" placeholder=\"" << ConsoleHtmlEscape(an)
 				       << "\"" << req << "><br>";
 			}
 			String submit = method == "POST" ? "Run" : "Open";
 			String m = method == "POST" ? "post" : "get";
-			b << "<form method=\"" << m << "\" action=\"" << Esc(r.Site().Url(api_path)) << "\">"
+			b << "<form method=\"" << m << "\" action=\"" << ConsoleHtmlEscape(r.Site().Url(api_path)) << "\">"
 			  << fields << "<input type=\"submit\" value=\"" << submit << "\"></form></td></tr>";
 		}
 		b << "</table>";
 	}
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Command console</title></head>"
-	       "<body><nav><a href=\"" + Esc(r.Site().Url("")) + "\">Home</a></nav>"
+	       "<body><nav><a href=\"" + ConsoleHtmlEscape(r.Site().Url("")) + "\">Home</a></nav>"
 	       "<h1>Command console</h1>" + String(b) + "</body></html>");
 }
 

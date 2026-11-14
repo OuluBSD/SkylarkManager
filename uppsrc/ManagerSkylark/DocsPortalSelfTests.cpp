@@ -1,5 +1,5 @@
 #include <Core/Core.h>
-#include "DocsPortal.h"
+#include <WebDocs/DocsPortal.h>
 
 #ifndef _WIN32
 #include <unistd.h>

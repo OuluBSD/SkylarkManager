@@ -1,6 +1,7 @@
 #include "MetaAccountSite.h"
 #include "MetaInbox.h"
 #include <WebEngine/SessionRoutes.h>
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -38,10 +39,10 @@ static ValueMap JsonOk(bool ok, const String& err = String())
 
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
-	       "<title>" + title + "</title></head><body>"
-	       "<header>" + SessionChromeHtml(r) + "</header>"
-	       "<h1>" + title + "</h1>" + body + "</body></html>");
+	const WebsiteTemplate *t = FindWebsiteTemplate("glassmorphism");
+	ASSERT(t);
+	r.Html(t->RenderPage(title, "<header>" + SessionChromeHtml(r) + "</header><h1>" + title + "</h1>" + body,
+	                      ThemeHtmlAttrs(r), ThemeHeadScript()));
 }
 
 static String HtmlForm(const String& action, const String& csrf, const String& fields)
@@ -70,49 +71,24 @@ static String EscText(const String& s)
 	return String(out);
 }
 
-// The sign-in look follows the reference card (~/webref/javascript-login-form): dark navy, violet
-// accent, labeled form groups. No external font or script: the page falls back to the system stack.
-static String MetaLoginStyle()
-{
-	return R"MLOGIN(<style>
-body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 16px; background: #1d015a; color: rgba(255, 255, 255, 0.6);
-  font-family: Raleway, system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; }
-a { color: #7f71fe; text-decoration: none; cursor: pointer; }
-.m-container { width: 100%; max-width: 375px; box-sizing: border-box; padding: 30px 0; border-radius: 16px;
-  border: 4px solid rgba(255, 255, 255, 0.1); background: linear-gradient(0deg, rgba(4, 158, 116, 0.3), rgba(255, 255, 215, 0.02));
-  box-shadow: 0 32px 47px rgba(32, 23, 23, 0.09); }
-.m-form { width: 100%; padding: 0 30px; box-sizing: border-box; }
-.m-form_title { color: #fff; font-size: 26px; font-weight: 500; margin: 0 0 20px; }
-.m-form_group { display: flex; flex-wrap: wrap; justify-content: space-between; padding-bottom: 18px; }
-.m-form_label { display: block; margin-bottom: 10px; font-size: 15px; }
-.m-form_input { width: 100%; appearance: none; outline: 0; line-height: 44px; border: 1px solid rgba(255, 255, 255, 0.09);
-  background-color: rgba(255, 255, 255, 0.04); border-radius: 3px; padding: 0 15px; font-size: 18px; font-family: inherit;
-  box-sizing: border-box; color: #fff; font-weight: 300; }
-.m-form_input:focus { border-color: #7f71fe; }
-.m-form_btn { appearance: none; outline: 0; background-color: #7f71fe; border: 0; margin-top: 15px; line-height: 44px; padding: 0 15px;
-  color: #fff; font-weight: 500; border-radius: 3px; width: 100%; cursor: pointer; font-size: 18px; font-family: inherit; }
-.m-form_link { text-align: center; }
-.m-form_btn-register { display: block; line-height: 44px; color: rgba(255, 255, 255, 0.35); cursor: not-allowed; }
-.m-form_error { margin: 0 0 18px; padding: 8px 12px; border: 1px solid rgba(255, 140, 140, 0.5); border-radius: 3px; color: #ffb8b8; }
-</style>)MLOGIN";
-}
-
 static void MetaPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
-	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-	       "<title>" + title + "</title>" + MetaLoginStyle() + "</head><body>"
-	       "<main class=\"m-container\">" + body + "</main></body></html>");
+	const WebsiteTemplate *t = FindWebsiteTemplate("glassmorphism");
+	ASSERT(t);
+	r.Html(t->RenderPage(title, body, ThemeHtmlAttrs(r), ThemeHeadScript()));
 }
 
 // A browser sign-in that failed gets a readable page with the reason (task 042). An API caller keeps JSON.
 static void BrowserError(WebRequest& r, const String& back, const String& message, int code)
 {
 	r.Status(code, "Error");
-	MetaPage(r, "Not done",
+	const WebsiteTemplate *t = FindWebsiteTemplate("meta-login");
+	ASSERT(t);
+	r.Html(t->RenderPage("Not done",
 	         "<div class=\"m-form\"><h2 class=\"m-form_title\">Not done</h2>"
 	         "<p class=\"m-form_error\" role=\"alert\">" + EscText(message) + "</p>"
-	         "<div class=\"m-form_link\"><a href=\"" + EscText(r.Site().Url(back)) + "\">Back</a></div></div>");
+	         "<div class=\"m-form_link\"><a href=\"" + EscText(r.Site().Url(back)) + "\">Back</a></div></div>",
+	         ThemeHtmlAttrs(r), ThemeHeadScript()));
 }
 
 
@@ -140,21 +116,10 @@ static void MetaHome(WebRequest& r)
 static void MetaLoginForm(WebRequest& r)
 {
 	r.EnsureSession();
-	String body = "<form class=\"m-form\" method=\"post\" action=\"" + EscText(r.Site().Url("login:POST")) + "\">"
-	       "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscText(r.CsrfToken()) + "\">"
-	       "<h2 class=\"m-form_title\">Account Login</h2>"
-	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"username\">Username</label>"
-	       "<input class=\"m-form_input\" type=\"text\" id=\"username\" name=\"username\" autocomplete=\"username\" required></div>"
-	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"password\">Password</label>"
-	       "<input class=\"m-form_input\" type=\"password\" id=\"password\" name=\"password\" autocomplete=\"current-password\" required></div>"
-	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"code\">Authentication code</label>"
-	       "<input class=\"m-form_input\" type=\"text\" id=\"code\" name=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\""
-	       " placeholder=\"6 digits, if enrolled\"></div>"
-	       "<input type=\"hidden\" name=\"next\" value=\"" + EscText(r.Param("next")) + "\">"
-	       "<div class=\"m-form_group\"><button class=\"m-form_btn\" type=\"submit\">Log In</button></div>"
-	       "<div class=\"m-form_link\"><span class=\"m-form_btn-register\" aria-disabled=\"true\">Register (not available yet)</span></div>"
-	       "</form>";
-	MetaPage(r, "Sign in", body);
+	const WebsiteTemplate *t = FindWebsiteTemplate("meta-login");
+	ASSERT(t);
+	r.Html(t->RenderPage("Sign in", t->RenderMetaLoginForm(r.Site().Url("login:POST"), r.CsrfToken(), r.Param("next")),
+	                     ThemeHtmlAttrs(r), ThemeHeadScript()));
 }
 
 // One sign-in surface: session/login is kept for the API caller, and a browser that opens it goes to login (task 048).
@@ -172,9 +137,18 @@ static void MetaLoginSubmit(WebRequest& r)
 	String next = r.Param("next");
 	String back = next.IsEmpty() ? String("login") : "login?next=" + UrlEncode(next);
 	bool browser = r.Header("accept").Find("text/html") >= 0;
+	String auth_method = "password";
+	auto login_event = [&](const String& outcome, const String& method, const String& actor = String()) {
+		WebAuditEvent e; e.at = GetSysTime(); e.site = r.Site().id; e.kind = "login";
+		e.route = "login:POST"; e.method = "POST"; e.outcome = outcome; e.operation = method;
+		e.actor_user_id = actor; e.status = outcome == "success" ? 200 : 401;
+		if(r.HasSession()) e.session_ref = r.Session().data.Get("__audit_ref", "");
+		r.Site().Audit().Record(e);
+	};
 	r.DropSession();
 	WebAccountUser u;
 	if(!r.Site().Accounts().VerifyPassword(username, password, u).ok) {
+		login_event("failure", auth_method);
 		if(browser)
 			BrowserError(r, back, "The username or password was not recognized.", 401);
 		else
@@ -182,15 +156,20 @@ static void MetaLoginSubmit(WebRequest& r)
 		return;
 	}
 	// Enrolled accounts must present a live TOTP code or a recovery code.
-	if(u.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(u.user_id, code)) {
+	bool used_recovery = false;
+	if(u.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(u.user_id, code, used_recovery)) {
+		login_event("failure", "password_second_factor");
 		if(browser)
 			BrowserError(r, back, "A second-factor code is needed. Enter a current code and try again.", 401);
 		else
 			r.Json(JsonOk(false, "second factor required"), 401);
 		return;
 	}
+	if(u.totp_enrolled)
+		auth_method = used_recovery ? "password_recovery" : "password_totp";
 	String sid, csrf, err;
 	if(!r.Site().Accounts().Login(username, password, r.ClientIp(), sid, csrf, u, err).ok) {
+		login_event("failure", auth_method);
 		if(browser)
 			BrowserError(r, back, "Sign-in did not work. Try again.", 401);
 		else
@@ -198,8 +177,16 @@ static void MetaLoginSubmit(WebRequest& r)
 		return;
 	}
 	r.AdoptSession(sid);
+	login_event("success", auth_method, u.user_id);
 	if(browser) {
-		r.Redirect(!next.IsEmpty() && SsoReturnAllowed(r, next) ? next : r.Site().Url(""));
+		bool allowed_next = !next.IsEmpty() && SsoReturnAllowed(r, next);
+		if(!next.IsEmpty() && !allowed_next) {
+			WebAuditEvent rejected; rejected.at = GetSysTime(); rejected.site = r.Site().id;
+			rejected.kind = "redirect"; rejected.route = "redirect"; rejected.method = "POST";
+			rejected.outcome = "rejected"; rejected.status = 302; rejected.actor_user_id = u.user_id;
+			r.Site().Audit().Record(rejected);
+		}
+		r.Redirect(allowed_next ? next : r.Site().PublicUrl("/"));
 		return;
 	}
 	ValueMap m;
@@ -217,9 +204,20 @@ static void MetaLogout(WebRequest& r)
 	r.Json(JsonOk(true));
 }
 
+static void MetaAuditAction(WebRequest& r, const String& route, const String& outcome, int status)
+{
+	WebAuditEvent e; e.at = GetSysTime(); e.site = r.Site().id;
+	e.kind = "sensitive_action"; e.route = route; e.method = "POST";
+	e.outcome = outcome; e.status = status;
+	if(r.HasUser()) e.actor_user_id = r.User().user_id;
+	if(r.HasSession()) e.session_ref = r.Session().data.Get("__audit_ref", "");
+	r.Site().Audit().Record(e);
+}
+
 static void MetaTotpBegin(WebRequest& r)
 {
 	if(!r.HasUser()) {
+		MetaAuditAction(r, "account:totp_begin", "failure", 401);
 		r.Json(JsonOk(false, "sign in first"), 401);
 		return;
 	}
@@ -228,9 +226,11 @@ static void MetaTotpBegin(WebRequest& r)
 	StoreResult st = r.Site().Accounts().BeginTotpEnrollment(r.User().user_id, r.Param("password"),
 	                                                         secret, recovery);
 	if(!st.ok) {
+		MetaAuditAction(r, "account:totp_begin", "failure", 403);
 		r.Json(JsonOk(false, st.error), 403);
 		return;
 	}
+	MetaAuditAction(r, "account:totp_begin", "success", 200);
 	ValueArray codes;
 	for(const String& c : recovery)
 		codes.Add(c);
@@ -246,28 +246,34 @@ static void MetaTotpBegin(WebRequest& r)
 static void MetaTotpConfirm(WebRequest& r)
 {
 	if(!r.HasUser()) {
+		MetaAuditAction(r, "account:totp_confirm", "failure", 401);
 		r.Json(JsonOk(false, "sign in first"), 401);
 		return;
 	}
 	StoreResult st = r.Site().Accounts().ConfirmTotpEnrollment(r.User().user_id, r.Param("code"));
 	if(!st.ok) {
+		MetaAuditAction(r, "account:totp_confirm", "failure", 403);
 		r.Json(JsonOk(false, st.error), 403);
 		return;
 	}
+	MetaAuditAction(r, "account:totp_confirm", "success", 200);
 	r.Json(JsonOk(true));
 }
 
 static void MetaTotpDisable(WebRequest& r)
 {
 	if(!r.HasUser()) {
+		MetaAuditAction(r, "account:totp_disable", "failure", 401);
 		r.Json(JsonOk(false, "sign in first"), 401);
 		return;
 	}
 	StoreResult st = r.Site().Accounts().DisableTotp(r.User().user_id, r.Param("password"));
 	if(!st.ok) {
+		MetaAuditAction(r, "account:totp_disable", "failure", 403);
 		r.Json(JsonOk(false, st.error), 403);
 		return;
 	}
+	MetaAuditAction(r, "account:totp_disable", "success", 200);
 	r.Json(JsonOk(true));
 }
 
@@ -455,6 +461,7 @@ static void MetaConsentDecide(WebRequest& r)
 			return;
 		}
 		ConsentEvent(g.subject_user_id, g.client_site, "meta:" + r.User().username, "consent.granted");
+		MetaAuditAction(r, "meta:grant_approve", "success", 200);
 		FormDone(r, "consent", JsonOk(true));
 		return;
 	}
@@ -474,6 +481,7 @@ static void MetaConsentDecide(WebRequest& r)
 	ConsentEvent(g.subject_user_id, g.client_site, "meta:" + r.User().username,
 	             approve ? "consent.granted"
 	                     : (g.state == "requested" ? "consent.denied" : "consent.revoked"));
+	MetaAuditAction(r, approve ? "meta:grant_approve" : (g.state == "requested" ? "meta:grant_deny" : "meta:grant_revoke"), "success", 200);
 	FormDone(r, "consent", JsonOk(true));
 }
 
@@ -579,6 +587,51 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 		r.status = 200;
 		r.payload.Add("grant_id", grant_id);
 		r.payload.Add("existed", existed);
+		return r;
+	}
+	if(call.op == "grant-consent") {
+		String subject = call.payload.Get("subject_user_id");
+		String client_site = call.payload.Get("client_site");
+		String client_user = call.payload.Get("client_user_id");
+		if(ctx.from_site != client_site || subject.IsEmpty() || client_user.IsEmpty()) {
+			r.status = 403;
+			r.error = "invalid consent caller";
+			return r;
+		}
+		Vector<String> scopes;
+		Value sv = call.payload.Get("scopes");
+		if(sv.Is<ValueArray>())
+			for(const Value& s : (ValueArray)sv)
+				scopes.Add((String)s);
+		String grant_id;
+		StoreResult st = grants.GrantAs(subject, client_user, client_site,
+		                               call.payload.Get("client_id"), scopes, grant_id);
+		if(!st.ok) {
+			r.status = 409;
+			r.error = st.error;
+			return r;
+		}
+		r.ok = true;
+		r.status = 200;
+		r.payload.Add("grant_id", grant_id);
+		return r;
+	}
+	if(call.op == "clear-provision-requests") {
+		String subject = call.payload.Get("subject_user_id");
+		String client_site = call.payload.Get("client_site");
+		if(ctx.from_site != client_site || subject.IsEmpty()) {
+			r.status = 403;
+			r.error = "invalid consent caller";
+			return r;
+		}
+		StoreResult st = grants.DenyPendingProvision(subject, client_site);
+		if(!st.ok) {
+			r.status = 409;
+			r.error = st.error;
+			return r;
+		}
+		r.ok = true;
+		r.status = 200;
 		return r;
 	}
 	// The state of this site's account request for one username: "requested", "denied" or "none". The
@@ -740,6 +793,15 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 	r.status = 404;
 	r.error = "unknown op";
 	return r;
+}
+
+String MetaAccountService::AuditOperation(const String& op) const
+{
+	if(op == "ping" || op == "authenticate" || op == "request-consent" || op == "grant-consent" || op == "clear-provision-requests" ||
+	   op == "provision-status" || op == "request-provision" || op == "notify" ||
+	   op == "check-grant" || op == "resolve-session" || op == "revoke-grant")
+		return op;
+	return "unclassified";
 }
 
 void RegisterMetaAccountService(const String& meta_site_id, SiteAccounts& accounts, WebGrants& grants)

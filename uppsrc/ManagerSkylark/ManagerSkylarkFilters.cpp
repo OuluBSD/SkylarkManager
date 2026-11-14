@@ -21,7 +21,20 @@ bool ManagerSkylarkApp::FilterHandler(Http& http)
 		TheWebEngine().Gateway(http);
 		return false;
 	}
-	return test_mode || SystemAuthService::AuthorizeRequest(http);
+	if(test_mode)
+		return true;
+	UserSession session = SystemAuthService::GetCurrentSession(http);
+	int rejection_status = 0;
+	bool allowed = SystemAuthService::AuthorizeRequest(http, &session, &rejection_status);
+	SystemAuthService::SetRootAuditContext(http, session, allowed);
+	return allowed;
+}
+
+void ManagerSkylarkApp::RequestComplete(Http& http, int duration_ms)
+{
+	if(test_mode || WebEngine::CurrentListenerPort() > 0)
+		return;
+	SystemAuthService::RecordRootRequestComplete(http, duration_ms);
 }
 
 EffectivePolicy ManagerSkylarkApp::ResolveEffectivePolicy(const PolicyInput& input) const

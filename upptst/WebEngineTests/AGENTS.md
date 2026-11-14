@@ -14,5 +14,7 @@ asserts the fence properties:
 - cross-site work goes through the WebBroker and is recorded in diagnostics;
   calls to unregistered sites fail explicitly;
 - broker TCP transport is an explicit stub.
+- Website template registry checks cover stable ids, unique registration,
+  renderer structure, safe theme/density defaults and task-052 propagation.
 
 Run with the app's `--test` convention: exit code 0 = all checks passed.

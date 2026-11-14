@@ -40,3 +40,13 @@
 - Assets are read from `GetExeDirFile("static/WebFramework/")`. That is the real directory of the executable, so run `deploy-assets.sh` with the directory that holds the binary, not a `bin/<name>` symlink.
 - A missing asset throws `Exc`. A page without its CSS or JS is a defect, so it is not rendered.
 - Assets are cached after the first read. Edit `assets/` and redeploy; a running process keeps its cache.
+
+## Website template ownership
+
+- New composed-site page shells and reusable theme configuration belong in
+  `uppsrc/WebsiteTemplates`; site handlers select a template by id and provide
+  page-specific content.
+- `WebFramework` retains its independent layout/navigation template registry
+  (`WebTemplate`/`TemplateRegistry`) for `PageBuilder`. Composed-site templates
+  use `WebsiteTemplate` in the `WebsiteTemplates` package to avoid a dependency
+  cycle between the engine and this framework.

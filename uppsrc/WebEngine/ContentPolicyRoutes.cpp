@@ -3,8 +3,16 @@
 
 NAMESPACE_UPP
 
+static VectorMap<String, bool> s_policy_secret_links;
+
+static bool PolicySecretLinksEnabled(const WebRequest& r)
+{
+	int i = s_policy_secret_links.Find(r.Site().id);
+	return i >= 0 && s_policy_secret_links[i];
+}
+
 // The content policy settings for a site (task 053): an admin page and the same actions as manifest commands.
-// Only admins change a policy. A link token is shown once, when it is created, and is kept only as its hash.
+// Only admins change policy. Secret links travel in URL fragments, then exchange by POST for scoped cookies.
 
 static bool PolicyAdmin(WebRequest& r)
 {
@@ -22,6 +30,18 @@ static void PolicyDenied(WebRequest& r)
 	m.Add("ok", false);
 	m.Add("error", r.HasUser() ? "content policy is for admins" : "sign in to change content policy");
 	r.Json(m, r.HasUser() ? 403 : 401);
+}
+
+static bool PolicyStoreReady(WebRequest& r, ContentPolicyStore& store)
+{
+	if(store.LoadError().IsEmpty())
+		return true;
+	ValueMap m;
+	m.Add("ok", false);
+	m.Add("error", String("content policy could not be loaded; repair ") +
+	      AppendFileName(r.Site().data_root, "content_policy.json") + ": " + store.LoadError());
+	r.Json(m, 503);
+	return false;
 }
 
 // The policy a scope names. The site policy has no id; a module or record policy is found by id.
@@ -90,6 +110,7 @@ static void PolicyGet(WebRequest& r)
 		return;
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store)) return;
 	ValueMap m;
 	m.Add("ok", true);
 	m.Add("site", PolicyValue(store.Site()));
@@ -103,6 +124,7 @@ static void PolicySet(WebRequest& r)
 		return;
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store)) return;
 	String scope = r.Param("scope");
 	String id = r.Param("id");
 	ContentLevel level;
@@ -126,6 +148,7 @@ static void PolicyGrant(WebRequest& r)
 		return;
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store)) return;
 	String scope = r.Param("scope");
 	String id = r.Param("id");
 	String kind = r.Param("kind");
@@ -153,6 +176,7 @@ static void PolicyRevoke(WebRequest& r)
 		return;
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store)) return;
 	String scope = r.Param("scope");
 	String id = r.Param("id");
 	int index = ScanInt(r.Param("index"));
@@ -169,24 +193,35 @@ static void PolicyRevoke(WebRequest& r)
 	Done(r, store, "");
 }
 
+static bool ValidPolicyTarget(const String& target);
+
 static void PolicyLink(WebRequest& r)
 {
 	if(!PolicyAdmin(r)) {
 		PolicyDenied(r);
 		return;
 	}
-	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
-	String scope = r.Param("scope");
-	String id = r.Param("id");
-	ContentPolicy p;
-	if(!ScopeGet(store, scope, id, p)) {
+	if(!r.IsSecureTransport()) {
 		ValueMap m;
 		m.Add("ok", false);
-		m.Add("error", "scope must be site, module or record, with an id for module and record");
+		m.Add("error", "secret links require verified HTTPS transport");
+		r.Json(m, 403);
+		return;
+	}
+	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store)) return;
+	String scope = r.Param("scope");
+	String id = r.Param("id");
+	String target = r.Param("target");
+	ContentPolicy p;
+	if(!ScopeGet(store, scope, id, p) || p.level != CONTENT_PROTECTED || !ValidPolicyTarget(target)) {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "secret links require an explicitly protected scope and a safe local target path");
 		r.Json(m, 400);
 		return;
 	}
-	// The token is random and shown once. Only its keyed hash is stored.
+	// The token is returned once as a fragment; browsers never send fragments in HTTP requests.
 	String token = WebAuthRandomBytes(24, true);
 	ContentGrant g;
 	g.kind = "link";
@@ -195,13 +230,118 @@ static void PolicyLink(WebRequest& r)
 	p.grants.Add(pick(g));
 	ScopeSet(store, scope, id, p);
 	String err;
-	ValueMap m;
-	m.Add("ok", store.Save(err));
-	m.Add("token", token);
-	m.Add("path", "?key=" + token);
-	if(!err.IsEmpty())
+	if(!store.Save(err)) {
+		p.grants.Remove(p.grants.GetCount() - 1);
+		ScopeSet(store, scope, id, p);
+		ValueMap m;
+		m.Add("ok", false);
 		m.Add("error", err);
-	r.Json(m, err.IsEmpty() ? 200 : 500);
+		r.Json(m, 500);
+		return;
+	}
+	ValueMap m;
+	m.Add("ok", true);
+	m.Add("access_path", "/policy-access");
+	m.Add("fragment", "wfcp=" + token + "&to=" + target);
+	r.SetHeader("Cache-Control", "no-store").SetHeader("Referrer-Policy", "no-referrer");
+	r.Json(m);
+}
+
+static bool ValidPolicyTarget(const String& target)
+{
+	if(target.GetCount() < 2 || target.GetCount() > 2048 || target[0] != '/' || target[1] == '/')
+		return false;
+	String segment;
+	for(int i = 0; i <= target.GetCount(); i++) {
+		int c = i < target.GetCount() ? (byte)target[i] : '/';
+		if(c == '/') {
+			if(segment == "." || segment == "..")
+				return false;
+			segment.Clear();
+			continue;
+		}
+		if(!(IsAlpha(c) || IsDigit(c) || c == '-' || c == '_' || c == '.' || c == '~'))
+			return false;
+		segment.Cat(c);
+	}
+	return true;
+}
+
+static void PolicyAccessPage(WebRequest& r)
+{
+	if(!r.IsSecureTransport()) {
+		r.Status(403, "secret links require verified HTTPS transport");
+		return;
+	}
+	r.EnsureSession();
+	r.SetHeader("Cache-Control", "no-store")
+	 .SetHeader("Referrer-Policy", "no-referrer")
+	 .SetHeader("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+ String csrf = Esc(r.CsrfToken());
+	String html;
+	html << "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Opening protected link</title></head>"
+	     << "<body><p id=\"status\">Opening protected content...</p><script>"
+	     << "(function(){var status=document.getElementById('status');var f=location.hash.slice(1);"
+	     << "history.replaceState(null,'',location.pathname);"
+	     << "var p=new URLSearchParams(f),token=p.get('wfcp'),target=p.get('to');"
+	     << "if(!token||!target){status.textContent='This protected link is invalid.';return;}"
+	     << "fetch('/api/policy/exchange',{method:'POST',credentials:'same-origin',referrerPolicy:'no-referrer',"
+	     << "headers:{'Content-Type':'application/json','X-WF-CSRF':'" << csrf << "'},"
+	     << "body:JSON.stringify({token:token,target:target})}).then(function(r){return r.json().then(function(v){return {ok:r.ok,value:v};});})"
+	     << ".then(function(result){if(result.ok&&result.value.ok){location.replace(target);return;}"
+	     << "status.textContent='This protected link is invalid or expired.';})"
+	     << ".catch(function(){status.textContent='The protected link could not be opened.';});})();"
+	     << "</script></body></html>";
+	r.Html(html);
+}
+
+static void PolicyAccessExchange(WebRequest& r)
+{
+	r.SetHeader("Cache-Control", "no-store").SetHeader("Referrer-Policy", "no-referrer");
+	if(!r.IsSecureTransport()) {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "secret links require verified HTTPS transport");
+		r.Json(m, 403);
+		return;
+	}
+	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!PolicyStoreReady(r, store))
+		return;
+	Value parsed;
+	try {
+		parsed = ParseJSON(r.Body());
+	}
+	catch(Exc&) {
+		parsed = Null;
+	}
+	auto InvalidLink = [&]() {
+		ValueMap m;
+		m.Add("ok", false);
+		m.Add("error", "secret link is invalid or expired");
+		r.Json(m, 404);
+	};
+	if(!parsed.Is<ValueMap>()) {
+		InvalidLink();
+		return;
+	}
+	ValueMap body = parsed;
+	if(body.GetCount() != 2 || body.Find("token") < 0 || body.Find("target") < 0 ||
+	   !body.Get("token").Is<String>() || !body.Get("target").Is<String>()) {
+		InvalidLink();
+		return;
+	}
+	String token = body.Get("token");
+	String target = body.Get("target");
+	String scope, id, hash;
+	if(!ValidPolicyTarget(target) || !store.FindLinkGrant(token, scope, id, hash) ||
+	   !CreateContentPolicyLinkSession(r, scope, id, hash)) {
+		InvalidLink();
+		return;
+	}
+	ValueMap response;
+	response.Add("ok", true);
+	r.Json(response);
 }
 
 static String ScopeForm(WebRequest& r, const String& scope, const String& id_label, const ContentPolicy& p,
@@ -239,16 +379,27 @@ static String ScopeForm(WebRequest& r, const String& scope, const String& id_lab
 
 static void PolicyPage(WebRequest& r)
 {
+	bool secret_links_configured = PolicySecretLinksEnabled(r);
+	bool allow_secret_links = secret_links_configured && r.IsSecureTransport();
 	if(!PolicyAdmin(r)) {
 		r.Status(r.HasUser() ? 403 : 401, r.HasUser() ? "content policy is for admins" : "sign in to change content policy");
 		return;
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!store.LoadError().IsEmpty()) {
+		r.Status(503, String("content policy could not be loaded; repair ") +
+		         AppendFileName(r.Site().data_root, "content_policy.json") + ": " + store.LoadError());
+		return;
+	}
 	String csrf = "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
 	String back = "<input type=\"hidden\" name=\"back\" value=\"" + Esc(r.Site().Url("policy")) + "\">";
 	String body;
 	body << "<h2>Content visibility</h2>"
-	     << "<p>The site policy applies to everything without a module or record policy. Public content is visible to everyone; protected content needs a grant or a secret link; private content needs a grant; public-only content is hidden from signed-in users.</p>"
+	     << (allow_secret_links
+	         ? String("<p>The site policy applies to everything without a module or record policy. Public content is visible to everyone; protected content needs a grant or a secret link; private content needs a grant; public-only content is hidden from signed-in users.</p>")
+	         : secret_links_configured
+	           ? String("<p>Secret-link controls require verified HTTPS transport. Public content is visible to everyone; protected/private content needs a named user or group grant; public-only content is hidden from signed-in users.</p>")
+	           : String("<p>The site policy applies to everything without a module or record policy. Public content is visible to everyone; protected/private content needs a named user or group grant; public-only content is hidden from signed-in users. Secret links are disabled on this site.</p>"))
 	     << ScopeForm(r, "site", "", store.Site(), "");
 	body << "<h3>Module</h3><form method=\"get\" action=\"" << Esc(r.Site().Url("policy")) << "\"><input name=\"module\" placeholder=\"module name\"><button>Show</button></form>";
 	String module = r.Param("module");
@@ -258,26 +409,47 @@ static void PolicyPage(WebRequest& r)
 	String record = r.Param("record");
 	if(record.GetCount())
 		body << ScopeForm(r, "record", "", store.Record(record), record);
-	body << "<h3>Secret link</h3><p>The token is shown once, in the answer to the request. Only its hash is kept.</p>"
-	     << "<form method=\"post\" action=\"" << Esc(r.Site().Url("api/policy/link")) << "\">" << csrf
-	     << "<input type=\"hidden\" name=\"scope\" value=\"site\">"
-	     << "<input name=\"label\" placeholder=\"label\"><button>Create link</button></form>";
+	if(allow_secret_links)
+		body << "<h3>Secret link</h3><p>Creates a protected link shown once as a URL fragment. Browsers never send the fragment in the HTTP request; the server stores only its keyed hash.</p>"
+		     << "<form id=\"policy-link-form\" method=\"post\" action=\"" << Esc(r.Site().Url("api/policy/link")) << "\">" << csrf
+		     << "<select name=\"scope\"><option value=\"site\">site</option><option value=\"module\">module</option><option value=\"record\">record</option></select>"
+		     << "<input name=\"id\" placeholder=\"module or record id\"><input name=\"target\" placeholder=\"/papers/1234.56789\" required>"
+		     << "<input name=\"label\" placeholder=\"label\"><button>Create link</button></form>"
+		     << "<output id=\"policy-link-output\" aria-live=\"polite\"></output>"
+		     << "<script>(function(){var f=document.getElementById('policy-link-form');if(!f)return;"
+		     << "f.addEventListener('submit',function(e){e.preventDefault();var out=document.getElementById('policy-link-output');"
+		     << "fetch(f.action,{method:'POST',credentials:'same-origin',referrerPolicy:'no-referrer',"
+		     << "headers:{'Content-Type':'application/x-www-form-urlencoded','X-WF-CSRF':f.elements['__wf_csrf__'].value},"
+		     << "body:new URLSearchParams(new FormData(f))}).then(function(r){return r.json();}).then(function(m){"
+		     << "if(!m.ok){out.textContent=m.error||'Link creation failed.';return;}"
+		     << "var u=new URL(m.access_path,location.origin);u.hash=m.fragment;out.textContent=u.href;})"
+		     << ".catch(function(){out.textContent='Link creation failed.';});});})();</script>";
 	body << "<h3>Grant</h3><form method=\"post\" action=\"" << Esc(r.Site().Url("api/policy/grant")) << "\">" << csrf << back
 	     << "<select name=\"kind\"><option value=\"user\">user</option><option value=\"group\">group (role)</option></select>"
 	     << "<input type=\"hidden\" name=\"scope\" value=\"site\">"
 	     << "<input name=\"value\" placeholder=\"username or role\"><button>Grant</button></form>";
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Content policy</title></head><body>"
+	r.SetHeader("Cache-Control", "no-store").SetHeader("Referrer-Policy", "no-referrer");
+	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Content policy</title></head><body>"
 	       "<main>" + body + "</main></body></html>");
 }
 
-void InstallContentPolicyRoutes(EngineSite& site)
+void InstallContentPolicyRoutes(EngineSite& site, bool allow_secret_links)
 {
+	int i = s_policy_secret_links.Find(site.id);
+	if(i < 0)
+		s_policy_secret_links.Add(site.id, allow_secret_links);
+	else
+		s_policy_secret_links[i] = allow_secret_links;
 	site.Router().Add("policy", PolicyPage);
 	site.Router().Add("api/policy", PolicyGet);
 	site.Router().Add("api/policy/set:POST", PolicySet);
 	site.Router().Add("api/policy/grant:POST", PolicyGrant);
 	site.Router().Add("api/policy/revoke:POST", PolicyRevoke);
-	site.Router().Add("api/policy/link:POST", PolicyLink);
+	if(allow_secret_links) {
+		site.Router().Add("api/policy/link:POST", PolicyLink);
+		site.Router().Add("policy-access", PolicyAccessPage);
+		site.Router().Add("api/policy/exchange:POST", PolicyAccessExchange);
+	}
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	cm.Add(site.id, site.title, HttpCommand("policy-show", "GET", "api/policy", "admin",
@@ -291,9 +463,10 @@ void InstallContentPolicyRoutes(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("policy-revoke", "POST", "api/policy/revoke", "admin",
 	                                        "json", "Revoke a grant by its index",
 	                                        {"scope:string:required", "id:string", "index:int:required"}));
-	cm.Add(site.id, site.title, HttpCommand("policy-link", "POST", "api/policy/link", "admin",
-	                                        "json", "Create a secret link for protected content; the token is shown once",
-	                                        {"scope:string:required", "id:string", "label:string"}));
+	if(allow_secret_links)
+		cm.Add(site.id, site.title, HttpCommand("policy-link", "POST", "api/policy/link", "admin",
+		                                        "json", "Create a protected-scope fragment link; token is shown once and exchanged by POST",
+		                                        {"scope:string:required", "id:string", "label:string", "target:string:required"}));
 }
 
 END_UPP_NAMESPACE

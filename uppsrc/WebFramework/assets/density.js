@@ -20,7 +20,7 @@ var WebDensityManager = (function() {
       return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname === location.hostname;
     } catch (e) { return false; }
   }
-  let current = readCookie('wf_density') || localStorage.getItem('wf_density') || document.documentElement.getAttribute('data-density') || 'comfortable';
+  let current = readCookie('wf_density') || localStorage.getItem('wf_density') || document.documentElement.getAttribute('data-density') || 'dense';
   function apply(lvl) {
     current = lvl;
     localStorage.setItem('wf_density', lvl);

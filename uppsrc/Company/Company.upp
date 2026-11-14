@@ -1,6 +1,7 @@
 description "Company store: proposals, work items, reviews, ledger, audit, contracts and projects on WebStorage records\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	Skylark,
 	WebStorage,

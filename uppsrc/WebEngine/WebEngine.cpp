@@ -9,6 +9,29 @@ WebEngine& TheWebEngine()
 	return x;
 }
 
+WebEngine::WebEngine()
+{
+	broker.SetAuditObserver(this);
+}
+
+void WebEngine::OnBrokerCall(const String& from_site, const String& to_site,
+                             const String& operation, const String& correlation,
+                             const String& outcome, int duration_ms)
+{
+	EngineSite *source = FindSite(from_site);
+	EngineSite *target = FindSite(to_site);
+	EngineSite *site = source ? source : target;
+	if(!site) return;
+	WebAuditEvent e;
+	e.at = GetSysTime(); e.site = site->id; e.kind = "broker_inprocess";
+	e.route = "broker:call"; e.method = "CALL"; e.outcome = outcome;
+	e.source_site = source ? source->id : "unregistered";
+	e.target_site = target ? target->id : "unregistered";
+	e.operation = operation;
+	e.correlation_id = correlation; e.duration_ms = duration_ms;
+	site->Audit().Record(e);
+}
+
 static thread__ int t_listener_port;
 
 int  WebEngine::CurrentListenerPort()          { return t_listener_port; }
@@ -110,6 +133,7 @@ Vector<EngineSiteListing> WebEngine::ListSites()
 		EngineSiteListing l;
 		l.id = sites[i]->id;
 		l.title = sites[i]->title;
+		l.public_url = sites[i]->PublicUrl("/");
 		for(int k = 0; k < port_site.GetCount(); k++)
 			if(port_site[k] == i) {
 				l.port = port_site.GetKey(k);
@@ -123,8 +147,8 @@ Vector<EngineSiteListing> WebEngine::ListSites()
 
 void WebEngine::Gateway(Http& http)
 {
-	// Absolute URLs and the fence are built on the authority the client used (task 032).
-	RequestHostScope host_scope(TrimBoth(http.GetHeader("host")));
+	uint64 audit_start = msecs();
+	// URL authority and origin validation are pinned to the configured public origin.
 	EngineSite* site = FindSiteByPort(CurrentListenerPort());
 	if(!site) {
 		http << "no website is bound to this listener";
@@ -159,7 +183,8 @@ void WebEngine::Gateway(Http& http)
 	String raw_cookie = http[~cookie_key];
 	if(raw_cookie.GetCount()) {
 		WebAccountSession s;
-		if(site->Accounts().ResolveSession(raw_cookie, s)) {
+		bool expired = false;
+		if(site->Accounts().ResolveSession(raw_cookie, s, &expired)) {
 			wr.session = s;
 			wr.has_session = true;
 			if(s.user_id.GetCount()) {
@@ -170,11 +195,42 @@ void WebEngine::Gateway(Http& http)
 				}
 			}
 		}
+		else {
+			WebAuditEvent e; e.at = GetSysTime(); e.site = site->id; e.kind = "session";
+			e.route = "session:resolve"; e.method = method; e.outcome = expired ? "expired" : "failed_resolution";
+			site->Audit().Record(e);
+		}
 	}
 
 	// Shared MetaAccount sign-in for a guest (task 039). In-process broker only, and only when enabled.
 	if(TheWebEngine().MetaSso())
 		SsoAutoSignIn(wr);
+
+	SiteRoute route;
+	Vector<String> args;
+	bool matched = site->Router().Match(method, segs, args, route);
+	String route_id = matched ? WebAuditRouteLabel(route.method, route.pattern) : "UNMATCHED:/";
+	bool audit_route = matched && (route.pattern == "api/audit/events" || route.pattern == "api/audit/sessions" ||
+	                              route.pattern == "api/audit/health" || route.pattern == "audit");
+	auto record_request = [&](int status, const String& outcome) {
+		if(audit_route) return;
+		WebAuditEvent e;
+		e.at = GetSysTime(); e.site = site->id; e.kind = "request"; e.route = route_id;
+		e.method = method.GetCount() <= 8 ? method : String("OTHER"); e.outcome = outcome;
+		e.status = status; e.duration_ms = min((int)(msecs() - audit_start), 3600000);
+		if(wr.HasUser()) e.actor_user_id = wr.User().user_id;
+		if(wr.HasSession()) e.session_ref = wr.Session().data.Get("__audit_ref", "");
+		site->Audit().Record(e);
+		if(matched && method == "POST" && route.pattern.Find("login") >= 0 &&
+		   route.pattern != "session/login" && site->id != "meta") {
+			WebAuditEvent login = e;
+			login.kind = "login";
+			login.operation = "password";
+			login.outcome = status >= 400 ? "failure" : "success";
+			site->Audit().Record(login);
+		}
+		if(wr.IsMutation()) { e.kind = "action"; site->Audit().Record(e); }
+	};
 
 	// Mutation fence: exact origin + server-side CSRF token.
 	if(wr.IsMutation()) {
@@ -182,6 +238,7 @@ void WebEngine::Gateway(Http& http)
 		if(authority.GetCount() && !site->OriginAllowed(authority)) {
 			http << "forbidden: cross-origin mutation";
 			http.Response(403, "Forbidden");
+			record_request(403, "rejected");
 			return;
 		}
 		if(wr.has_session) {
@@ -191,20 +248,21 @@ void WebEngine::Gateway(Http& http)
 			if(csrf != wr.session.csrf_token) {
 				http << "forbidden: csrf token mismatch";
 				http.Response(403, "Forbidden");
+				record_request(403, "rejected");
 				return;
 			}
 		}
 	}
 
-	SiteRoute route;
-	Vector<String> args;
-	if(site->Router().Match(method, segs, args, route)) {
+	if(matched) {
 		wr.path_args <<= args;
 		route.handler(wr);
+		record_request(wr.ResponseStatus(), wr.ResponseStatus() >= 400 ? "error" : "ok");
 	}
 	else {
 		http << "site '" << site->id << "': not found: " << path;
 		http.Response(404, "Not found");
+		record_request(404, "not_found");
 	}
 }
 

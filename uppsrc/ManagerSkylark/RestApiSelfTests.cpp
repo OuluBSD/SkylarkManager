@@ -1,4 +1,5 @@
 #include "ManagerSkylark.h"
+#include <GitHubForge/GitHubPlatform.h>
 #include "SfLegacyMigrationCli.h"
 #include "PrivateHubService.h"
 #include <TaskFoundry/TaskFoundryService.h>
@@ -6,11 +7,17 @@
 #include "CandidateWorkflow.h"
 #include "ReviewPackage.h"
 #include "AssessmentViews.h"
-#include "DataStoreSelfTests.h"
+#include <DataStore/DataStoreSelfTests.h>
 
 NAMESPACE_UPP
 
 namespace {
+
+static void PortalAuditExceptionFixture(Http&)
+{
+	Sleep(5);
+	throw Exc("root-audit-exception-canary");
+}
 
 struct SelfTestSiteRoot {
 	String path;
@@ -134,22 +141,17 @@ bool RunAtlasSelfTests(const String& scratch_dir);
 // Portal shell (tasks 033, 034): the descriptors, the meta-shell frame and the stock tree.
 static bool PortalShellSelfTests()
 {
-	if(PortalLinkHost("") != "127.0.0.1" || PortalLinkHost("192.168.1.169:8081") != "192.168.1.169"
-	   || PortalLinkHost("localhost") != "localhost" || PortalLinkHost("[::1]:8081") != "[::1]") {
-		Cerr() << "FAILED: portal link host is not the request's name without its port\n";
-		return false;
-	}
-
 	Vector<EngineSiteListing> sites;
 	EngineSiteListing atlas;
 	atlas.id = "atlas";
 	atlas.title = "Atlas";
+	atlas.public_url = "https://atlas.example/";
 	atlas.port = 18217;
 	sites.Add(pick(atlas));
 
-	Vector<PortalWebapp> apps = ListWebapps("192.168.1.169:8081", sites);
+	Vector<PortalWebapp> apps = ListWebapps(sites);
 	// Atlas leads the list (task 036), then the five hubs, then settings.
-	if(apps.GetCount() != 7 || apps[0].id != "atlas" || apps[0].url != "http://192.168.1.169:18217/"
+	if(apps.GetCount() != 7 || apps[0].id != "atlas" || apps[0].url != "https://atlas.example/"
 	   || apps[1].id != "ai" || apps[1].url != "/ai" || apps[5].id != "mesh"
 	   || apps[6].id != "settings" || apps[6].url != "/host/settings" || apps[6].group != "settings") {
 		Cerr() << "FAILED: portal descriptors are not Atlas, the five hubs, then settings\n";
@@ -158,8 +160,8 @@ static bool PortalShellSelfTests()
 
 	// The meta-nav is two rails of links that target the frame; no tree widget (task 036).
 	UserSession guest;
-	String atlas_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
-	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("name=\"portal-frame\"") < 0
+	String atlas_page = RenderPortalShell("atlas", guest, sites);
+	if(atlas_page.Find("src=\"https://atlas.example/\"") < 0 || atlas_page.Find("name=\"portal-frame\"") < 0
 	   || atlas_page.Find("class=\"portal-rail\"") < 0 || atlas_page.Find("class=\"portal-rail-slot\"") < 0
 	   || atlas_page.Find("data-app=\"atlas\" aria-current=\"page\"") < 0 || atlas_page.Find("class=\"wf-tree") >= 0
 	   || atlas_page.Find("class=\"wf-dock") >= 0 || atlas_page.Find("class=\"wf-template-sidebar\"") >= 0
@@ -186,25 +188,25 @@ static bool PortalShellSelfTests()
 		Cerr() << "FAILED: the webapp rail is not one widening rail with a toggle and no second list\n";
 		return false;
 	}
-	String guest_row = RenderPortalShell("192.168.1.169:8081", "github", guest, sites);
+	String guest_row = RenderPortalShell("github", guest, sites);
 	if(guest_row.Find("href=\"/login?next=%2Fgithub\" target=\"portal-frame\"") < 0
 	   || guest_row.Find("data-app=\"github\" aria-current=\"page\"") < 0) {
 		Cerr() << "FAILED: a guest's log in does not open inside the frame and return to the selected hub\n";
 		return false;
 	}
 	// Theme and density live in the portal header, read host-wide cookies, and refuse values outside the whitelist.
-	String header_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
+	String header_page = RenderPortalShell("atlas", guest, sites);
 	if(header_page.Find("id=\"wf-btn-theme\"") < 0 || header_page.Find("id=\"wf-btn-density\"") < 0
 	   || header_page.Find("id=\"wf-density-label\"") < 0 || header_page.Find("class=\"portal-head\"") < 0) {
 		Cerr() << "FAILED: portal header does not carry the theme and density controls\n";
 		return false;
 	}
-	String cookie_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites, "vivid-light", "spacious");
+	String cookie_page = RenderPortalShell("atlas", guest, sites, "vivid-light", "spacious");
 	if(cookie_page.Find("data-theme=\"vivid-light\"") < 0 || cookie_page.Find("data-density=\"spacious\"") < 0) {
 		Cerr() << "FAILED: a valid wf_theme or wf_density cookie is not applied to the portal page\n";
 		return false;
 	}
-	String refused_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites, "<script>x</script>", "none");
+	String refused_page = RenderPortalShell("atlas", guest, sites, "<script>x</script>", "none");
 	if(refused_page.Find("data-theme=\"vivid-dark\"") < 0 || refused_page.Find("data-density=\"none\"") < 0
 	   || refused_page.Find("<script>x</script>") >= 0) {
 		Cerr() << "FAILED: an invalid wf_theme or wf_density cookie was not refused\n";
@@ -217,8 +219,8 @@ static bool PortalShellSelfTests()
 		return false;
 	}
 
-	String fallback = RenderPortalShell("", "no-such-app", guest, sites);
-	if(fallback.Find("src=\"http://127.0.0.1:18217/\"") < 0) {
+	String fallback = RenderPortalShell("no-such-app", guest, sites);
+	if(fallback.Find("src=\"https://atlas.example/\"") < 0) {
 		Cerr() << "FAILED: an unknown app does not fall back to the first webapp\n";
 		return false;
 	}
@@ -244,6 +246,189 @@ static bool PortalShellSelfTests()
 	return true;
 }
 
+static bool PortalAuditHttpSelfTests(bool& test_mode, bool& demo_site,
+	                                 const String& site_root, const String& base_url)
+{
+	test_mode = false;
+	demo_site = false;
+	SystemAuthService::ConfigureSite(site_root, false);
+	HttpRequest anonymous(base_url + "/api/audit/events");
+	anonymous.Timeout(3000);
+	anonymous.Execute();
+	if(anonymous.GetStatusCode() != 401) { Cerr() << "portal audit anon status=" << anonymous.GetStatusCode() << "\n"; return false; }
+
+	ValueMap failed; failed.Add("username", "portal-login-user-canary");
+	failed.Add("password", "portal-login-password-canary");
+	HttpRequest failed_req(base_url + "/api/auth/login");
+	failed_req.POST().ContentType("application/json").PostData(AsJSON(failed));
+	failed_req.Timeout(3000); failed_req.Execute();
+	if(failed_req.GetStatusCode() != 401) { Cerr() << "portal audit failed-login status=" << failed_req.GetStatusCode() << "\n"; return false; }
+
+	auto login = [&](String& token) {
+		ValueMap credentials; credentials.Add("username", "synthetic-user"); credentials.Add("password", "synthetic-password");
+		HttpRequest req(base_url + "/api/auth/login");
+		req.POST().ContentType("application/json").PostData(AsJSON(credentials));
+		req.Timeout(3000);
+		ValueMap response = ParseJSON(req.Execute());
+		token = response.Get("token", "");
+		return req.GetStatusCode() == 200 && !token.IsEmpty();
+	};
+	String first_token, second_token;
+	if(!login(first_token)) { Cerr() << "portal audit first admin login failed\n"; return false; }
+	HttpRequest successful_root(base_url + "/api/auth/status");
+	successful_root.Header("Authorization", "Bearer " + first_token); successful_root.Timeout(3000);
+	successful_root.Execute();
+	HttpRequest denied_root(base_url + "/api/candidates/lineage");
+	denied_root.Timeout(3000); denied_root.Execute();
+	HttpRequest error_root(base_url + "/api/candidates/lineage?workspace=");
+	error_root.Header("Authorization", "Bearer " + first_token); error_root.Timeout(3000); error_root.Execute();
+	HttpRequest exception_root(base_url + "/__selftest/portal-audit-error?token=root-exception-query-canary");
+	exception_root.Header("Authorization", "Bearer " + first_token); exception_root.Timeout(3000); exception_root.Execute();
+	HttpRequest unmatched_root(base_url + "/__root_audit_unmatched_canary__?token=root-unmatched-query-canary");
+	unmatched_root.Header("Authorization", "Bearer " + first_token); unmatched_root.Timeout(3000); unmatched_root.Execute();
+	if(successful_root.GetStatusCode() != 200 || denied_root.GetStatusCode() != 401 ||
+	   error_root.GetStatusCode() != 400 || exception_root.GetStatusCode() != 500 ||
+	   unmatched_root.GetStatusCode() != 404) {
+		Cerr() << "root completion fixtures statuses=" << successful_root.GetStatusCode() << ","
+		       << denied_root.GetStatusCode() << "," << error_root.GetStatusCode() << ","
+		       << exception_root.GetStatusCode() << "," << unmatched_root.GetStatusCode() << "\n";
+		return false;
+	}
+	HttpRequest events_req(base_url + "/api/audit/events");
+	events_req.Header("Authorization", "Bearer " + first_token);
+	events_req.Timeout(3000);
+	String events_body = events_req.Execute();
+	ValueMap events_response = ParseJSON(events_body);
+	ValueArray events = events_response.Get("events", ValueArray());
+	bool login_failure = false, login_success = false, post_action = false;
+	bool success_status = false, denied_status = false, error_status = false, not_found_status = false;
+	bool exception_status = false, exception_duration_present = false, exception_duration_elapsed = false;
+	bool duration_present = false, duration_elapsed = false;
+	for(const Value& value : events) {
+		ValueMap e = value;
+		login_failure |= (String)e.Get("kind") == "login" && (String)e.Get("outcome") == "failure";
+		login_success |= (String)e.Get("kind") == "login" && (String)e.Get("outcome") == "success";
+		post_action |= (String)e.Get("kind") == "action" && ((String)e.Get("route")).Find("ApiAuthLogin") >= 0;
+		if((String)e.Get("kind") == "request") {
+			String route = e.Get("route", "");
+			int status = e.Get("status", 0);
+			if(route.Find("ApiAuthStatus") >= 0 && status == 200) success_status = true;
+			if(route.Find("ApiCandidateLineage") >= 0 && status == 401) denied_status = true;
+			if(route.Find("ApiCandidateLineage") >= 0 && status == 400) error_status = true;
+			if(route.Find("PortalAuditExceptionFixture") >= 0 && status == 500 &&
+			   (String)e.Get("outcome") == "error") {
+				exception_status = true;
+				exception_duration_present = !e.Get("duration_ms", Null).IsNull();
+				exception_duration_elapsed = (int)e.Get("duration_ms", 0) > 0;
+			}
+			if(route == "host:unmatched" && status == 404 && (String)e.Get("outcome") == "not_found")
+				not_found_status = true;
+			int duration = e.Get("duration_ms", 0);
+			duration_present |= !e.Get("duration_ms", Null).IsNull();
+			duration_elapsed |= duration > 0;
+		}
+	}
+	HttpRequest health_req(base_url + "/api/audit/health");
+	health_req.Header("Authorization", "Bearer " + first_token); health_req.Timeout(3000);
+	ValueMap health = ParseJSON(health_req.Execute());
+	if(health_req.GetStatusCode() != 200 ||
+	   ((String)health.Get("broker_diagnostics", "")).Find("communications_are_durable_in_WebAudit") < 0)
+		return false;
+	if(events_req.GetStatusCode() != 200 || (String)events_response.Get("site") != "portal" ||
+	   !login_failure || !login_success || !post_action || !success_status || !denied_status ||
+	   !error_status || !exception_status || !exception_duration_present || !exception_duration_elapsed ||
+	   !not_found_status || !duration_present || !duration_elapsed ||
+	   events_body.Find("portal-login-user-canary") >= 0 || events_body.Find("portal-login-password-canary") >= 0 ||
+	   events_body.Find("synthetic-user") >= 0 || events_body.Find("synthetic-password") >= 0 ||
+	   events_body.Find(first_token) >= 0 || events_body.Find("__root_audit_unmatched_canary__") >= 0 ||
+	   events_body.Find("root-unmatched-query-canary") >= 0 || events_body.Find("root-exception-query-canary") >= 0 ||
+	   events_body.Find("root-audit-exception-canary") >= 0) {
+		Cerr() << "portal audit event state site=" << (String)events_response.Get("site") << " status=" << events_req.GetStatusCode()
+		       << " login-failure=" << login_failure << " login-success=" << login_success << " action=" << post_action
+		       << " success=" << success_status << " denied=" << denied_status << " error=" << error_status
+		       << " exception=" << exception_status << " not-found=" << not_found_status
+		       << " duration=" << duration_present << "/" << duration_elapsed
+		       << " count=" << events.GetCount() << "\n";
+		for(const Value& value : events) {
+			ValueMap event = value;
+			Cerr() << "  kind=" << (String)event.Get("kind") << " route=" << (String)event.Get("route")
+			       << " method=" << (String)event.Get("method") << " outcome=" << (String)event.Get("outcome") << "\n";
+		}
+		return false;
+	}
+	HttpRequest bounds_req(base_url + "/api/audit/events?offset=10001");
+	bounds_req.Header("Authorization", "Bearer " + first_token); bounds_req.Timeout(3000); bounds_req.Execute();
+	HttpRequest session_bounds_req(base_url + "/api/audit/sessions?limit=201");
+	session_bounds_req.Header("Authorization", "Bearer " + first_token); session_bounds_req.Timeout(3000); session_bounds_req.Execute();
+	if(bounds_req.GetStatusCode() != 400 || session_bounds_req.GetStatusCode() != 400) {
+		Cerr() << "portal audit pagination status=" << bounds_req.GetStatusCode() << "," << session_bounds_req.GetStatusCode() << "\n";
+		return false;
+	}
+
+	HttpRequest sessions_req(base_url + "/api/audit/sessions");
+	sessions_req.Header("Authorization", "Bearer " + first_token); sessions_req.Timeout(3000);
+	String sessions_body = sessions_req.Execute();
+	if(sessions_req.GetStatusCode() != 200 || sessions_body.Find("session_ref") < 0 ||
+	   sessions_body.Find(first_token) >= 0 || sessions_body.Find("synthetic-user") >= 0) {
+		Cerr() << "portal audit sessions status=" << sessions_req.GetStatusCode() << " ref=" << (sessions_body.Find("session_ref") >= 0) << "\n";
+		return false;
+	}
+	HttpRequest page_req(base_url + "/audit");
+	page_req.Header("Authorization", "Bearer " + first_token); page_req.Timeout(3000);
+	String page = page_req.Execute();
+	if(page_req.GetStatusCode() != 200 || page.Find("api/audit/events") < 0) { Cerr() << "portal audit page status=" << page_req.GetStatusCode() << "\n"; return false; }
+
+	if(!login(second_token)) { Cerr() << "portal audit second admin login failed\n"; return false; }
+	HttpRequest logout(base_url + "/logout");
+	logout.Header("Cookie", "wf_auth_session=" + first_token); logout.Timeout(3000); logout.Execute();
+	HttpRequest after_logout(base_url + "/api/audit/events");
+	after_logout.Header("Authorization", "Bearer " + second_token); after_logout.Timeout(3000);
+	String logout_body = after_logout.Execute();
+	ValueArray after_events = ValueMap(ParseJSON(logout_body)).Get("events", ValueArray());
+	bool revoked = false;
+	for(const Value& value : after_events) {
+		ValueMap e = value;
+		revoked |= (String)e.Get("route") == "session:logout" && (String)e.Get("outcome") == "revoked";
+	}
+	if(after_logout.GetStatusCode() != 200 || !revoked || logout_body.Find(first_token) >= 0 || logout_body.Find(second_token) >= 0) {
+		Cerr() << "portal audit logout status=" << after_logout.GetStatusCode() << " revoked=" << revoked << "\n";
+		return false;
+	}
+
+	SystemAuthService::ConfigureSite(site_root, true);
+	ValueMap demo_credentials; demo_credentials.Add("username", "demo"); demo_credentials.Add("password", "demo");
+	HttpRequest demo_login(base_url + "/api/auth/login");
+	demo_login.POST().ContentType("application/json").PostData(AsJSON(demo_credentials)); demo_login.Timeout(3000);
+	ValueMap demo_response = ParseJSON(demo_login.Execute());
+	String demo_token = demo_response.Get("token", "");
+	HttpRequest forbidden(base_url + "/api/audit/events");
+	forbidden.Header("Authorization", "Bearer " + demo_token); forbidden.Timeout(3000); forbidden.Execute();
+	HttpRequest demo_denied(base_url + "/api/tasks/claim");
+	demo_denied.Header("Authorization", "Bearer " + demo_token);
+	demo_denied.POST().ContentType("application/json").PostData("{}");
+	demo_denied.Timeout(3000); demo_denied.Execute();
+	SystemAuthService::ConfigureSite(site_root, false);
+	if(demo_login.GetStatusCode() != 200 || demo_token.IsEmpty() || forbidden.GetStatusCode() != 403 ||
+	   demo_denied.GetStatusCode() != 403) {
+		Cerr() << "portal audit demo status=" << demo_login.GetStatusCode() << " token=" << !demo_token.IsEmpty()
+		       << " forbidden=" << forbidden.GetStatusCode() << " post-denied=" << demo_denied.GetStatusCode() << "\n";
+		return false;
+	}
+	HttpRequest post_events_req(base_url + "/api/audit/events");
+	post_events_req.Header("Authorization", "Bearer " + second_token); post_events_req.Timeout(3000);
+	ValueArray post_events = ValueMap(ParseJSON(post_events_req.Execute())).Get("events", ValueArray());
+	bool forbidden_status = false;
+	for(const Value& value : post_events) {
+		ValueMap event = value;
+		forbidden_status |= (String)event.Get("kind") == "action" &&
+		                    ((String)event.Get("route")).Find("ApiClaimTask") >= 0 &&
+		                    (int)event.Get("status") == 403;
+	}
+	if(!forbidden_status) return false;
+	Cout() << "ok    portal audit root auth, routes, sessions, logout and redaction\n";
+	return true;
+}
+
 bool ManagerSkylarkApp::RunSelfTests(int port)
 {
 	Cout() << "=== Running ManagerSkylark Automated Verification ===\n";
@@ -253,6 +438,14 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: cannot create isolated self-test site root\n";
 		return false;
 	}
+	ManagerSkylarkApp app;
+	app.port = port;
+	app.threads = 1;
+	app.ip = "127.0.0.1";
+	app.test_mode = true;
+	app.custom_site_dir = true;
+	app.site_dir = fixture.path;
+	app.demo_site = false;
 	if(!SystemAuthService::SetSitePassword(fixture.path, "synthetic-user", "synthetic-password")) {
 		Cerr() << "FAILED: cannot write hashed synthetic site-auth fixture\n";
 		return false;
@@ -383,7 +576,7 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		return false;
 	}
 	if(!PortalShellSelfTests()) {
-		Cerr() << "FAILED: portal shell (left pane, user row, link host) tests\n";
+		Cerr() << "FAILED: portal shell (left pane, user row, configured origins) tests\n";
 		return false;
 	}
 	Value auth_config = ParseJSON(LoadFile(AppendFileName(fixture.path, "auth.json")));
@@ -398,6 +591,7 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		return false;
 	}
 	SystemAuthService::ConfigureSite(fixture.path, false);
+	RegisterHandler(&PortalAuditExceptionFixture, "PortalAuditExceptionFixture", "__selftest/portal-audit-error");
 	bool hashed_ok = SystemAuthService::VerifySystemPassword("synthetic-user", "synthetic-password");
 	bool hashed_bad = SystemAuthService::VerifySystemPassword("synthetic-user", "wrong-password");
 	bool legacy_ok = SystemAuthService::VerifySystemPassword("legacy-user", "legacy-password");
@@ -415,14 +609,6 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	SystemAuthService::ConfigureSite(fixture.path, false);
 
-	ManagerSkylarkApp app;
-	app.port = port;
-	app.threads = 1;
-	app.ip = "127.0.0.1";
-	app.test_mode = true;
-	app.custom_site_dir = true;
-	app.site_dir = fixture.path;
-	app.demo_site = false;
 	SystemAuthService::ConfigureSite(fixture.path, false);
 	DataStore::SetRootRegistrationPath(AppendFileName(fixture.path, "data-root.json"));
 	app.InitApp();
@@ -617,20 +803,25 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		}
 		Cout() << "ok    GET /chat Integrated WebChat (200 OK)\n";
 	}
-
-	// Test GET /webchat (WebChat Standalone View)
+	// WebChat's package handler is distinct from ManagerSkylark's integrated /chat view.
 	{
 		HttpRequest req(base_url + "/webchat");
 		req.Timeout(3000);
 		String res = req.Execute();
-		if(req.GetStatusCode() != 200 || res.Find("chat-app") < 0) {
+		if(req.GetStatusCode() != 200 || res.Find("<div class=\"chat-app\">") < 0) {
 			Cerr() << "FAILED: GET /webchat returned " << req.GetStatusCode() << "\n";
 			app.Quit();
 			server_thread.Wait();
 			return false;
 		}
-		Cout() << "ok    GET /webchat Standalone WebChat (200 OK)\n";
+		Cout() << "ok    GET /webchat WebChat package page (200 OK)\n";
 	}
+	if(!PortalAuditHttpSelfTests(app.test_mode, app.demo_site, fixture.path, base_url)) {
+		Cerr() << "FAILED: portal root audit authentication, session or redaction integration\n";
+		app.Quit(); server_thread.Wait(); return false;
+	}
+	app.test_mode = true;
+	SystemAuthService::ConfigureSite(fixture.path, false);
 
 	// Test GET /api/framework/spec (WebFramework MegaMenu semantic spec)
 	{
@@ -708,6 +899,24 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	app.demo_site = false;
 	SystemAuthService::ConfigureSite(fixture.path, false);
 	{
+		HttpRequest req(base_url + "/api/audit/events");
+		req.Timeout(3000);
+		req.Execute();
+		if(req.GetStatusCode() != 401) {
+			Cerr() << "FAILED: portal audit API must reject anonymous callers\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+	}
+	{
+		HttpRequest req(base_url + "/api/audit/sessions");
+		req.Timeout(3000);
+		req.Execute();
+		if(req.GetStatusCode() != 401) {
+			Cerr() << "FAILED: portal active-session API must reject anonymous callers\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+	}
+	{
 		HttpRequest req(base_url + "/api/projects");
 		req.Timeout(3000);
 		req.Execute();
@@ -730,6 +939,17 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		}
 	}
 	ValueMap site_login;
+	ValueMap failed_portal_login;
+	failed_portal_login.Add("username", "root-login-username-canary");
+	failed_portal_login.Add("password", "root-login-password-canary");
+	HttpRequest failed_portal_login_req(base_url + "/api/auth/login");
+	failed_portal_login_req.POST().ContentType("application/json").PostData(AsJSON(failed_portal_login));
+	failed_portal_login_req.Timeout(3000);
+	failed_portal_login_req.Execute();
+	if(failed_portal_login_req.GetStatusCode() != 401) {
+		Cerr() << "FAILED: portal root login failure fixture\n";
+		app.Quit(); server_thread.Wait(); return false;
+	}
 	site_login.Add("username", "synthetic-user");
 	site_login.Add("password", "synthetic-password");
 	HttpRequest site_login_req(base_url + "/api/auth/login");
@@ -743,6 +963,90 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		app.Quit();
 		server_thread.Wait();
 		return false;
+	}
+	{
+		HttpRequest req(base_url + "/api/auth/login");
+		ValueMap login; login.Add("username", "synthetic-user"); login.Add("password", "synthetic-password");
+		req.POST().ContentType("application/json").PostData(AsJSON(login));
+		req.Timeout(3000);
+		ValueMap response = ParseJSON(req.Execute());
+		String backup_token = response.Get("token", "");
+		if(req.GetStatusCode() != 200 || backup_token.IsEmpty()) {
+			Cerr() << "FAILED: second root session fixture\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		String events_url = base_url + "/api/audit/events";
+		HttpRequest events_req(events_url);
+		events_req.Header("Authorization", "Bearer " + site_token).Timeout(3000);
+		String events_body = events_req.Execute();
+		ValueMap events_response = ParseJSON(events_body);
+		ValueArray portal_events = events_response.Get("events", ValueArray());
+		bool failure_seen = false, success_seen = false, action_seen = false;
+		for(const Value& value : portal_events) {
+			ValueMap event = value;
+			if((String)event.Get("kind") == "login" && (String)event.Get("outcome") == "failure") failure_seen = true;
+			if((String)event.Get("kind") == "login" && (String)event.Get("outcome") == "success") success_seen = true;
+			if((String)event.Get("kind") == "action" && (String)event.Get("route") == "host:ApiAuthLogin") action_seen = true;
+		}
+		if(events_req.GetStatusCode() != 200 || (String)events_response.Get("site") != "portal" ||
+		   !failure_seen || !success_seen || !action_seen ||
+		   events_body.Find("root-login-username-canary") >= 0 ||
+		   events_body.Find("root-login-password-canary") >= 0 ||
+		   events_body.Find("synthetic-user") >= 0 || events_body.Find("synthetic-password") >= 0 ||
+		   events_body.Find(site_token) >= 0 || events_body.Find(backup_token) >= 0) {
+			Cerr() << "FAILED: portal auth/request audit redaction or site scope\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		HttpRequest sessions_req(base_url + "/api/audit/sessions");
+		sessions_req.Header("Authorization", "Bearer " + site_token).Timeout(3000);
+		String sessions_body = sessions_req.Execute();
+		if(sessions_req.GetStatusCode() != 200 || sessions_body.Find("session_ref") < 0 ||
+		   sessions_body.Find(site_token) >= 0 || sessions_body.Find("synthetic-user") >= 0) {
+			Cerr() << "FAILED: portal session snapshot leaks a bearer or username\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		HttpRequest page_req(base_url + "/audit");
+		page_req.Header("Authorization", "Bearer " + site_token).Timeout(3000);
+		String page = page_req.Execute();
+		if(page_req.GetStatusCode() != 200 || page.Find("api/audit/events") < 0 || page.Find("api/audit/sessions") < 0) {
+			Cerr() << "FAILED: root portal audit UI\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		HttpRequest logout_req(base_url + "/logout");
+		logout_req.Header("Cookie", "wf_auth_session=" + site_token);
+		logout_req.Timeout(3000);
+		logout_req.Execute();
+		HttpRequest after_logout_req(events_url);
+		after_logout_req.Header("Authorization", "Bearer " + backup_token).Timeout(3000);
+		String after_logout_body = after_logout_req.Execute();
+		ValueArray after_logout = ValueMap(ParseJSON(after_logout_body)).Get("events", ValueArray());
+		bool logout_seen = false;
+		for(const Value& value : after_logout) {
+			ValueMap event = value;
+			logout_seen |= (String)event.Get("route") == "session:logout" && (String)event.Get("outcome") == "revoked";
+		}
+		if(!logout_seen || after_logout_body.Find(site_token) >= 0 || after_logout_body.Find(backup_token) >= 0) {
+			Cerr() << "FAILED: portal logout audit event or bearer redaction\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		// Keep later legacy HTTP checks on a live session; site_token was intentionally revoked above.
+		site_token = backup_token;
+		SystemAuthService::ConfigureSite(fixture.path, true);
+		HttpRequest demo_login_req(base_url + "/api/auth/login");
+		ValueMap demo_login; demo_login.Add("username", "demo"); demo_login.Add("password", "demo");
+		demo_login_req.POST().ContentType("application/json").PostData(AsJSON(demo_login));
+		demo_login_req.Timeout(3000);
+		ValueMap demo_login_result = ParseJSON(demo_login_req.Execute());
+		String demo_token = demo_login_result.Get("token", "");
+		HttpRequest forbidden_req(events_url);
+		forbidden_req.Header("Authorization", "Bearer " + demo_token).Timeout(3000);
+		forbidden_req.Execute();
+		SystemAuthService::ConfigureSite(fixture.path, false);
+		if(demo_login_req.GetStatusCode() != 200 || demo_token.IsEmpty() || forbidden_req.GetStatusCode() != 403) {
+			Cerr() << "FAILED: portal audit API must require root admin role\n";
+			app.Quit(); server_thread.Wait(); return false;
+		}
+		Cout() << "ok    portal audit root auth, routes, sessions, logout and redaction\n";
 	}
 	{
 		HttpRequest req(base_url + "/api/projects");
@@ -1132,4 +1436,3 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 END_UPP_NAMESPACE
 
 using namespace Upp;
-

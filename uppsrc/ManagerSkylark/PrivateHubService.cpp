@@ -228,6 +228,16 @@ BrokerResult PrivateHubService::Handle(const BrokerCallContext& ctx, const Broke
 	return res;
 }
 
+String PrivateHubService::AuditOperation(const String& op) const
+{
+	if(op == "repo.info" || op == "issue.list" || op == "issue.get" ||
+	   op == "issue.create" || op == "issue.comment" || op == "wiki.list" ||
+	   op == "wiki.get" || op == "topic.list" || op == "topic.get" ||
+	   op == "post.list" || op == "file.list" || op == "file.get")
+		return op;
+	return "unclassified";
+}
+
 BrokerResult PrivateHubService::Recorded(const BrokerCallContext& ctx, const BrokerCall& call, bool& found, String& rev)
 {
 	found = false;

@@ -1,7 +1,7 @@
 #include "ManagerSkylark.h"
 #include "AgentPlatform.h"
-#include "GitHubPlatform.h"
-#include "GitHubTemplates.h"
+#include <GitHubForge/GitHubPlatform.h>
+#include <GitHubForge/GitHubTemplates.h>
 
 NAMESPACE_UPP
 

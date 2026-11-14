@@ -1,4 +1,5 @@
 #include "ScienceSite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -52,28 +53,21 @@ static bool MayAuthor(WebRequest& r)
 	return g.HasScopes(Vector<String>() << String(SCIENCE_AUTHOR_SCOPE));
 }
 
-// The composed-site palette shared with Atlas (task 038: Science had no stylesheet).
+// Page-specific rules only; the colours and base look come from WebsitePageStyles (shared tokens).
 static String ScienceStylesheet()
 {
 	return R"SCIENCE(<style>
-:root { --bg: #f7f7f5; --fg: #1b1b1b; --muted: #5c5c5c; --line: #d0d0cc; --panel: #ffffff; --link: #1864ab; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-}
-:root[data-theme="dark"] { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 1100px; }
-a { color: var(--link); }
-h1 { font-size: 1.5rem; margin: 8px 0; }
+body { max-width: var(--wf-container-width); margin: 0 auto; }
 li { margin: 4px 0; }
 </style>)SCIENCE";
 }
 
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<title>" + title + "</title>" + ScienceStylesheet() + "</head><body>"
-	       "<header>" + SessionChromeHtml(r) + "</header>"
-	       "<h1>" + title + "</h1>" + body + "</body></html>");
+	       "<header>" + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</header>"
+	       "<h1>" + title + "</h1>" + body + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static ValueMap JsonOk(bool ok, const String& err = String())
@@ -85,16 +79,22 @@ static ValueMap JsonOk(bool ok, const String& err = String())
 	return m;
 }
 
+static bool MayView(WebRequest& r, const SciencePaper& p);
+
 static void ScienceHome(WebRequest& r)
 {
 	Vector<SciencePaper> papers;
 	Corpus().ListPapers(papers);
+	int visible_count = 0;
 	int with_article = 0;
 	for(const SciencePaper& p : papers)
-		if(p.has_article)
-			with_article++;
+		if(MayView(r, p)) {
+			visible_count++;
+			if(p.has_article)
+				with_article++;
+		}
 	HtmlPage(r, "Science",
-		"<p>" + AsString(papers.GetCount()) + " papers, "
+		"<p>" + AsString(visible_count) + " papers, "
 		+ AsString(with_article) + " with structured article.</p>"
 		+ "<p><a href=\"" + r.Site().Url("papers") + "\">Browse papers</a></p>");
 }
@@ -121,13 +121,14 @@ static ContentPrincipal ViewerOf(WebRequest& r)
 			if(role == "admin")
 				who.admin = true;
 	}
-	who.link_token = r.Param("key");
 	return who;
 }
 
 static bool MayView(WebRequest& r, const SciencePaper& p)
 {
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	if(!store.LoadError().IsEmpty())
+		return false;
 	Vector<ContentPolicy> chain;
 	ContentPolicy record = store.Record(p.id);
 	if(record.level == CONTENT_UNSET)
@@ -135,7 +136,9 @@ static bool MayView(WebRequest& r, const SciencePaper& p)
 	chain.Add(record);
 	chain.Add(store.Module(SCIENCE_CONTENT_MODULE));
 	chain.Add(store.Site());
-	return ContentVisible(ContentResolve(chain, CONTENT_PRIVATE), ViewerOf(r));
+	ContentPrincipal who = ViewerOf(r);
+	ContentPolicyApplyLinkSession(r, SCIENCE_CONTENT_MODULE, p.id, who);
+	return ContentVisible(ContentResolve(chain, CONTENT_PRIVATE), who);
 }
 
 static void SciencePaperList(WebRequest& r)
@@ -295,6 +298,10 @@ static void SciencePaperAuthorPage(WebRequest& r)
 	String id = r.PathArg(0);
 	SciencePaper paper;
 	if(!Corpus().GetPaper(id, paper)) {
+		r.Status(404, "paper not found");
+		return;
+	}
+	if(!MayView(r, paper)) {
 		r.Status(404, "paper not found");
 		return;
 	}

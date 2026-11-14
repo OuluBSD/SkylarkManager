@@ -7,6 +7,8 @@
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include "HostPlatform.h"
+#include "AgentPlatform.h"
+#include <GitHubForge/GitHubForgeHost.h>
 
 NAMESPACE_UPP
 
@@ -19,6 +21,18 @@ ManagerSkylarkApp::ManagerSkylarkApp()
 	, custom_port(8081)
 {
 	s_instance = this;
+	GitHubForgeHost& github_host = GetGitHubForgeHost();
+	github_host.build_navigation = [](const String& active) { return ManagerSkylarkApp::BuildNavigation(active); };
+	github_host.render_user_menu = [](Http& http) {
+		return SystemAuthService::RenderUserMenu(SystemAuthService::GetCurrentSession(http));
+	};
+	github_host.is_admin = [](Http& http) { return SystemAuthService::GetCurrentSession(http).is_admin; };
+	github_host.add_markdown_support = [](PageBuilder& pb) { ManagerSkylarkApp::AddMarkdownSupport(pb); };
+	github_host.get_manager_store = []() -> ManagerStore* { return &ManagerSkylarkApp::Get().GetLocalStore(); };
+	github_host.render_agent_dashboard = [](const String& owner, const String& repo, const String& author,
+	                                        const String& status, const String& run_id) {
+		return AgentPlatformService::RenderRunsDashboard(owner, repo, author, status, run_id);
+	};
 	root = "";
 	port = 8081;
 	ip = "0.0.0.0";
@@ -100,8 +114,12 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("set-atlas-user", 0, "Create/update an Atlas account with hidden prompt (or MANAGERSKYLARK_ATLAS_PASSWORD)", true, "username");
 	cla.AddArg("docs-repos", 0, "Documentation repositories for the /docs portal (label=path,...; default: SkylarkManager, CompanySkylark, AgentIPC)", true, "list");
 	cla.AddArg("financials-role", 0, "Role for --set-financials-user (default viewer; finance sees ledger rows and contracts)", true, "role");
+	cla.AddArg("public-host", 0, "Address other machines use for site links (default: detected LAN IPv4, or MANAGERSKYLARK_PUBLIC_HOST); never loopback", true, "host");
+	cla.AddArg("company-port", 0, "Company engine site port (default 18219)", true, "port");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
+	cla.AddArg("company-role", 0, "Role for --set-company-user (default admin; the first admin is provisioned this way)", true, "role");
+	cla.AddArg("set-company-user", 0, "Create/update a Company user and its login with hidden prompt (or MANAGERSKYLARK_COMPANY_PASSWORD)", true, "username");
 	cla.AddArg("approve-taskfoundry-grant", 0, "Approve a requested TaskFoundry grant by id (wag_...) and exit", true, "grant-id");
 	cla.AddArg("revoke-taskfoundry-grant", 0, "Revoke an active TaskFoundry grant by id and exit", true, "grant-id");
 	cla.AddArg("set-taskfoundry-user", 0, "Create/update a TaskFoundry account with hidden prompt (or MANAGERSKYLARK_TASKFOUNDRY_PASSWORD)", true, "username");
@@ -189,6 +207,17 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 		if(custom_port > 0 && custom_port < 65536)
 			port = custom_port;
 	}
+	String public_host, public_host_error;
+	if(!ResolvePublicHost(cla.GetArg("public-host"), public_host, public_host_error)) {
+		Cerr() << public_host_error << "\n";
+		return false;
+	}
+	String portal_origin, portal_origin_error;
+	if(!ResolvePortalExternalOrigin(public_host, port, portal_origin, portal_origin_error)) {
+		Cerr() << portal_origin_error << "\n";
+		return false;
+	}
+	TheWebEngine().SetPortalOrigin(portal_origin);
 
 	// Grant decisions read and write the grant store directly, so they run while
 	// the server is up. Composition would bind the engine ports, so it is skipped.
@@ -217,6 +246,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 
 	if(!test_mode && !demo_site) {
 		EngineComposition cfg = EngineComposition::Defaults();
+		cfg.public_host = public_host;
 		if(!cla.GetArg("privatehub-port").IsEmpty())
 			cfg.privatehub_port = ScanInt(cla.GetArg("privatehub-port"));
 		if(!cla.GetArg("science-port").IsEmpty())
@@ -237,6 +267,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.atlas_port = ScanInt(cla.GetArg("atlas-port"));
 		if(!cla.GetArg("youtubeplanner-port").IsEmpty())
 			cfg.youtubeplanner_port = ScanInt(cla.GetArg("youtubeplanner-port"));
+		if(!cla.GetArg("company-port").IsEmpty())
+			cfg.company_port = ScanInt(cla.GetArg("company-port"));
 		cfg.enable_meta_sso = cla.IsArg("enable-meta-sso");
 		TheWebEngine().SetHostPort(port);
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
@@ -304,6 +336,22 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			}
 			Cout() << "Configured Atlas account '" << atl_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
+
+		String co_user = cla.GetArg("set-company-user");
+		if(!co_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_COMPANY_PASSWORD", "New Company password: ", password))
+				return false;
+			String error;
+			String co_role = cla.GetArg("company-role").IsEmpty() ? String("admin") : cla.GetArg("company-role");
+			if(!SetCompanyPassword(engine_backends, co_user, co_role, password, error)) {
+				Cerr() << "Failed to write Company credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured Company account '" << co_user << "'\n";
 			fflush(stdout);
 			_exit(0);
 		}

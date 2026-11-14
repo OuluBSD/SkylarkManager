@@ -17,8 +17,8 @@ recent entries) and the client contracts. Design: the planner handoff task
    Company workflow; this site never mutates Company data.
 2. **Broker is the boundary**: every read is a scope-checked broker op on
    the Company module (`ledger-summary`, `ledger-recent`,
-   `ledger-balances`, `contracts-list` — see `CompanyWorkflow/
-   CompanyBroker.{h,cpp}` in the private CompanySkylark repo), recorded in
+   `ledger-balances`, `contracts-list` — see `uppsrc/Company/
+   CompanyBroker.{h,cpp}`), recorded in
    the diagnostics ledger. The site never touches the Company store.
 3. **Roles carry the scopes**: the viewer's role maps to the caller scopes
    — `viewer` carries `ledger:read` (aggregates and rows without user ids),

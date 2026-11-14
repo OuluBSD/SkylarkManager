@@ -62,6 +62,19 @@ children, else `place`; status defaults to `planned`. Full rules are in
 
 Manifest commands: `atlas-maps`, `atlas-map`, `atlas-element` (read-only).
 
+## Map page view (task 054)
+
+- Default view is an overview: the current plane's blocks as equal tiles, so
+  titles stay readable whatever block sizes the seed stored. Show contents
+  (toolbar checkbox) draws every nested block at its stored size.
+- The view fits the map on load, on plane change and on resize until the user
+  zooms or pans; Fit (0), 1:1, and the zoom buttons or keys (+ - 0) set it.
+- Maximize makes the map fill the window; Esc or Close returns. Hovering a
+  block highlights it and the roads attached to it.
+- Dragging an element moves it only in Show contents, and only for admins.
+- Theme and density come from the shared composed-page tokens and buttons
+  (`WebsiteTemplates`), with Dense as the default.
+
 ## Deferred
 
 - Outward links from elements to task tracking (decision (a) defers them).

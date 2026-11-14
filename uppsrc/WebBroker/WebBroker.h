@@ -69,6 +69,15 @@ class IBrokerService {
 public:
 	virtual ~IBrokerService() {}
 	virtual BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) = 0;
+	virtual String AuditOperation(const String& op) const { return "unclassified"; }
+};
+
+class IBrokerAuditObserver {
+public:
+	virtual ~IBrokerAuditObserver() {}
+	virtual void OnBrokerCall(const String& from_site, const String& to_site,
+	                          const String& operation, const String& correlation,
+	                          const String& outcome, int duration_ms) = 0;
 };
 
 struct BrokerDiagEntry : Moveable<BrokerDiagEntry> {
@@ -94,6 +103,7 @@ class WebBroker {
 public:
 	// Takes ownership of the service for the target site.
 	void Register(const String& to_site, IBrokerService* service);
+	void SetAuditObserver(IBrokerAuditObserver *observer) { audit_observer = observer; }
 
 	// Synchronous in-process call. Copies values across the boundary, records
 	// diagnostics, and generates a correlation id when the caller did not.
@@ -120,6 +130,7 @@ private:
 	Vector<BrokerDiagEntry> diag;
 	Mutex  mutex;
 	VectorMap<String, One<IBrokerService> > services;
+	IBrokerAuditObserver *audit_observer = NULL;
 	static const int DIAG_MAX = 1000;
 };
 

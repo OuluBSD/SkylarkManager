@@ -16,16 +16,10 @@ struct PortalWebapp : Moveable<PortalWebapp> {
 	String url;     // what the frame loads
 };
 
-// The host portal links are served on, from a request's Host header: the name
-// without its port (loopback when the header is empty). A LAN browser gets LAN
-// links (task 032).
-String PortalLinkHost(const String& host_header);
-
 // The descriptors for the webapp list: Atlas first (task 036), then the five
-// stock hubs (their roots), then the other composed sites (absolute origins on
-// the request's host), then the stock settings page. Sites are a parameter so
-// the self-tests can pass their own.
-Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineSiteListing>& sites);
+// The descriptors for the webapp list: composed-site links use configured
+// public origins; stock hubs use local paths. Sites are a parameter for tests.
+Vector<PortalWebapp> ListWebapps(const Vector<EngineSiteListing>& sites);
 
 // The user row at the foot of the webapp list. A guest's "Log in" opens inside the
 // portal frame and returns to return_url (a stock webapp's path); an empty return_url
@@ -36,7 +30,7 @@ String RenderShellAccountRow(const UserSession& sess, const String& return_url);
 // beside the selected webapp's frame. Links target the frame, so the shell stays
 // mounted while webapps switch; the frame shows a loading state and a timeout
 // fallback. An unknown or empty selection falls back to the first webapp.
-String RenderPortalShell(const String& host_header, const String& selected, const UserSession& sess,
+String RenderPortalShell(const String& selected, const UserSession& sess,
                          const Vector<EngineSiteListing>& sites,
                          const String& theme_cookie = Null, const String& density_cookie = Null);
 

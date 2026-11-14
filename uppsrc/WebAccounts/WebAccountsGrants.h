@@ -92,6 +92,10 @@ public:
 	                             const String& proposed_role, const Vector<String>& scopes,
 	                             String& grant_id, bool& existed);
 	StoreResult ApproveProvision(const String& grant_id, const String& client_user_id);
+	StoreResult GrantAs(const String& subject_user_id, const String& client_user_id,
+	                    const String& client_site, const String& client_id,
+	                    const Vector<String>& scopes, String& grant_id);
+	StoreResult DenyPendingProvision(const String& subject_user_id, const String& client_site);
 	StoreResult RequestGrantProposal(const String& subject_user_id, const String& client_user_id,
 	                                 const String& client_site, const String& client_id,
 	                                 const String& proposed_username, const String& proposed_role,

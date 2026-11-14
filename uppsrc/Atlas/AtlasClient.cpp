@@ -10,49 +10,53 @@ NAMESPACE_UPP
 String AtlasStylesheet()
 {
 	return R"ATLAS(<style>
-:root { --bg: #f7f7f5; --fg: #1b1b1b; --muted: #5c5c5c; --line: #d0d0cc; --panel: #ffffff; --link: #1864ab; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-}
-:root[data-theme="dark"] { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; }
-main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+:root { --link: var(--accent); }
+body { background: var(--bg); color: var(--fg); font: var(--fs)/1.45 system-ui, sans-serif; margin: 0; }
+main { padding: calc(var(--pad) * 2); max-width: var(--wf-container-width); margin: 0 auto; }
 a { color: var(--link); }
-nav.atlas-nav { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+nav.atlas-nav { padding: var(--pad) calc(var(--pad) * 2); border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: var(--gap); align-items: center; }
 nav.atlas-nav a { font-weight: 600; text-decoration: none; }
 h1 { font-size: 1.5rem; margin: 8px 0; }
-h2 { font-size: 1.15rem; margin-top: 24px; }
+h2 { font-size: 1.15rem; margin-top: calc(var(--gap) * 1.5); }
 table { border-collapse: collapse; width: 100%; margin: 8px 0; display: block; overflow-x: auto; }
-th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+th, td { border-bottom: 1px solid var(--line); padding: var(--pad) calc(var(--pad) * 2); text-align: left; vertical-align: top; }
 .meta, .hint { color: var(--muted); font-size: 0.9rem; }
-.err { color: #c92a2a; font-weight: 600; }
+.err { color: var(--st-trouble); font-weight: 600; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
 #atlas-plane { font-weight: 600; }
 #atlas-canvas { width: 100%; height: 70vh; min-height: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; touch-action: none; cursor: grab; }
 #atlas-canvas .plane { fill: var(--panel); }
-#atlas-canvas .sea { fill: #d0ebff; opacity: 0.7; }
+#atlas-stage.atlas-max { position: fixed; inset: 0; z-index: 1000; background: var(--bg); padding: var(--pad); display: flex; flex-direction: column; }
+#atlas-stage.atlas-max #atlas-canvas { flex: 1 1 auto; height: auto; min-height: 0; border-radius: 0; }
+#atlas-stage.atlas-max .toolbar { margin: 0 0 var(--pad); }
+body.atlas-lock { overflow: hidden; }
+#atlas-canvas g[data-id].hover > rect.el, #atlas-canvas g[data-id].hover > rect.sea { stroke: var(--accent); stroke-width: 3; }
+#atlas-canvas path.road.lit { stroke: var(--accent); stroke-width: 3; }
+#atlas-zoom { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
+#atlas-close[hidden], #atlas-maximize[hidden] { display: none; }
+#atlas-canvas .sea { fill: var(--sea); opacity: 0.7; }
 #atlas-canvas .el { stroke: var(--line); stroke-width: 1.5; fill: var(--panel); }
 #atlas-canvas .el.kind-block { stroke-width: 2.5; }
 #atlas-canvas .el.kind-continent { stroke-width: 3; }
-#atlas-canvas .el.status-hot { stroke: #e8590c; fill: #fff4e6; }
-#atlas-canvas .el.status-active { stroke: #2b8a3e; }
-#atlas-canvas .el.status-planned { stroke: #1c7ed6; }
-#atlas-canvas .el.status-not-ready { stroke: #868e96; stroke-dasharray: 6 4; }
-#atlas-canvas .el.status-future { stroke: #9775fa; stroke-dasharray: 2 4; }
-#atlas-canvas .el.status-settled { stroke: #495057; fill: #e9ecef; }
-#atlas-canvas .el.status-trouble { stroke: #c92a2a; fill: #ffe3e3; }
-#atlas-canvas .label { fill: var(--fg); font: 600 14px system-ui, sans-serif; pointer-events: none; }
+#atlas-canvas .el.status-hot { stroke: var(--st-hot); fill: color-mix(in srgb, var(--st-hot) 18%, var(--panel)); }
+#atlas-canvas .el.status-active { stroke: var(--st-active); }
+#atlas-canvas .el.status-planned { stroke: var(--st-planned); }
+#atlas-canvas .el.status-not-ready { stroke: var(--st-notready); stroke-dasharray: 6 4; }
+#atlas-canvas .el.status-future { stroke: var(--st-future); stroke-dasharray: 2 4; }
+#atlas-canvas .el.status-settled { stroke: var(--st-settled); fill: color-mix(in srgb, var(--st-settled) 12%, var(--panel)); }
+#atlas-canvas .el.status-trouble { stroke: var(--st-trouble); fill: color-mix(in srgb, var(--st-trouble) 16%, var(--panel)); }
+#atlas-canvas .label { fill: var(--fg); font: 600 calc(var(--fs) - 1px) system-ui, sans-serif; pointer-events: none; }
 #atlas-canvas .badge { fill: var(--muted); font: 12px system-ui, sans-serif; pointer-events: none; }
 #atlas-canvas .road { fill: none; stroke: var(--muted); stroke-width: 2; }
 #atlas-canvas .road.kind-communication { stroke-dasharray: 6 5; }
-#atlas-canvas .road.kind-dependency { stroke-dasharray: 2 4; stroke: #c92a2a; }
+#atlas-canvas .road.kind-dependency { stroke-dasharray: 2 4; stroke: var(--st-trouble); }
 #atlas-canvas .road-label { fill: var(--muted); font: 12px system-ui, sans-serif; }
 .status { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 0.85rem; }
-.status-hot { background: #fff4e6; border-color: #e8590c; }
-.status-trouble { background: #ffe3e3; border-color: #c92a2a; }
-details.edit, details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 16px 0; background: var(--panel); }
+.status-hot { background: color-mix(in srgb, var(--st-hot) 18%, var(--panel)); border-color: var(--st-hot); }
+.status-trouble { background: color-mix(in srgb, var(--st-trouble) 16%, var(--panel)); border-color: var(--st-trouble); }
+details.edit, details { border: 1px solid var(--line); border-radius: 8px; padding: var(--pad) calc(var(--pad) * 2); margin: var(--gap) 0; background: var(--panel); }
 details summary { cursor: pointer; font-weight: 600; }
-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 12px 0; }
+form { display: flex; flex-wrap: wrap; gap: var(--pad) calc(var(--pad) * 2); align-items: flex-end; margin: var(--gap) 0; }
 form h3 { width: 100%; font-size: 1rem; margin: 8px 0 0; }
 label { display: flex; flex-direction: column; font-size: 0.9rem; gap: 2px; }
 label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
@@ -63,7 +67,7 @@ dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px;
 dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; }
 ol.path { padding-left: 20px; }
-@media (max-width: 600px) { main { padding: 12px; } #atlas-canvas { min-height: 320px; } }
+@media (max-width: 600px) { main { padding: var(--pad); } #atlas-canvas { min-height: 320px; } }
 </style>)ATLAS";
 }
 
@@ -76,15 +80,24 @@ String AtlasScript()
   var editable = body.getAttribute('data-editable') === '1';
   var csrf = body.getAttribute('data-csrf') || '';
   var base = body.getAttribute('data-base') || '';
+  var stage = document.getElementById('atlas-stage');
   var svg = document.getElementById('atlas-canvas');
   var planeLabel = document.getElementById('atlas-plane');
   var upButton = document.getElementById('atlas-up');
+  var contentsBox = document.getElementById('atlas-contents');
+  var zoomLabel = document.getElementById('atlas-zoom');
+  var maximizeButton = document.getElementById('atlas-maximize');
+  var closeButton = document.getElementById('atlas-close');
   var NS = 'http://www.w3.org/2000/svg';
-  var LEVEL_BADGE_MIN_SCALE = 0.5;
+  // Overview tiles: one size for every block, so titles stay readable whatever the block sizes stored.
+  var TILE_W = 220, TILE_H = 96, TILE_GAP = 24, TILE_PAD = 12;
+  var MIN_SCALE = 0.2, MAX_SCALE = 6, FIT_MAX_SCALE = 2;
   var data = JSON.parse(document.getElementById('atlas-data').textContent);
   var map = data.map;
   var revision = data.revision;
-  var view = { plane: '', scale: 1, tx: 24, ty: 24 };
+  // manual: the user zoomed or panned, so draws keep the view; otherwise the view fits the content.
+  var view = { plane: '', scale: 1, tx: 24, ty: 24, manual: false, root: null, tiles: {},
+               contentW: 1, contentH: 1, hover: '' };
   var drag = null;
 
   function find(id) {
@@ -101,8 +114,12 @@ String AtlasScript()
     return n;
   }
 
+  function childrenOf(id) {
+    return map.elements.filter(function (e) { return e.parent === id; });
+  }
+
   function childCount(id) {
-    return map.elements.filter(function (e) { return e.parent === id; }).length;
+    return childrenOf(id).length;
   }
 
   function planeNames(plane) {
@@ -115,6 +132,24 @@ String AtlasScript()
       cur = e.parent;
     }
     return names;
+  }
+
+  // The ancestor-or-self of an element that sits directly on the current plane.
+  function inPlane(id) {
+    var cur = find(id);
+    while (cur && cur.parent !== view.plane) { cur = cur.parent ? find(cur.parent) : null; }
+    return cur;
+  }
+
+  // Position of an element relative to the current plane, summing the stored offsets of its parents.
+  function absPos(e) {
+    var x = e.x, y = e.y, p = e.parent ? find(e.parent) : null;
+    while (p && p.id !== view.plane) {
+      x += p.x;
+      y += p.y;
+      p = p.parent ? find(p.parent) : null;
+    }
+    return { x: x, y: y, w: e.w, h: e.h };
   }
 
   function readHash() {
@@ -131,11 +166,152 @@ String AtlasScript()
 
   function enter(plane) {
     view.plane = plane;
-    view.scale = 1;
-    view.tx = 24;
-    view.ty = 24;
+    view.manual = false;
     writeHash();
     draw();
+  }
+
+  function applyTransform() {
+    if (view.root) {
+      view.root.setAttribute('transform', 'translate(' + view.tx + ',' + view.ty + ') scale(' + view.scale + ')');
+    }
+    if (zoomLabel) { zoomLabel.textContent = Math.round(view.scale * 100) + '%'; }
+  }
+
+  function fitView() {
+    var W = svg.clientWidth || 900;
+    var H = svg.clientHeight || 600;
+    var s = Math.min((W - 40) / view.contentW, (H - 40) / view.contentH, FIT_MAX_SCALE);
+    view.scale = Math.max(MIN_SCALE, s);
+    view.tx = (W - view.contentW * view.scale) / 2;
+    view.ty = (H - view.contentH * view.scale) / 2;
+    applyTransform();
+  }
+
+  function actualSize() {
+    var W = svg.clientWidth || 900;
+    var H = svg.clientHeight || 600;
+    view.manual = true;
+    view.scale = 1;
+    view.tx = (W - view.contentW) / 2;
+    view.ty = (H - view.contentH) / 2;
+    applyTransform();
+  }
+
+  function zoomAt(px, py, factor) {
+    var next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, view.scale * factor));
+    var k = next / view.scale;
+    view.manual = true;
+    view.tx = px - (px - view.tx) * k;
+    view.ty = py - (py - view.ty) * k;
+    view.scale = next;
+    applyTransform();
+  }
+
+  function zoomCentre(factor) {
+    zoomAt((svg.clientWidth || 900) / 2, (svg.clientHeight || 600) / 2, factor);
+  }
+
+  // Overview: a near-square grid of equal tiles, in the order the stored layout gives them.
+  function layoutTiles(kids) {
+    view.tiles = {};
+    var n = kids.length;
+    if (!n) { return { w: 0, h: 0 }; }
+    var W = svg.clientWidth || 900;
+    var H = svg.clientHeight || 600;
+    var sorted = kids.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; });
+    var cols = Math.min(n, Math.max(1, Math.round(Math.sqrt(n * (W / H)))));
+    var rows = Math.ceil(n / cols);
+    sorted.forEach(function (e, i) {
+      view.tiles[e.id] = {
+        x: (i % cols) * (TILE_W + TILE_GAP),
+        y: Math.floor(i / cols) * (TILE_H + TILE_GAP),
+        w: TILE_W, h: TILE_H
+      };
+    });
+    return { w: cols * TILE_W + (cols - 1) * TILE_GAP, h: rows * TILE_H + (rows - 1) * TILE_GAP };
+  }
+
+  function tileFont(name) {
+    return Math.max(12, Math.min(22, (TILE_W - 2 * TILE_PAD) / Math.max(6, name.length * 0.56)));
+  }
+
+  // Contents: title size follows the block height, so nested blocks stay readable.
+  function titleFont(e) {
+    return Math.max(11, Math.min(28, e.h * 0.16));
+  }
+
+  function drawTree(parentG, e) {
+    var g = node('g', { 'data-id': e.id, transform: 'translate(' + e.x + ',' + e.y + ')' });
+    if (e.kind === 'sea') {
+      g.appendChild(node('rect', { x: 0, y: 0, width: e.w, height: e.h, rx: 24, 'class': 'sea' }));
+    } else {
+      g.appendChild(node('rect', {
+        x: 0, y: 0, width: e.w, height: e.h, rx: 12,
+        'class': 'el kind-' + e.kind + ' status-' + e.status
+      }));
+    }
+    var fs = titleFont(e);
+    g.appendChild(node('text', { x: 12, y: fs + 6, 'class': 'label', style: 'font-size:' + fs + 'px' }, e.name));
+    var inside = childCount(e.id);
+    if (inside && e.h >= 60) {
+      g.appendChild(node('text', { x: 12, y: e.h - 10, 'class': 'badge' }, inside + ' inside'));
+    }
+    childrenOf(e.id).forEach(function (c) { drawTree(g, c); });
+    parentG.appendChild(g);
+  }
+
+  // Road end on the drawn map: the block itself in contents mode, the tile holding it in overview.
+  function endpoint(id, contents) {
+    var e = find(id);
+    if (!e) { return null; }
+    if (contents) {
+      if (!inPlane(id)) { return null; }
+      var p = absPos(e);
+      return { id: e.id, cx: p.x + p.w / 2, cy: p.y + p.h / 2 };
+    }
+    var top = inPlane(id);
+    var t = top ? view.tiles[top.id] : null;
+    return t ? { id: top.id, cx: t.x + t.w / 2, cy: t.y + t.h / 2 } : null;
+  }
+
+  function drawRoads(root, contents) {
+    var seen = {};
+    map.roads.forEach(function (r) {
+      var a = endpoint(r.from, contents);
+      var b = endpoint(r.to, contents);
+      if (!a || !b || a.id === b.id) { return; }
+      var key = a.id + '>' + b.id;
+      if (seen[key]) { return; }
+      seen[key] = true;
+      root.appendChild(node('path', {
+        d: 'M' + a.cx + ' ' + a.cy + ' L' + b.cx + ' ' + b.cy,
+        'class': 'road kind-' + r.kind,
+        'data-a': a.id, 'data-b': b.id
+      }));
+      if (r.label) {
+        root.appendChild(node('text', { x: (a.cx + b.cx) / 2, y: (a.cy + b.cy) / 2 - 4, 'class': 'road-label' }, r.label));
+      }
+    });
+  }
+
+  function markHover() {
+    var els = svg.querySelectorAll('[data-id]');
+    for (var i = 0; i < els.length; i++) {
+      els[i].classList.toggle('hover', !!view.hover && els[i].getAttribute('data-id') === view.hover);
+    }
+    var roads = svg.querySelectorAll('path.road');
+    for (var j = 0; j < roads.length; j++) {
+      var a = roads[j].getAttribute('data-a');
+      var b = roads[j].getAttribute('data-b');
+      roads[j].classList.toggle('lit', !!view.hover && (a === view.hover || b === view.hover));
+    }
+  }
+
+  function setHover(id) {
+    if (id === view.hover) { return; }
+    view.hover = id;
+    markHover();
   }
 
   function draw() {
@@ -147,60 +323,55 @@ String AtlasScript()
     planeLabel.textContent = names.length ? names.join(' / ') : 'World plane';
     if (upButton) { upButton.disabled = !view.plane; }
 
-    var root = node('g', { transform: 'translate(' + view.tx + ',' + view.ty + ') scale(' + view.scale + ')' });
-    svg.appendChild(root);
+    var contents = !!(contentsBox && contentsBox.checked);
     var parent = view.plane ? find(view.plane) : null;
-    var pw = parent ? parent.w : map.world.width;
-    var ph = parent ? parent.h : map.world.height;
-    root.appendChild(node('rect', { x: 0, y: 0, width: pw, height: ph, 'class': 'plane' }));
-
-    var here = map.elements.filter(function (e) { return e.parent === view.plane; });
-    here.forEach(function (e) {
-      if (e.kind === 'sea') {
-        root.appendChild(node('rect', { x: e.x, y: e.y, width: e.w, height: e.h, rx: 24, 'class': 'sea' }));
-      }
-    });
-
-    map.roads.forEach(function (r) {
-      var a = find(r.from);
-      var b = find(r.to);
-      if (!a || !b || a.parent !== view.plane || b.parent !== view.plane) { return; }
-      var x1 = a.x + a.w / 2, y1 = a.y + a.h / 2, x2 = b.x + b.w / 2, y2 = b.y + b.h / 2;
-      root.appendChild(node('path', {
-        d: 'M' + x1 + ' ' + y1 + ' L' + x2 + ' ' + y2,
-        'class': 'road kind-' + r.kind
-      }));
-      if (r.label) {
-        root.appendChild(node('text', { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, 'class': 'road-label' }, r.label));
-      }
-    });
-
-    here.forEach(function (e) {
-      if (e.kind === 'sea') { return; }
-      var g = node('g', { 'data-id': e.id });
-      g.appendChild(node('rect', {
-        x: e.x, y: e.y, width: e.w, height: e.h, rx: 12,
-        'class': 'el kind-' + e.kind + ' status-' + e.status
-      }));
-      g.appendChild(node('text', { x: e.x + 12, y: e.y + 24, 'class': 'label' }, e.name));
-      var inside = childCount(e.id);
-      if (inside && view.scale >= LEVEL_BADGE_MIN_SCALE) {
-        g.appendChild(node('text', { x: e.x + 12, y: e.y + e.h - 12, 'class': 'badge' }, inside + ' inside'));
-      }
-      root.appendChild(g);
-    });
-    here.forEach(function (e) {
-      if (e.kind !== 'sea') { return; }
-      root.appendChild(node('text', { x: e.x + 12, y: e.y + 24, 'class': 'label' }, e.name));
-    });
+    var root = node('g', {});
+    svg.appendChild(root);
+    view.root = root;
+    var kids = childrenOf(view.plane);
+    var size = { w: parent ? parent.w : map.world.width, h: parent ? parent.h : map.world.height };
+    view.tiles = {};
+    if (contents) {
+      view.contentW = size.w;
+      view.contentH = size.h;
+      root.appendChild(node('rect', { x: 0, y: 0, width: size.w, height: size.h, 'class': 'plane' }));
+      kids.forEach(function (e) {
+        if (e.kind === 'sea') { drawTree(root, e); }
+      });
+      kids.forEach(function (e) {
+        if (e.kind !== 'sea') { drawTree(root, e); }
+      });
+    } else {
+      var grid = layoutTiles(kids.filter(function (e) { return e.kind !== 'sea'; }));
+      view.contentW = Math.max(size.w, grid.w, 1);
+      view.contentH = Math.max(size.h, grid.h, 1);
+      root.appendChild(node('rect', { x: 0, y: 0, width: view.contentW, height: view.contentH, 'class': 'plane' }));
+      kids.forEach(function (e) {
+        var t = view.tiles[e.id];
+        if (!t) { return; }
+        var g = node('g', { 'data-id': e.id, transform: 'translate(' + t.x + ',' + t.y + ')' });
+        g.appendChild(node('rect', {
+          x: 0, y: 0, width: t.w, height: t.h, rx: 12,
+          'class': 'el kind-' + e.kind + ' status-' + e.status
+        }));
+        g.appendChild(node('text', {
+          x: TILE_PAD, y: 34, 'class': 'label', style: 'font-size:' + tileFont(e.name) + 'px'
+        }, e.name));
+        var inside = childCount(e.id);
+        if (inside) { g.appendChild(node('text', { x: TILE_PAD, y: t.h - 12, 'class': 'badge' }, inside + ' inside')); }
+        root.appendChild(g);
+      });
+    }
+    drawRoads(root, contents);
+    markHover();
+    if (view.manual) { applyTransform(); } else { fitView(); }
   }
 
-  function zoomAt(px, py, factor) {
-    var next = Math.min(4, Math.max(0.2, view.scale * factor));
-    var k = next / view.scale;
-    view.tx = px - (px - view.tx) * k;
-    view.ty = py - (py - view.ty) * k;
-    view.scale = next;
+  function setMaximized(on) {
+    stage.classList.toggle('atlas-max', on);
+    document.body.classList.toggle('atlas-lock', on);
+    if (maximizeButton) { maximizeButton.hidden = on; }
+    if (closeButton) { closeButton.hidden = !on; }
     draw();
   }
 
@@ -226,12 +397,18 @@ String AtlasScript()
     });
   }
 
+  function hitId(target) {
+    var hit = target && target.closest ? target.closest('[data-id]') : null;
+    return hit ? hit.getAttribute('data-id') : '';
+  }
+
   svg.addEventListener('pointerdown', function (ev) {
-    var hit = ev.target && ev.target.closest ? ev.target.closest('[data-id]') : null;
-    var id = hit ? hit.getAttribute('data-id') : '';
+    var id = hitId(ev.target);
     var e = id ? find(id) : null;
+    // Only the stored layout of a contents view can be edited; overview tiles pan the map.
+    var moves = !!(e && contentsBox && contentsBox.checked && editable);
     drag = {
-      id: e ? e.id : '', startX: ev.clientX, startY: ev.clientY,
+      id: id, moves: moves, startX: ev.clientX, startY: ev.clientY,
       tx0: view.tx, ty0: view.ty, origX: e ? e.x : 0, origY: e ? e.y : 0, moved: false
     };
     svg.setPointerCapture(ev.pointerId);
@@ -243,8 +420,8 @@ String AtlasScript()
     var dy = ev.clientY - drag.startY;
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) { return; }
     drag.moved = true;
-    if (drag.id) {
-      if (!editable) { return; }
+    view.manual = true;
+    if (drag.moves) {
       var e = find(drag.id);
       e.x = Math.max(0, Math.round(drag.origX + dx / view.scale));
       e.y = Math.max(0, Math.round(drag.origY + dy / view.scale));
@@ -252,18 +429,17 @@ String AtlasScript()
     } else {
       view.tx = drag.tx0 + dx;
       view.ty = drag.ty0 + dy;
-      draw();
+      applyTransform();
     }
   });
 
   svg.addEventListener('pointerup', function () {
     var d = drag;
     drag = null;
-    if (!d) { return; }
-    if (!d.id) { return; }
+    if (!d || !d.id) { return; }
     var e = find(d.id);
     if (d.moved) {
-      if (editable && (e.x !== d.origX || e.y !== d.origY)) { saveMove(e); }
+      if (d.moves && (e.x !== d.origX || e.y !== d.origY)) { saveMove(e); }
       return;
     }
     if (childCount(e.id)) {
@@ -273,10 +449,13 @@ String AtlasScript()
     }
   });
 
+  svg.addEventListener('pointerover', function (ev) { setHover(hitId(ev.target)); });
+  svg.addEventListener('pointerleave', function () { setHover(''); });
+
   svg.addEventListener('wheel', function (ev) {
     ev.preventDefault();
     var rect = svg.getBoundingClientRect();
-    zoomAt(ev.clientX - rect.left, ev.clientY - rect.top, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
+    zoomAt(ev.clientX - rect.left, ev.clientY - rect.top, ev.deltaY < 0 ? 1.15 : 1 / 1.15);
   }, { passive: false });
 
   if (upButton) {
@@ -285,9 +464,31 @@ String AtlasScript()
       enter(cur ? cur.parent : '');
     });
   }
+  function onClick(id, fn) {
+    var el = document.getElementById(id);
+    if (el) { el.addEventListener('click', fn); }
+  }
+  onClick('atlas-zoom-in', function () { zoomCentre(1.25); });
+  onClick('atlas-zoom-out', function () { zoomCentre(1 / 1.25); });
+  onClick('atlas-fit', function () { view.manual = false; fitView(); });
+  onClick('atlas-actual', actualSize);
+  onClick('atlas-maximize', function () { setMaximized(true); });
+  onClick('atlas-close', function () { setMaximized(false); });
+  if (contentsBox) {
+    contentsBox.addEventListener('change', function () { draw(); });
+  }
+
+  document.addEventListener('keydown', function (ev) {
+    var tag = ev.target && ev.target.tagName ? ev.target.tagName : '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') { return; }
+    if (ev.key === 'Escape' && stage.classList.contains('atlas-max')) { setMaximized(false); return; }
+    if (ev.key === '+' || ev.key === '=') { zoomCentre(1.25); }
+    else if (ev.key === '-' || ev.key === '_') { zoomCentre(1 / 1.25); }
+    else if (ev.key === '0') { view.manual = false; fitView(); }
+  });
 
   window.addEventListener('hashchange', function () { readHash(); draw(); });
-  window.addEventListener('resize', draw);
+  window.addEventListener('resize', function () { draw(); });
   readHash();
   draw();
 })();

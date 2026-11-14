@@ -1,0 +1,9 @@
+description "Modular website template and theme configuration with shared safe rendering\377";
+
+uses
+	Core;
+
+file
+	AGENTS.md,
+	WebsiteTemplates.h,
+	WebsiteTemplates.cpp;

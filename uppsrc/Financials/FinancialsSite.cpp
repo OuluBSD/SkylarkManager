@@ -1,4 +1,5 @@
 #include "FinancialsSite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -44,14 +45,36 @@ static bool IsFinance(WebRequest& r)
 	return false;
 }
 
+static bool FinancePolicyHealthy(WebRequest& r)
+{
+	if(ContentPolicyFor(r.Site().data_root).LoadError().IsEmpty())
+		return true;
+	r.Status(503, "content policy is unavailable");
+	return false;
+}
+
+static bool FinancePolicyRead(WebRequest& r, const String& module, const String& record)
+{
+	int status = ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC);
+	if(status == 0)
+		return true;
+	r.Status(status, status == 503 ? "content policy is unavailable" : "not found");
+	return false;
+}
+
+static bool FinancePolicyRowVisible(WebRequest& r, const String& module, const String& record)
+{
+	return ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC) == 0;
+}
+
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<title>" + Esc(title) + "</title></head><body>"
 	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Financials</a> "
 	       "<a href=\"" + Esc(r.Site().Url("ledger")) + "\">Ledger</a> "
-	       "<a href=\"" + Esc(r.Site().Url("contracts")) + "\">Contracts</a> " + SessionChromeHtml(r) + "</nav>"
-	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
+	       "<a href=\"" + Esc(r.Site().Url("contracts")) + "\">Contracts</a> " + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</nav>"
+	       "<h1>" + Esc(title) + "</h1>" + body + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 // Broker payloads carry typed values; render numbers by their real type,
@@ -104,6 +127,19 @@ static void Summary(WebRequest& r)
 	}
 	if(!RequireLogin(r))
 		return;
+	if(!FinancePolicyHealthy(r))
+		return;
+	// The Company summary is pre-aggregated. Once any row policy exists, the
+	// aggregate cannot be safely reconstructed from the current broker contract.
+	ContentPolicyStore& policy_store = ContentPolicyFor(r.Site().data_root);
+	ContentLevel ledger_policy = policy_store.Module("ledger").level;
+	if(policy_store.HasRestrictiveRecordPolicies() ||
+	   (ledger_policy != CONTENT_UNSET && ledger_policy != CONTENT_PUBLIC)) {
+		r.Status(404, "summary unavailable");
+		return;
+	}
+	if(!FinancePolicyRead(r, "summary", String()))
+		return;
 	BrokerResult res = AskCompany(r, "ledger-summary", ValueMap());
 	if(!res.ok) {
 		BrokerProblem(r, res.error);
@@ -130,6 +166,8 @@ static void Ledger(WebRequest& r)
 		RoleProblem(r, "The ledger detail");
 		return;
 	}
+	if(!FinancePolicyHealthy(r))
+		return;
 	ValueMap f;
 	f.Add("limit", 50);
 	BrokerResult res = AskCompany(r, "ledger-recent", f);
@@ -142,6 +180,13 @@ static void Ledger(WebRequest& r)
 	Value rv = res.payload.Get("entries");
 	if(rv.Is<ValueArray>())
 		rows = rv;
+	ValueArray visible_rows;
+	for(const Value& v : rows) {
+		ValueMap m = v;
+		if(FinancePolicyRowVisible(r, "ledger", CellText(m.Get("seq", ""))))
+			visible_rows.Add(v);
+	}
+	rows = visible_rows;
 	if(rows.GetCount() == 0)
 		b << "<p>No ledger entries yet.</p>";
 	else {
@@ -166,6 +211,8 @@ static void Contracts(WebRequest& r)
 		RoleProblem(r, "The contracts view");
 		return;
 	}
+	if(!FinancePolicyHealthy(r))
+		return;
 	BrokerResult res = AskCompany(r, "contracts-list", ValueMap());
 	if(!res.ok) {
 		BrokerProblem(r, res.error);
@@ -176,6 +223,13 @@ static void Contracts(WebRequest& r)
 	Value rv = res.payload.Get("contracts");
 	if(rv.Is<ValueArray>())
 		rows = rv;
+	ValueArray visible_rows;
+	for(const Value& v : rows) {
+		ValueMap m = v;
+		if(FinancePolicyRowVisible(r, "contracts", CellText(m.Get("id", ""))))
+			visible_rows.Add(v);
+	}
+	rows = visible_rows;
 	if(rows.GetCount() == 0)
 		b << "<p>No contracts yet.</p>";
 	else {

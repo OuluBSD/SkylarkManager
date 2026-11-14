@@ -1,6 +1,7 @@
 #include "SessionRoutes.h"
 #include "Engine.h"
 #include "Request.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -26,28 +27,10 @@ static bool WantsJson(WebRequest& r)
 	return r.Header("accept").Find("json") >= 0 || r.Header("content-type").Find("json") >= 0;
 }
 
-// The composed-site palette (the same tokens Atlas and Science use), so a sign-in inside a
-// webapp frame reads as part of that app rather than a bare page (task 038).
-static String LoginStylesheet()
-{
-	return R"LOGIN(<style>
-:root { --bg: #f7f7f5; --fg: #1b1b1b; --muted: #5c5c5c; --line: #d0d0cc; --panel: #ffffff; --link: #1864ab; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-}
-:root[data-theme="dark"] { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 420px; }
-h1 { font-size: 1.5rem; margin: 8px 0 16px; }
-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
-input { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-button { font: inherit; color: #ffffff; background: var(--link); border: 0; border-radius: 6px; padding: 6px 14px; cursor: pointer; }
-.login-error { color: #c92a2a; border: 1px solid #c92a2a; border-radius: 6px; padding: 6px 8px; }
-</style>)LOGIN";
-}
-
 bool SsoReturnAllowed(WebRequest& r, const String& url);
 
 static const char* SSO_IDP_SITE = "meta";
+static String SsoSiteUrl(const String& site_id, const String& path);
 
 // The sign-in page. A browser that failed to sign in gets the same page with a short
 // message above the form (task 042); the message never echoes the typed username.
@@ -56,35 +39,25 @@ static void RenderLoginPage(WebRequest& r, const String& error, int code)
 	// A validated return target travels with the form, so a sign-in started from a webapp
 	// comes back to that webapp (task 039). An unlisted target is simply not carried.
 	String next = r.Param("next");
-	String hidden = TheWebEngine().MetaSso() && SsoReturnAllowed(r, next)
-		? "<input type=\"hidden\" name=\"next\" value=\"" + EscHtml(next) + "\">"
-		: String();
-	// A browser that still holds a session posts this form with that session's CSRF token, so the
-	// mutation fence accepts it; a guest form carries none (the fence has nothing to check).
-	String csrf = r.CsrfToken().IsEmpty()
-		? String()
-		: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
-	String alert = error.IsEmpty() ? String()
-		: "<p role=\"alert\" class=\"login-error\">" + EscHtml(error) + "</p>";
+	String safe_next = TheWebEngine().MetaSso() && SsoReturnAllowed(r, next) ? next : String();
+	// A browser session's CSRF token is carried by the template-rendered form;
+	// guest forms have no session token to include.
+	String csrf = r.CsrfToken();
 	if(code != 200)
 		r.Status(code, "Sign in");
 	// With MetaAccount SSO on, a composed site has no password form of its own: the browser signs
 	// in through MetaAccount (task 042). MetaAccount itself keeps its own login form.
 	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE) {
-		r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Sign in</title>" + LoginStylesheet() + "</head><body>"
-		       "<h1>Sign in</h1>" + alert +
-		       "<p>Sign in with your MetaAccount to open this site.</p>"
-		       "<p><a href=\"" + EscHtml(r.Site().Url("session/sso")) + "?next=%2F\">Continue with MetaAccount</a></p>"
-		       "</body></html>");
+		const WebsiteTemplate *t = FindWebsiteTemplate("engine-login");
+		ASSERT(t);
+		r.Html(t->RenderPage("Sign in", t->RenderEngineLoginBody(error, String(), String(), String(),
+		       SsoSiteUrl(r.Site().id, "/session/sso?next=%2F"), true), ThemeHtmlAttrs(r), ThemeHeadScript()));
 		return;
 	}
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Sign in</title>" + LoginStylesheet() + "</head><body>"
-	       "<h1>Sign in</h1>" + alert + "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden + csrf +
-	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
-	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
-	       "<p><button type=\"submit\">Sign in</button></p></form>"
-	       "<p><a href=\"" + EscHtml(r.Site().Url("session/sso")) + "?next=%2F\">Continue with MetaAccount</a></p>"
-	       "</body></html>");
+	const WebsiteTemplate *t = FindWebsiteTemplate("engine-login");
+	ASSERT(t);
+	r.Html(t->RenderPage("Sign in", t->RenderEngineLoginBody(error, r.Site().Url("session/login"), csrf,
+	       safe_next, SsoSiteUrl(r.Site().id, "/session/sso?next=%2F"), false), ThemeHtmlAttrs(r), ThemeHeadScript()));
 }
 
 // The sign-in page of this site: MetaAccount has one, at login; composed sites use session/login (task 048).
@@ -149,36 +122,14 @@ static String SsoSafeNext(const String& next)
 	return next;
 }
 
-// The host this request was made to, without its port. Composed sites share the host and differ by
-// port, so a return target is checked against this host and a composed site's port.
-static String SsoRequestHost(WebRequest& r)
+// Use the target site's configured public origin; never manufacture an SSO
+// credential redirect from an untrusted Host or forwarded header.
+static String SsoSiteUrl(const String& site_id, const String& path)
 {
-	String h = TrimBoth(r.Header("host"));
-	if(h.StartsWith("[")) {
-		int e = h.Find(']');
-		return e < 0 ? String() : h.Left(e + 1);
-	}
-	int c = h.Find(':');
-	return c < 0 ? h : h.Left(c);
-}
-
-static int SsoSitePort(const String& site_id)
-{
-	Vector<EngineSiteListing> sites = TheWebEngine().ListSites();
-	for(const EngineSiteListing& s : sites)
-		if(s.id == site_id)
-			return s.port;
-	return 0;
-}
-
-// "http://<request host>:<site port><path>" for a composed site, or "" when unknown.
-static String SsoSiteUrl(WebRequest& r, const String& site_id, const String& path)
-{
-	String host = SsoRequestHost(r);
-	int port = SsoSitePort(site_id);
-	if(host.IsEmpty() || port <= 0)
+	EngineSite *target = TheWebEngine().FindSite(site_id);
+	if(!target)
 		return String();
-	return "http://" + host + ":" + AsString(port) + path;
+	return target->PublicUrl(path);
 }
 
 // A MetaAccount return target is accepted only when it is an http URL on this request's host, on the
@@ -197,21 +148,25 @@ bool SsoPortAllowed(int port)
 
 bool SsoReturnAllowed(WebRequest& r, const String& url)
 {
-	String host = SsoRequestHost(r);
-	if(host.IsEmpty() || !url.StartsWith("http://" + host + ":"))
+	if(url.GetCount() > 1024 || url.Find('#') >= 0)
 		return false;
-	String rest = url.Mid(7 + host.GetCount());   // ":<port><path>"
-	String port_s;
-	int i = 1;
-	while(i < rest.GetCount() && IsDigit(rest[i]))
-		port_s.Cat(rest[i++]);
-	if(port_s.IsEmpty() || port_s.GetCount() > 5)
-		return false;
-	int port = ScanInt(port_s);
-	if(!SsoPortAllowed(port))
-		return false;
-	String path = rest.Mid(i);
-	return path.IsEmpty() || SsoSafeNext(path) == path;
+	for(const EngineSiteListing& entry : TheWebEngine().ListSites()) {
+		EngineSite *target = TheWebEngine().FindSite(entry.id);
+		if(!target) continue;
+		String origin = TrimBoth(target->external_origin);
+		if(!origin.StartsWith("http://") && !origin.StartsWith("https://")) continue;
+		int slash = origin.Find('/', origin.Find("://") + 3);
+		if(slash >= 0) origin = origin.Left(slash);
+		if(!url.StartsWith(origin + "/")) continue;
+		String path = url.Mid(origin.GetCount());
+		return SsoSafeNext(path) == path;
+	}
+	String portal_origin = TheWebEngine().PortalOrigin();
+	if(!portal_origin.IsEmpty() && url.StartsWith(portal_origin + "/")) {
+		String path = url.Mid(portal_origin.GetCount());
+		return SsoSafeNext(path) == path;
+	}
+	return false;
 }
 
 // The central account behind this request's MetaAccount cookie, or false.
@@ -281,7 +236,7 @@ static bool SsoAdoptLinked(WebRequest& r)
 	String sid, csrf, err;
 	if(!r.Site().Accounts().AdoptUserSession(local_id, r.ClientIp(), sid, csrf, err).ok)
 		return false;
-	r.AdoptSession(sid);
+	r.AdoptSession(sid, "sso");
 	return r.HasUser();
 }
 
@@ -310,9 +265,8 @@ void SsoAutoSignIn(WebRequest& r)
 	SsoAdopt(r);
 }
 
-// GET session/sso?next=/path: the explicit "Continue with MetaAccount" action.
-// Clears this site's sign-out marker, adopts the central session when linked,
-// and returns to a validated same-site path.
+// GET session/sso?next=/path: adopts an existing link or presents this site's
+// first-use consent. A MetaAccount login is reused across sibling ports.
 static void SsoContinue(WebRequest& r)
 {
 	r.SetCookieValue(SsoSuppressName(r.Site().id), "", GetSysTime() - 3600);
@@ -325,47 +279,132 @@ static void SsoContinue(WebRequest& r)
 	}
 	// MetaAccount signs in once and returns here: its login carries this site's own
 	// session/sso URL as the return target, which MetaAccount accepts only on this host (task 039).
-	String back = SsoSiteUrl(r, r.Site().id, "/session/sso?next=" + UrlEncode(next));
-	String login = SsoSiteUrl(r, SSO_IDP_SITE, "/login");
+	String back = SsoSiteUrl(r.Site().id, "/session/sso?next=" + UrlEncode(next));
+	String login = SsoSiteUrl(SSO_IDP_SITE, "/login");
 	if(login.GetCount() && back.GetCount())
 		login << "?next=" << UrlEncode(back);
-	// A central session with no link to this site can ask for a new local account (task 042).
 	String offer;
 	BrokerCallContext ctx;
 	ctx.from_site = r.Site().id;
 	ctx.to_site = SSO_IDP_SITE;
 	String subject, username;
 	if(!SsoDefaultRole(r.Site().id).IsEmpty() && SsoCentralUser(r, ctx, subject, &username)) {
-		// The last request decides the message: a pending one waits, a declined one says so. Only the
-		// visitor's own click asks again (task 042).
-		BrokerCall status;
-		status.op = "provision-status";
-		status.payload.Add("subject_user_id", subject);
-		status.payload.Add("client_site", r.Site().id);
-		status.payload.Add("proposed_username", username);
-		BrokerResult sr = TheWebEngine().Broker().Call(ctx, status);
-		String state = sr.ok ? String(sr.payload.Get("state")) : String("none");
-		if(state == "requested") {
-			offer = "<p>Your request for a <b>" + EscHtml(username) + "</b> account is waiting for approval on MetaAccount.</p>";
-		}
-		else {
-			String csrf = r.CsrfToken().IsEmpty()
-				? String()
-				: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
-			if(state == "denied")
-				offer << "<p>MetaAccount declined the last request for <b>" << EscHtml(username)
-				      << "</b>. Nothing was created. You can ask once more.</p>";
-			offer << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/provision")) << "\">" << csrf
-			      << "<p>Ask MetaAccount to create a <b>" << EscHtml(username) << "</b> account on this site. "
-			      << "Nothing is created until you approve it on MetaAccount.</p>"
-			      << "<p><button type=\"submit\">Request account</button></p></form>";
-		}
+		WebAccountUser collision;
+		bool exists = r.Site().Accounts().FindUserByUsername(username, collision);
+		r.EnsureSession();
+		String csrf = "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
+		offer << "<p>Allow MetaAccount to create or link a least-privilege account on "
+		      << EscHtml(r.Site().title) << "?</p>"
+		      << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/consent")) << "\">"
+		      << csrf << "<input type=\"hidden\" name=\"next\" value=\"" << EscHtml(next) << "\">"
+		      << "<input type=\"hidden\" name=\"decision\" value=\"yes\">";
+		if(exists)
+			offer << "<p>An account named <b>" << EscHtml(username) << "</b> already exists. Prove ownership to link it.</p>"
+			      << "<label>Existing account password <input type=\"password\" name=\"local_password\" required autocomplete=\"current-password\"></label>";
+		if(exists && collision.totp_enrolled)
+			offer << "<label>Authenticator or recovery code <input type=\"text\" name=\"local_code\" required inputmode=\"numeric\" autocomplete=\"one-time-code\"></label>";
+		offer << "<p><button type=\"submit\">Yes, continue</button></p></form>"
+		      << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/consent")) << "\">"
+		      << csrf << "<input type=\"hidden\" name=\"next\" value=\"" << EscHtml(next) << "\">"
+		      << "<input type=\"hidden\" name=\"decision\" value=\"no\"><button type=\"submit\">No</button></form>";
 	}
 	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"
-	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>" + offer +
+	       "<p>This MetaAccount account is not linked to this site yet. Sign in to MetaAccount if prompted, then choose whether to continue.</p>" + offer +
 	       "<p><a href=\"" + EscHtml(login) + "\">Sign in to MetaAccount</a></p>"
 	       "</body></html>");
+}
+
+static void SsoConsent(WebRequest& r)
+{
+	if(!TheWebEngine().MetaSso() || SsoDefaultRole(r.Site().id).IsEmpty()) {
+		r.Status(403, "SSO consent is unavailable");
+		return;
+	}
+	String next = SsoSafeNext(r.Param("next"));
+	if(r.Param("decision") != "yes" && r.Param("decision") != "no") {
+		r.Status(400, "Invalid consent decision");
+		return;
+	}
+	// Consent only runs on the anonymous session created for this form. Never let a
+	// forged/replayed choice revoke an already authenticated local account session.
+	if(!r.HasSession() || r.HasUser()) {
+		r.Status(403, "Consent session is unavailable");
+		return;
+	}
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = SSO_IDP_SITE;
+	String subject, username;
+	if(!SsoCentralUser(r, ctx, subject, &username)) {
+		r.Redirect(r.Site().Url("session/login"));
+		return;
+	}
+	BrokerCall cleanup;
+	cleanup.op = "clear-provision-requests";
+	cleanup.payload.Add("subject_user_id", subject);
+	cleanup.payload.Add("client_site", r.Site().id);
+	BrokerResult cleaned = TheWebEngine().Broker().Call(ctx, cleanup);
+	if(!cleaned.ok) {
+		r.Status(cleaned.status, "Previous account requests could not be reconciled");
+		return;
+	}
+	if(r.Param("decision") != "yes") {
+		if(!r.Site().Accounts().Logout(r.Session().session_id)) {
+			r.Status(503, "Consent session could not be revoked");
+			return;
+		}
+		r.DropSession();
+		r.Redirect(r.Site().Url("session/login"));
+		return;
+	}
+	String local_id;
+	WebAccountUser existing;
+	if(r.Site().Accounts().FindUserByUsername(username, existing)) {
+		WebAccountUser verified;
+		if(!r.Site().Accounts().VerifyPassword(username, r.Param("local_password"), verified).ok || verified.user_id != existing.user_id) {
+			r.Status(403, "Ownership proof failed");
+			r.Html("<p>That account was not linked. Sign in to the existing account first, then retry MetaAccount consent.</p>");
+			return;
+		}
+		if(existing.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(existing.user_id, r.Param("local_code"))) {
+			r.Status(403, "Ownership proof failed");
+			r.Html("<p>That account was not linked. Use a valid authenticator or recovery code.</p>");
+			return;
+		}
+		local_id = existing.user_id;
+	}
+	else {
+		Vector<String> roles;
+		roles.Add(SsoDefaultRole(r.Site().id));
+		bool existed = false;
+		StoreResult created = r.Site().Accounts().CreateSsoUser(username, username, roles, local_id, existed);
+		if(!created.ok || existed) {
+			r.Status(409, "Account could not be provisioned safely");
+			return;
+		}
+	}
+	BrokerCall grant;
+	grant.op = "grant-consent";
+	grant.payload.Add("subject_user_id", subject);
+	grant.payload.Add("client_user_id", local_id);
+	grant.payload.Add("client_site", r.Site().id);
+	grant.payload.Add("client_id", "sso");
+	ValueArray scopes;
+	scopes.Add(SSO_SCOPE);
+	grant.payload.Add("scopes", scopes);
+	BrokerResult granted = TheWebEngine().Broker().Call(ctx, grant);
+	if(!granted.ok) {
+		r.Status(granted.status, "Consent could not be saved");
+		return;
+	}
+	String sid, csrf, err;
+	if(!r.Site().Accounts().AdoptUserSession(local_id, r.ClientIp(), sid, csrf, err).ok) {
+		r.Status(503, "Local session could not be opened");
+		return;
+	}
+	r.AdoptSession(sid, "sso");
+	r.Redirect(next);
 }
 
 // A browser form gets the MetaAccount consent page after a request, or a short page for a refusal.
@@ -377,7 +416,7 @@ static void SsoReply(WebRequest& r, const ValueMap& m, int code)
 		return;
 	}
 	if((bool)m.Get("ok")) {
-		String consent = SsoSiteUrl(r, SSO_IDP_SITE, "/consent");
+		String consent = SsoSiteUrl(SSO_IDP_SITE, "/consent");
 		r.Redirect(consent.GetCount() ? consent : r.Site().Url(""));
 		return;
 	}
@@ -475,9 +514,17 @@ static void SsoLink(WebRequest& r)
 
 static void Login(WebRequest& r)
 {
+	auto login_event = [&](const String& outcome, const String& method, const String& actor = String()) {
+		WebAuditEvent e; e.at = GetSysTime(); e.site = r.Site().id; e.kind = "login";
+		e.route = "session/login"; e.method = "POST"; e.outcome = outcome; e.operation = method;
+		e.actor_user_id = actor; e.status = outcome == "success" ? 200 : method == "sso_required" ? 403 : 401;
+		if(r.HasSession()) e.session_ref = r.Session().data.Get("__audit_ref", "");
+		r.Site().Audit().Record(e);
+	};
 	// With MetaAccount sign-in on, a composed site takes no local password from a browser form
 	// (task 048). The JSON API keeps the password path for operators and automation (AGENTS.md).
 	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE && !WantsJson(r)) {
+		login_event("failure", "sso_required");
 		RenderLoginPage(r, "This site signs in through MetaAccount. Use Continue with MetaAccount on the sign-in page.", 403);
 		return;
 	}
@@ -487,6 +534,7 @@ static void Login(WebRequest& r)
 	String sid, csrf, err;
 	WebAccountUser u;
 	if(!r.Site().Accounts().Login(username, password, r.ClientIp(), sid, csrf, u, err).ok) {
+		login_event("failure", "password");
 		// A browser form gets the sign-in page again with a plain message, not a JSON document
 		// (task 042). An API caller keeps the JSON reply.
 		if(!WantsJson(r)) {
@@ -500,10 +548,18 @@ static void Login(WebRequest& r)
 		return;
 	}
 	r.AdoptSession(sid);
+	login_event("success", "password", u.user_id);
 	if(!WantsJson(r)) {
 		// Back to the webapp that started the sign-in, only for an allowlisted target (task 039, SSO on).
 		String next = r.Param("next");
-		r.Redirect(TheWebEngine().MetaSso() && SsoReturnAllowed(r, next) ? next : String("/"));
+		bool allowed = TheWebEngine().MetaSso() && SsoReturnAllowed(r, next);
+		if(!next.IsEmpty() && !allowed) {
+			WebAuditEvent rejected; rejected.at = GetSysTime(); rejected.site = r.Site().id;
+			rejected.kind = "redirect"; rejected.route = "redirect"; rejected.method = "POST";
+			rejected.outcome = "rejected"; rejected.status = 302; rejected.actor_user_id = u.user_id;
+			r.Site().Audit().Record(rejected);
+		}
+		r.Redirect(allowed ? next : String("/"));
 		return;
 	}
 	ValueMap m;
@@ -592,52 +648,21 @@ String SessionChromeHtml(WebRequest& r)
 	return out + "</span>";
 }
 
-// The theme and density whitelists match the WebFramework ids (ThemeRegistry, density.js). WebEngine does not
-// depend on WebFramework, so the lists are repeated here; a value outside them is never written to the page.
-static bool ThemeAllowed(const String& v)
-{
-	static const char *ids[] = { "vivid-dark", "vivid-light", "vivid-mixed", "github-dark", "github-light",
-	                             "sourceforge-dark", "sourceforge-classic" };
-	for(const char *id : ids)
-		if(v == id)
-			return true;
-	return false;
-}
-
-static bool DensityAllowed(const String& v)
-{
-	return v == "dense" || v == "compact" || v == "comfortable" || v == "spacious";
-}
-
 String ThemeHtmlAttrs(WebRequest& r)
 {
-	String theme = r.RequestCookie("wf_theme");
-	String density = r.RequestCookie("wf_density");
-	if(!ThemeAllowed(theme))
-		theme = "vivid-dark";
-	if(!DensityAllowed(density))
-		density = "comfortable";
-	return " data-theme=\"" + theme + "\" data-density=\"" + density + "\"";
+	return WebsiteThemeHtmlAttributes(r.RequestCookie("wf_theme"), r.RequestCookie("wf_density"));
 }
 
 // Applies a shell broadcast. It accepts only a message from the same host (any port) and a whitelisted value,
 // and sets an attribute, never HTML.
 String ThemeHeadScript()
 {
-	return "<script>(function(){"
-	       "var T=['vivid-dark','vivid-light','vivid-mixed','github-dark','github-light','sourceforge-dark','sourceforge-classic'];"
-	       "var L=['dense','compact','comfortable','spacious'];"
-	       "function sameHost(o){try{var u=new URL(o);return(u.protocol==='http:'||u.protocol==='https:')&&u.hostname===location.hostname;}catch(e){return false;}}"
-	       "window.addEventListener('message',function(e){"
-	       "if(!sameHost(e.origin)||!e.data)return;"
-	       "var d=e.data,h=document.documentElement;"
-	       "if(d.type==='wf-theme'&&T.indexOf(d.value)>=0)h.setAttribute('data-theme',d.value);"
-	       "else if(d.type==='wf-density'&&L.indexOf(d.value)>=0)h.setAttribute('data-density',d.value);"
-	       "});})();</script>";
+	return WebsiteThemeHeadScript();
 }
 
 void InstallSessionRoutes(EngineSite& site)
 {
+	InstallAuditRoutes(site);
 	// The MetaAccount site signs in only through its own TOTP-enforcing login (task 047); its
 	// session/login routes are registered by InstallMetaAccountSite, never the password-only ones here.
 	if(site.id != SSO_IDP_SITE) {
@@ -648,6 +673,7 @@ void InstallSessionRoutes(EngineSite& site)
 	site.Router().Add("session/whoami", Whoami);
 	if(TheWebEngine().MetaSso()) {
 		site.Router().Add("session/sso", SsoContinue);
+		site.Router().Add("session/sso/consent:POST", SsoConsent);
 		site.Router().Add("session/sso/diagnostics", SsoDiagnostics);
 		site.Router().Add("session/sso/link:POST", SsoLink);
 		site.Router().Add("session/sso/provision:POST", SsoProvision);
@@ -663,6 +689,9 @@ void InstallSessionRoutes(EngineSite& site)
 	                                        "json", "Show the signed-in account", {}));
 	if(TheWebEngine().MetaSso())
 	if(TheWebEngine().MetaSso()) {
+		cm.Add(site.id, site.title, HttpCommand("session-sso-consent", "POST", "session/sso/consent", "MetaAccount session and explicit Yes/No choice",
+		                                        "html", "Consent to a least-privilege local account for this site",
+		                                        {"decision:string:required", "next:string:optional", "local_password:string:optional", "local_code:string:optional"}));
 		cm.Add(site.id, site.title, HttpCommand("session-sso-link", "POST", "session/sso/link", "open session",
 		                                        "json", "Ask MetaAccount to link this account to this site", {}));
 		cm.Add(site.id, site.title, HttpCommand("session-sso-provision", "POST", "session/sso/provision", "any visitor with a MetaAccount session",

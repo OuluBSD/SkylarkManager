@@ -2,19 +2,6 @@
 
 NAMESPACE_UPP
 
-String PortalLinkHost(const String& host_header)
-{
-	String host = TrimBoth(host_header);
-	if(host.StartsWith("[")) {
-		int e = host.Find(']');
-		return e < 0 ? String("127.0.0.1") : host.Left(e + 1);
-	}
-	int colon = host.Find(':');
-	if(colon >= 0)
-		host = host.Left(colon);
-	return host.IsEmpty() ? String("127.0.0.1") : host;
-}
-
 // The rail icon of a composed site, by its id; unknown sites get a generic layers icon.
 static String SiteIcon(const String& id)
 {
@@ -29,7 +16,7 @@ static String SiteIcon(const String& id)
 	return "layers";
 }
 
-static PortalWebapp SiteWebapp(const String& host, const EngineSiteListing& s)
+static PortalWebapp SiteWebapp(const EngineSiteListing& s)
 {
 	PortalWebapp app;
 	app.id = s.id;
@@ -37,19 +24,18 @@ static PortalWebapp SiteWebapp(const String& host, const EngineSiteListing& s)
 	app.group = "webapp";
 	app.mode = "frame";
 	app.icon = SiteIcon(s.id);
-	app.url = Format("http://%s:%d/", host, s.port);
+	app.url = s.public_url;
 	return app;
 }
 
-Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineSiteListing>& sites)
+Vector<PortalWebapp> ListWebapps(const Vector<EngineSiteListing>& sites)
 {
-	String host = PortalLinkHost(host_header);
 	Vector<PortalWebapp> out;
 
 	// Atlas leads the list for now (task 036).
 	for(const EngineSiteListing& s : sites)
 		if(s.id == "atlas")
-			out.Add(pick(SiteWebapp(host, s)));
+			out.Add(pick(SiteWebapp(s)));
 
 	// The five stock hubs, each framed at its root.
 	static const char *hubs[][4] = {
@@ -72,7 +58,7 @@ Vector<PortalWebapp> ListWebapps(const String& host_header, const Vector<EngineS
 
 	for(const EngineSiteListing& s : sites)
 		if(s.id != "atlas")
-			out.Add(pick(SiteWebapp(host, s)));
+			out.Add(pick(SiteWebapp(s)));
 
 	PortalWebapp settings;
 	settings.id = "settings";
@@ -213,10 +199,10 @@ static String PortalShellScript(const String& first_src)
 		"})();\n";
 }
 
-String RenderPortalShell(const String& host_header, const String& selected, const UserSession& sess,
+String RenderPortalShell(const String& selected, const UserSession& sess,
                          const Vector<EngineSiteListing>& sites, const String& theme_cookie, const String& density_cookie)
 {
-	Vector<PortalWebapp> apps = ListWebapps(host_header, sites);
+	Vector<PortalWebapp> apps = ListWebapps(sites);
 	int sel = 0;
 	for(int i = 0; i < apps.GetCount(); i++)
 		if(apps[i].id == selected)
@@ -277,7 +263,7 @@ SKYLARK(PortalShellPage, "")
 	UserSession sess = SystemAuthService::GetCurrentSession(http);
 	if(!sess.is_authenticated)
 		sess = SystemAuthService::BridgeMetaSession(http, false);
-	http.ContentType("text/html; charset=utf-8") << RenderPortalShell(http.GetHeader("host"), http["app"],
+	http.ContentType("text/html; charset=utf-8") << RenderPortalShell(http["app"],
 	                                                               sess,
 	                                                               TheWebEngine().ListSites(),
 	                                                               SystemAuthService::ExtractCookie(http, "wf_theme"),

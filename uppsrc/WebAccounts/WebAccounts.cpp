@@ -38,6 +38,13 @@ String SiteAccounts::CookieName() const
 JsonFileStore& SiteAccounts::Users()      { return *users_store; }
 JsonFileStore& SiteAccounts::Sessions()   { return *sessions_store; }
 
+static String NewAuditRef()
+{
+	String ref = AsString(Uuid::Create());
+	ref.Replace("-", "");
+	return "as_" + ToLower(ref);
+}
+
 bool SiteAccounts::ValidUsername(const String& username)
 {
 	if(username.IsEmpty() || username.GetCount() > 64)
@@ -235,6 +242,7 @@ StoreResult SiteAccounts::CreateGuestSession(String& session_id, String& csrf_to
 	s.site = site;
 	s.user_id = String();
 	s.csrf_token = WebAuthRandomBytes(32);
+	s.data.Add("__audit_ref", NewAuditRef());
 	s.created = GetSysTime();
 	s.expires = s.created + 24 * 3600;
 	String new_rev;
@@ -260,6 +268,7 @@ StoreResult SiteAccounts::Login(const String& username, const String& password,
 	s.site = site;
 	s.user_id = user.user_id;
 	s.csrf_token = WebAuthRandomBytes(32);
+	s.data.Add("__audit_ref", NewAuditRef());
 	s.created = GetSysTime();
 	s.expires = s.created + ttl_hours * 3600;
 	s.data.Add("last_ip", ip);
@@ -287,6 +296,7 @@ StoreResult SiteAccounts::AdoptUserSession(const String& user_id, const String& 
 	s.site = site;
 	s.user_id = u.user_id;
 	s.csrf_token = WebAuthRandomBytes(32);
+	s.data.Add("__audit_ref", NewAuditRef());
 	s.created = GetSysTime();
 	s.expires = s.created + ttl_hours * 3600;
 	s.data.Add("last_ip", ip);
@@ -302,8 +312,9 @@ StoreResult SiteAccounts::AdoptUserSession(const String& user_id, const String& 
 	return r;
 }
 
-bool SiteAccounts::ResolveSession(const String& raw_session_id, WebAccountSession& out)
+bool SiteAccounts::ResolveSession(const String& raw_session_id, WebAccountSession& out, bool *expired)
 {
+	if(expired) *expired = false;
 	if(raw_session_id.IsEmpty())
 		return false;
 	String json, rev;
@@ -319,8 +330,15 @@ bool SiteAccounts::ResolveSession(const String& raw_session_id, WebAccountSessio
 		// another site/port is rejected here even if the raw id collides.
 		if(s.site != site)
 			return false;
-		if(s.expires < GetSysTime())
+		if(s.expires < GetSysTime()) {
+			if(expired) *expired = true;
 			return false;
+		}
+		if(((String)s.data.Get("__audit_ref", "")).IsEmpty()) {
+			s.data.Add("__audit_ref", NewAuditRef());
+			String new_rev;
+			Sessions().Put(raw_session_id, StoreAsJson(s, true), rev, new_rev);
+		}
 		out = s;
 		return true;
 	}
@@ -350,7 +368,10 @@ StoreResult SiteAccounts::SaveSessionData(const String& raw_session_id, const Va
 			return StoreResult("corrupt session record");
 		WebAccountSession s;
 		LoadFromJsonValue(s, v);
+		Value audit_ref = s.data.Get("__audit_ref", Null);
 		s.data = data;
+		if(!audit_ref.IsNull())
+			s.data.Add("__audit_ref", audit_ref);
 		String new_rev;
 		return Sessions().Put(raw_session_id, StoreAsJson(s, true), rev, new_rev);
 	}
@@ -381,6 +402,47 @@ void SiteAccounts::CleanupExpired()
 		catch(...) {}
 	}
 	mutex.Leave();
+}
+
+StoreResult SiteAccounts::ListActiveSessionSnapshots(Vector<WebAccountSessionSnapshot>& out, int offset, int limit)
+{
+	out.Clear();
+	if(offset < 0 || offset > 10000 || limit < 1 || limit > 200)
+		return StoreResult("invalid snapshot limit");
+	mutex.Enter();
+	Vector<String> ids;
+	StoreResult result = Sessions().List(ids);
+	if(!result) { mutex.Leave(); return result; }
+	Time now = GetSysTime();
+	int skipped = 0;
+	for(int i = ids.GetCount() - 1; i >= 0 && out.GetCount() < limit; i--) {
+		String json, revision;
+		if(!Sessions().Get(ids[i], json, revision))
+			continue;
+		try {
+			Value v = ParseJSON(json);
+			if(!v.Is<ValueMap>()) continue;
+			WebAccountSession session;
+			LoadFromJsonValue(session, v);
+			if(session.site != site || session.expires <= now) continue;
+			if(((String)session.data.Get("__audit_ref", "")).IsEmpty()) {
+				session.data.Add("__audit_ref", NewAuditRef());
+				String new_revision;
+				StoreResult saved = Sessions().Put(ids[i], StoreAsJson(session, true), revision, new_revision);
+				if(!saved) { mutex.Leave(); return StoreResult("session snapshots unavailable"); }
+			}
+			if(skipped < offset) { skipped++; continue; }
+			WebAccountSessionSnapshot snapshot;
+			snapshot.user_id = session.user_id;
+			snapshot.audit_ref = session.data.Get("__audit_ref", "");
+			snapshot.created = session.created;
+			snapshot.expires = session.expires;
+			out.Add(pick(snapshot));
+		}
+		catch(...) {}
+	}
+	mutex.Leave();
+	return StoreResult(true);
 }
 
 
@@ -451,6 +513,13 @@ StoreResult SiteAccounts::DisableTotp(const String& user_id, const String& passw
 
 bool SiteAccounts::VerifyTotpOrRecovery(const String& user_id, const String& code)
 {
+	bool used_recovery;
+	return VerifyTotpOrRecovery(user_id, code, used_recovery);
+}
+
+bool SiteAccounts::VerifyTotpOrRecovery(const String& user_id, const String& code, bool& used_recovery)
+{
+	used_recovery = false;
 	WebAccountUser u;
 	if(!GetUser(user_id, u) || u.totp_secret.IsEmpty())
 		return false;
@@ -466,6 +535,7 @@ bool SiteAccounts::VerifyTotpOrRecovery(const String& user_id, const String& cod
 			String json, rev;
 			if(Users().Get(user_id, json, rev).ok)
 				Users().Put(user_id, StoreAsJson(upd, true), rev, rev);
+			used_recovery = true;
 			return true;
 		}
 	}
@@ -536,6 +606,19 @@ StoreResult RunAll(const String& root, String& report)
 
 	String guest, gcsrf;
 	all &= Check(rep, a.CreateGuestSession(guest, gcsrf).ok && gcsrf.GetCount() >= 32, "guest session with csrf token");
+	all &= Check(rep, a.ResolveSession(guest, sess) &&
+	                  ((String)sess.data.Get("__audit_ref", "")).StartsWith("as_"),
+	             "persisted session contains only an opaque audit reference");
+	String guest_json, guest_rev, new_guest_rev;
+	JsonFileStore a_sessions(site_a, AppendFileName(root, "a"), "sessions");
+	if(a_sessions.Get(guest, guest_json, guest_rev).ok) {
+		LoadFromJsonValue(sess, ParseJSON(guest_json));
+		sess.expires = GetSysTime() - 1;
+		a_sessions.Put(guest, StoreAsJson(sess, true), guest_rev, new_guest_rev);
+	}
+	bool expired = false;
+	all &= Check(rep, !a.ResolveSession(guest, sess, &expired) && expired,
+	             "session resolution distinguishes expired sessions without exposing the raw id");
 
 	// Adoption (task 039): an enabled user gets a new site-stamped session without a password;
 	// an unknown or disabled user gets none; the adopted session resolves on its own site only.
@@ -596,6 +679,36 @@ StoreResult RunAll(const String& root, String& report)
 	             "bound grant is granted to the created account");
 	all &= Check(rep, !pg_store.ApproveProvision(pg1, pid).ok, "a granted provisioning request cannot be approved twice");
 	all &= Check(rep, !pg_store.ApproveProvision(pg3, "").ok, "approval without an account binds nothing");
+
+	String immediate_id, immediate_again;
+	all &= Check(rep, pg_store.GrantAs("wau_subject", pid, "science", "sso", psc, immediate_id).ok,
+	             "explicit client consent grants the selected local account immediately");
+	all &= Check(rep, pg_store.GrantAs("wau_subject", pid, "science", "sso", psc, immediate_again).ok &&
+	                  immediate_again == immediate_id,
+	             "repeated consent is idempotent for the same subject and app account");
+	WebAccountGrant immediate;
+	all &= Check(rep, pg_store.GetGrant(immediate_id, immediate) && immediate.state == "granted" &&
+	                  immediate.client_user_id == pid,
+	             "immediate grant remains bound to exactly one app-local user");
+	Vector<String> elevated_scopes; elevated_scopes.Add("finance");
+	String elevated_id;
+	all &= Check(rep, !pg_store.GrantAs("wau_subject", pid, "science", "finance", psc, elevated_id).ok &&
+	                  !pg_store.GrantAs("wau_subject", pid, "science", "sso", elevated_scopes, elevated_id).ok,
+	             "SSO consent cannot grant a non-SSO client or elevated scope");
+	String other_site_pending, other_subject_pending;
+	bool other_site_exists = false, other_subject_exists = false;
+	all &= Check(rep, pg_store.RequestProvision("wau_subject", "atlas", "sso", "frank", "reader", psc,
+	                                           other_site_pending, other_site_exists).ok &&
+	                  pg_store.RequestProvision("wau_other", "science", "sso", "grace", "reader", psc,
+	                                           other_subject_pending, other_subject_exists).ok,
+	             "unrelated pending provisions are present for cleanup isolation test");
+	all &= Check(rep, pg_store.DenyPendingProvision("wau_subject", "science").ok &&
+	                  pg_store.GetGrant(pg3, immediate) && immediate.state == "denied",
+	             "legacy pending account requests are reconciled without granting them");
+	WebAccountGrant unrelated;
+	all &= Check(rep, pg_store.GetGrant(other_site_pending, unrelated) && unrelated.state == "requested" &&
+	                  pg_store.GetGrant(other_subject_pending, unrelated) && unrelated.state == "requested",
+	             "denying one app's consent preserves other sites' and subjects' pending requests");
 
 	report = Join(rep, "");
 	return all ? StoreResult(true) : StoreResult("WebAccounts self test failures:\n" + report);

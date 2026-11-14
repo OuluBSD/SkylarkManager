@@ -33,8 +33,10 @@ the WebBroker. Client webapps keep their own lightweight accounts
 4. **Broker is the boundary**: other sites never touch the meta store
    directly; all cross-site access flows through `MetaAccountService` and is
    recorded in the broker diagnostics ledger.
-5. **Minimal HTML**: until the Witz work package, pages are small functional
-   HTML emitted directly by handlers.
+5. **Template ownership**: shared page shells and CSS come from
+   `WebsiteTemplates` (`meta-login` for sign-in, `glassmorphism` for signed-in
+   content). Handlers provide escaped values and page-specific content, never
+   inline `<style>` blocks or theme helpers.
 6. **The inbox is subject-scoped and events are inert**: every inbox event
    names its meta subject; the page and `inbox/read-all` serve the session
    identity only, and a second identity sees an empty inbox. Events carry

@@ -13,7 +13,8 @@
 #include <Science/ScienceService.h>
 #include <TaskFoundry/TaskFoundrySite.h>
 #include <YouTubePlanner/YouTubePlannerSite.h>
-#include <CompanyComposed/CompanyComposed.h>
+#include <Company/CompanyComposed.h>
+#include <Company/CompanySite.h>
 #include "PrivateHubService.h"
 
 NAMESPACE_UPP
@@ -28,6 +29,8 @@ struct EngineComposition {
 	int    financials_port = 18216;
 	int    atlas_port = 18217;
 	int    youtubeplanner_port = 18218;
+	int    company_port = 18219;
+	String public_host;               // address clients use for site links; never loopback (see ResolvePublicHost)
 	bool   enable_meta_sso = false;   // --enable-meta-sso: opt-in MetaAccount SSO (task 039)
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the
 	// defaults of AgentIpcConfig / AgentIpcDefaultClientArgv().
@@ -63,6 +66,11 @@ struct EngineSiteBackends {
 // opened.
 bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
                         const EngineComposition& cfg, String& error);
+// Resolves the address other machines use to reach this host: the flag value,
+// else MANAGERSKYLARK_PUBLIC_HOST, else the detected LAN IPv4. Loopback is refused.
+bool ResolvePublicHost(const String& flag_value, String& host, String& error);
+bool ResolvePortalExternalOrigin(const String& public_host, int port, String& origin, String& error);
+bool IsTrustedManagerProxyPeer(const String& peer);
 
 // Creates or updates a PrivateHub account (role "member") on the composed
 // PrivateHub site. Requires ComposeEngineSites to have run.
@@ -95,6 +103,12 @@ bool SetFinancialsPassword(const String& username, const String& role,
 // Creates or updates an Atlas account on the composed atlas site. The role
 // "admin" may edit maps; any other role reads only. Requires ComposeEngineSites.
 bool SetAtlasPassword(const String& username, const String& role, const String& password, String& error);
+
+// Creates or updates a Company user (the Company record and its WebAccounts
+// login) with one role, through the store ComposeEngineSites opened. Requires
+// ComposeEngineSites to have run; owned is the same backends object.
+bool SetCompanyPassword(EngineSiteBackends& owned, const String& username, const String& role,
+                        const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.
 bool IsEngineGatewayHandler(const String& handler_id);

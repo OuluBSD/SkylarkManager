@@ -1,5 +1,6 @@
 #include "AtlasSite.h"
 #include <WebStorage/WebStorage.h>
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -121,6 +122,11 @@ static bool RequireLogin(WebRequest& r)
 	return false;
 }
 
+static int AtlasPolicyStatus(WebRequest& r, const String& module, const String& record)
+{
+	return ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC);
+}
+
 static String CsrfField(WebRequest& r)
 {
 	return "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + Esc(r.CsrfToken()) + "\">";
@@ -135,10 +141,12 @@ static void Page(WebRequest& r, const String& title, const String& body, const S
 {
 	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-	       "<title>" + Esc(title) + " - Atlas</title>" + AtlasStylesheet() + "</head>"
+	       "<title>" + Esc(title) + " - Atlas</title><style>" + WebsiteThemeStyles() + WebsiteDensityStyles() + "</style>"
+	       + AtlasStylesheet() + "</head>"
 	       "<body" + body_attrs + ">"
-	       "<nav class=\"atlas-nav\"><a href=\"" + Esc(r.Site().Url("atlas")) + "\">Atlas</a> " + SessionChromeHtml(r) + "</nav>"
-	       "<main><h1>" + Esc(title) + "</h1>" + body + "</main></body></html>");
+	       "<nav class=\"atlas-nav\"><a href=\"" + Esc(r.Site().Url("atlas")) + "\">Atlas</a> " + SessionChromeHtml(r)
+	       + WebsiteThemeControlsHtml() + "</nav>"
+	       "<main><h1>" + Esc(title) + "</h1>" + body + "</main>" + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static void Refuse(WebRequest& r, int code, const String& message)
@@ -197,26 +205,39 @@ static String ElementOptions(const AtlasMap& m, const String& selected)
 // Reads.
 // ---------------------------------------------------------------------------
 
+static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map);
+
 static void MapList(WebRequest& r)
 {
-	// Map reads are public (task 053). Edits are still limited to the admin role.
+	if(AtlasPolicyStatus(r, "maps", String()) == 503) {
+		r.Status(503, "content policy is unavailable");
+		return;
+	}
 	Vector<String> ids;
 	Maps(r.Site().data_root).List(ids);
+	Vector<String> visible_ids;
+	for(const String& id : ids)
+		if(AtlasPolicyStatus(r, "maps", id) == 0)
+			visible_ids.Add(id);
+	StringBuffer rows;
+	int visible_count = 0;
+	for(const String& id : visible_ids) {
+		AtlasMap m;
+		String rev, err;
+		if(!AtlasLoadMap(r.Site().data_root, id, m, rev, err))
+			continue;
+		FilterAtlasMap(r, id, m);
+		rows << "<tr><td><a href=\"" << Esc(r.Site().Url("atlas/" + id)) << "\">" << Esc(m.map) << "</a></td><td>"
+		     << Esc(m.version) << "</td><td>" << Esc(m.title) << "</td><td>" << m.elements.GetCount()
+		     << "</td><td>" << m.roads.GetCount() << "</td></tr>";
+		visible_count++;
+	}
 	StringBuffer b;
-	if(ids.IsEmpty())
+	if(visible_count == 0)
 		b << "<p>No maps yet.</p>";
 	else {
-		b << "<table><tr><th>Map</th><th>Version</th><th>Title</th><th>Elements</th><th>Roads</th></tr>";
-		for(const String& id : ids) {
-			AtlasMap m;
-			String rev, err;
-			if(!AtlasLoadMap(r.Site().data_root, id, m, rev, err))
-				continue;
-			b << "<tr><td><a href=\"" << Esc(r.Site().Url("atlas/" + id)) << "\">" << Esc(m.map) << "</a></td><td>"
-			  << Esc(m.version) << "</td><td>" << Esc(m.title) << "</td><td>" << m.elements.GetCount()
-			  << "</td><td>" << m.roads.GetCount() << "</td></tr>";
-		}
-		b << "</table>";
+		b << "<table><tr><th>Map</th><th>Version</th><th>Title</th><th>Elements</th><th>Roads</th></tr>"
+		  << String(rows) << "</table>";
 	}
 	if(CanEdit(r))
 		b << "<details><summary>Create a map</summary>"
@@ -228,6 +249,21 @@ static void MapList(WebRequest& r)
 		  << "<label>World height <input name=\"height\" value=\"1600\"></label>"
 		  << "<button type=\"submit\">Create</button></form></details>";
 	Page(r, "Maps", String(b));
+}
+
+static bool AtlasElementVisible(WebRequest& r, const String& key, const String& element_id)
+{
+	return AtlasPolicyStatus(r, "elements", key + ":element:" + element_id) == 0;
+}
+
+static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map)
+{
+	for(int i = map.elements.GetCount() - 1; i >= 0; i--)
+		if(!AtlasElementVisible(r, key, map.elements[i].id))
+			map.elements.Remove(i);
+	for(int i = map.roads.GetCount() - 1; i >= 0; i--)
+		if(map.FindElement(map.roads[i].from) < 0 || map.FindElement(map.roads[i].to) < 0)
+			map.roads.Remove(i);
 }
 
 static void ElementTable(WebRequest& r, const AtlasMap& m, const String& key, StringBuffer& b)
@@ -299,21 +335,39 @@ static String EditPanel(WebRequest& r, const AtlasMap& m, const String& key, con
 static void MapView(WebRequest& r)
 {
 	String key = r.PathArg(0);
+	if(AtlasPolicyStatus(r, "maps", String()) == 503) {
+		r.Status(503, "content policy is unavailable");
+		return;
+	}
 	AtlasMap m;
 	String rev, err;
 	if(!AtlasLoadMap(r.Site().data_root, key, m, rev, err)) {
 		Refuse(r, 404, err);
 		return;
 	}
+	if(AtlasPolicyStatus(r, "maps", key) != 0) {
+		Refuse(r, 404, "map not found");
+		return;
+	}
+	FilterAtlasMap(r, key, m);
 	bool edit = CanEdit(r);
 	StringBuffer b;
 	b << "<p class=\"meta\">" << Esc(m.map) << " " << Esc(m.version) << " &middot; " << m.elements.GetCount()
 	  << " elements &middot; " << m.roads.GetCount() << " roads &middot; world " << m.world.width << " x "
 	  << m.world.height << "</p>"
+	  << "<div id=\"atlas-stage\">"
 	  << "<div class=\"toolbar\"><span id=\"atlas-plane\"></span> <button type=\"button\" id=\"atlas-up\">Up</button> "
+	  << "<label><input type=\"checkbox\" id=\"atlas-contents\"> Show contents</label>"
+	  << "<button type=\"button\" id=\"atlas-zoom-out\" title=\"Zoom out (-)\">&minus;</button>"
+	  << "<span id=\"atlas-zoom\">100%</span>"
+	  << "<button type=\"button\" id=\"atlas-zoom-in\" title=\"Zoom in (+)\">+</button>"
+	  << "<button type=\"button\" id=\"atlas-fit\" title=\"Fit to window (0)\">Fit</button>"
+	  << "<button type=\"button\" id=\"atlas-actual\" title=\"Actual size\">1:1</button>"
+	  << "<button type=\"button\" id=\"atlas-maximize\">Maximize</button>"
+	  << "<button type=\"button\" id=\"atlas-close\" hidden>&#x2715; Close</button>"
 	  << "<span class=\"hint\">Wheel to zoom, drag to pan, click a block to go inside."
-	  << (edit ? " Drag an element to move it." : "") << "</span></div>"
-	  << "<svg id=\"atlas-canvas\" role=\"img\" aria-label=\"Topology map\"></svg>"
+	  << (edit ? " Drag an element to move it in Show contents." : "") << "</span></div>"
+	  << "<svg id=\"atlas-canvas\" role=\"img\" aria-label=\"Topology map\"></svg></div>"
 	  << "<noscript><p>The canvas needs JavaScript; the lists below show the same map.</p></noscript>"
 	  << "<h2>Elements</h2>";
 	ElementTable(r, m, key, b);
@@ -333,13 +387,30 @@ static void MapView(WebRequest& r)
 static void ElementView(WebRequest& r)
 {
 	String key = r.PathArg(0);
+	if(AtlasPolicyStatus(r, "maps", String()) == 503) {
+		r.Status(503, "content policy is unavailable");
+		return;
+	}
 	AtlasMap m;
 	String rev, err;
 	if(!AtlasLoadMap(r.Site().data_root, key, m, rev, err)) {
 		Refuse(r, 404, err);
 		return;
 	}
+	if(AtlasPolicyStatus(r, "maps", key) != 0) {
+		Refuse(r, 404, "element not found");
+		return;
+	}
 	String id = r.PathArg(1);
+	if(AtlasPolicyStatus(r, "elements", key + ":element:" + id) == 503) {
+		r.Status(503, "content policy is unavailable");
+		return;
+	}
+	if(!AtlasElementVisible(r, key, id)) {
+		Refuse(r, 404, "element not found");
+		return;
+	}
+	FilterAtlasMap(r, key, m);
 	int i = m.FindElement(id);
 	if(i < 0) {
 		Refuse(r, 404, "element not found: " + id);
@@ -359,6 +430,8 @@ static void ElementView(WebRequest& r)
 	b << "<h2>Containment path</h2><ol class=\"path\">";
 	Vector<String> path = AtlasPath(m, e.id);
 	for(const String& pid : path) {
+		if(!AtlasElementVisible(r, key, pid))
+			continue;
 		int p = m.FindElement(pid);
 		b << "<li><a href=\"" << Esc(base + "/element/" + pid) << "\">" << Esc(m.elements[p].name) << "</a></li>";
 	}
@@ -368,6 +441,9 @@ static void ElementView(WebRequest& r)
 	bool any = false;
 	for(const AtlasRoad& rd : m.roads) {
 		if(rd.from != e.id && rd.to != e.id)
+			continue;
+		if(m.FindElement(rd.from) < 0 || m.FindElement(rd.to) < 0 ||
+		   !AtlasElementVisible(r, key, rd.from) || !AtlasElementVisible(r, key, rd.to))
 			continue;
 		if(!any)
 			b << "<table><tr><th>From</th><th>To</th><th>Kind</th><th>Label</th></tr>";
@@ -659,7 +735,7 @@ static void MoveElement(WebRequest& r)
 void InstallAtlasSite(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
-	rt.Add("", MapList); // the root is the map list, gated like every Atlas read (task 036)
+	rt.Add("", MapList); // the root is the public map list (Atlas reads are public; edits remain gated)
 	rt.Add("atlas", MapList);
 	rt.Add("POST", "atlas/create", CreateMap);
 	rt.Add("atlas/*", MapView);

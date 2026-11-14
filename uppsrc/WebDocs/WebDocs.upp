@@ -1,0 +1,8 @@
+description "Read-only, allowlisted local documentation repository resolver";
+
+uses
+	Core;
+
+file
+	DocsPortal.h,
+	DocsPortal.cpp;

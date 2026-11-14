@@ -1,7 +1,7 @@
 #ifndef _ManagerSkylark_CandidateWorkflow_h_
 #define _ManagerSkylark_CandidateWorkflow_h_
 
-#include "DataStore.h"
+#include <DataStore/DataStore.h>
 #include "SystemAuth.h"
 
 NAMESPACE_UPP

@@ -23,6 +23,8 @@
 #include <Science/ScienceModel.h>
 #include <Science/ScienceSite.h>
 #include <Science/ScienceService.h>
+#include <WebsiteTemplates/WebsiteTemplates.h>
+#include <WebAudit/WebAudit.h>
 
 using namespace Upp;
 
@@ -56,6 +58,8 @@ struct HttpReply {
 	String body;
 	int    content_length = -1;
 	String location;
+	String referrer_policy;
+	String cache_control;
 	Vector<String> set_cookies;
 };
 
@@ -119,6 +123,10 @@ static HttpReply HttpCallOnce(const String& method, int port, const String& path
 			r.content_length = ScanInt(TrimBoth(line.Mid(q + 1)));
 		else if(key == "location")
 			r.location = TrimBoth(line.Mid(q + 1));
+		else if(key == "referrer-policy")
+			r.referrer_policy = TrimBoth(line.Mid(q + 1));
+		else if(key == "cache-control")
+			r.cache_control = TrimBoth(line.Mid(q + 1));
 	}
 	r.body = String(all);
 	if(r.content_length >= 0 && r.body.GetCount() < r.content_length) {
@@ -362,6 +370,10 @@ static void RegisterSiteHandlers(EngineSite& site)
 }
 // Broker service on alpha.
 struct AlphaService : IBrokerService {
+	String AuditOperation(const String& op) const override
+	{
+		return op == "add" || op == "ping" ? op : String("unclassified");
+	}
 	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override
 	{
 		BrokerResult r;
@@ -509,6 +521,17 @@ static void SetupSites()
 	bool existed;
 	alpha.Accounts().CreateUser("alice", "pw-alpha", "Alice", roles, uid, existed);
 	alpha.Accounts().CreateUser("bob", "pw-bob", "Bob", roles, uid, existed);
+	Vector<String> admin_roles; admin_roles.Add("admin");
+	alpha.Accounts().CreateUser("auditadmin", "pw-audit", "Audit Admin", admin_roles, uid, existed);
+	beta.Accounts().CreateUser("auditadmin", "pw-audit", "Audit Admin", admin_roles, uid, existed);
+	InstallSessionRoutes(alpha);
+	InstallSessionRoutes(beta);
+	alpha.Router().Add("audit-redirect-local", [](WebRequest& r) { r.Redirect("/safe?token=redirect-secret-canary"); });
+	alpha.Router().Add("audit-redirect-external", [](WebRequest& r) { r.Redirect("https://outside.example/path?token=redirect-secret-canary"); });
+	alpha.Router().Add("audit-redirect-sso", [](WebRequest& r) {
+		EngineSite *meta = TheWebEngine().FindSite("meta");
+		r.Redirect(meta ? meta->PublicUrl("/login") : String("/"));
+	});
 	beta.Accounts().CreateUser("alice", "pw-beta", "Alice", roles, uid, existed);
 	beta.Accounts().CreateUser("bob", "pw-bob", "Bob", roles, uid, existed);
 	RegisterSiteHandlers(alpha);
@@ -546,12 +569,19 @@ static void SetupSites()
 		"\"visibility\":\"public\",\"provenance_ref\":\"\"}}");
 	s_sci_corpus = new ScienceCorpus(sci_corpus, AppendFileName(s_root, "science-site-articles"));
 	InstallScienceSite(science, *s_sci_corpus, s_meta_grants);
+	TheWebEngine().SetMetaSso(true);
+	InstallSessionRoutes(science);
+	TheWebEngine().SetMetaSso(false);
+	InstallContentPolicyRoutes(science, true);
 	science.Router().Add("login:POST", RouteLogin);
 	Vector<String> author_roles;
 	author_roles.Add(SCIENCE_AUTHOR_ROLE);
+	Vector<String> science_admin_roles;
+	science_admin_roles.Add("admin");
 	Vector<String> reader_roles;
 	reader_roles.Add("member");
 	science.Accounts().CreateUser("author", "pw-author", "Author", author_roles, uid, existed);
+	science.Accounts().CreateUser("sciadmin", "pw-admin", "Admin", science_admin_roles, uid, existed);
 	science.Accounts().CreateUser("reader", "pw-reader", "Reader", reader_roles, s_sci_reader_uid, existed);
 	science.Accounts().CreateUser("other", "pw-other", "Other", reader_roles, s_sci_other_uid, existed);
 
@@ -565,6 +595,7 @@ static void SetupSites()
 		Format("http://127.0.0.1:%d", PRIVATEHUB_PORT), AppendFileName(s_root, "privatehub"));
 	InstallPrivateHubSite(ph, *s_ph_backend);
 	InstallSessionRoutes(ph);
+	InstallContentPolicyRoutes(ph, true);
 	Vector<String> ph_member_roles;
 	ph_member_roles.Add("member");
 	Vector<String> ph_no_roles;
@@ -580,6 +611,7 @@ static void SetupSites()
 		Format("http://127.0.0.1:%d", TASKFOUNDRY_PORT), tf_root);
 	InstallTaskFoundrySite(tf, *s_tf_service, s_meta_grants);
 	InstallSessionRoutes(tf);
+	InstallContentPolicyRoutes(tf, true);
 	InstallCommandConsole(tf);
 	tf.Accounts().CreateUser("tfdev", "pw-tf", "Tfdev", ph_no_roles, uid, existed);
 
@@ -591,6 +623,7 @@ static void SetupSites()
 		Format("http://127.0.0.1:%d", FINANCIALS_PORT), AppendFileName(s_root, "financials"));
 	InstallFinancialsSite(fin);
 	InstallSessionRoutes(fin);
+	InstallContentPolicyRoutes(fin, true);
 	Vector<String> fin_finance_roles;
 	fin_finance_roles.Add("finance");
 	fin.Accounts().CreateUser("fviewer", "pw-fin", "Fviewer", ph_no_roles, uid, existed);
@@ -600,7 +633,10 @@ static void SetupSites()
 	EngineSite& atl = TheWebEngine().AddSite("atlas", "Atlas",
 		Format("http://127.0.0.1:%d", ATLAS_PORT), AppendFileName(s_root, "atlas"));
 	InstallAtlasSite(atl);
+	TheWebEngine().SetMetaSso(true);
 	InstallSessionRoutes(atl);
+	TheWebEngine().SetMetaSso(false);
+	InstallContentPolicyRoutes(atl, true);
 	Vector<String> atl_admin_roles;
 	atl_admin_roles.Add("admin");
 	atl.Accounts().CreateUser("aadmin", "pw-atl", "Aadmin", atl_admin_roles, uid, existed);
@@ -639,6 +675,7 @@ static void SetupSites()
 		Format("http://127.0.0.1:%d", CHANNELS_PORT), AppendFileName(s_root, "channels"));
 	InstallChannelsSite(ch, ch_ipc);
 	InstallSessionRoutes(ch);
+	InstallContentPolicyRoutes(ch, true);
 	ch.Accounts().CreateUser("viewer", "pw-view", "Viewer", ph_no_roles, uid, existed);
 }
 
@@ -700,6 +737,154 @@ static void Check(bool cond, const String& what)
 	if(!cond)
 		failures.Add(what);
 	Cout() << (cond ? "ok   " : "FAIL ") << what << "\n";
+}
+
+static void RunWebsiteTemplateChecks()
+{
+	const Vector<WebsiteTemplate>& templates = GetWebsiteTemplates();
+	Index<String> ids;
+	for(const WebsiteTemplate& t : templates)
+		ids.Add(t.id);
+	Check(ids.Find("meta-login") >= 0 && ids.Find("glassmorphism") >= 0,
+	      "website template registry includes meta-login and glassmorphism");
+	Check(ids.GetCount() == templates.GetCount(), "website template registry ids are unique");
+	int template_count = templates.GetCount();
+	WebsiteTemplate duplicate;
+	duplicate.id = "meta-login";
+	duplicate.title = "replacement must not win";
+	Check(!RegisterWebsiteTemplate(duplicate) && GetWebsiteTemplates().GetCount() == template_count &&
+	      FindWebsiteTemplate("meta-login")->title == "MetaAccount sign-in" &&
+	      !RegisterWebsiteTemplate(WebsiteTemplate()),
+	      "template registration rejects duplicate and empty ids without replacing built-ins");
+	const WebsiteTemplate *login = FindWebsiteTemplate("meta-login");
+	const WebsiteTemplate *glass = FindWebsiteTemplate("glassmorphism");
+	const WebsiteTemplate *engine_login = FindWebsiteTemplate("engine-login");
+	String login_form = login ? login->RenderMetaLoginForm("/login", "csrf", "next") : String();
+	Check(login && login->RenderPage("Sign in", login_form).Find("m-container") >= 0 &&
+	      login_form.Find("autocomplete=\"one-time-code\"") >= 0 && login_form.Find("<button") >= 0 &&
+	      login->RenderMetaLoginForm("/\"<x>", "csrf", "").Find("/&quot;&lt;x&gt;") >= 0,
+	      "meta-login template renders escaped TOTP form structure");
+	Check(glass && glass->RenderContent("<article>Account</article>").Find("wt-glass-panel") >= 0 &&
+	      glass->RenderStyles().Find("backdrop-filter") >= 0 && glass->RenderStyles().Find("fonts.googleapis") < 0,
+	      "glassmorphism template renders translucent content without external fonts");
+	String public_login = engine_login ? engine_login->RenderEngineLoginBody("bad <credentials>", "/login", "csrf",
+	                                                                        "/return", "/sso", false) : String();
+	String sso_login = engine_login ? engine_login->RenderEngineLoginBody(String(), String(), String(), String(),
+	                                                                       "/sso", true) : String();
+	Check(public_login.Find("<form") >= 0 && public_login.Find("name=\"username\"") >= 0 &&
+	      public_login.Find("name=\"__wf_csrf__\"") >= 0 && public_login.Find("name=\"next\"") >= 0 &&
+	      public_login.Find("bad &lt;credentials&gt;") >= 0 && sso_login.Find("<form") < 0 &&
+	      sso_login.Find("Continue with MetaAccount") >= 0,
+	      "engine-login template renders password and SSO-only form parts safely");
+	Check(WebsiteThemeHtmlAttributes("github-dark", "dense").Find("data-theme=\"github-dark\"") >= 0 &&
+	      WebsiteThemeHtmlAttributes("invalid", "invalid").Find("data-theme=\"vivid-dark\"") >= 0 &&
+	      WebsiteThemeHtmlAttributes("invalid", "invalid").Find("data-density=\"dense\"") >= 0,
+	      "website themes and density stay allowlisted with safe defaults (dense is the default)");
+	String all_theme_styles = WebsiteThemeStyles();
+	bool every_theme = true;
+	for(const char *id : { "vivid-dark", "vivid-light", "vivid-mixed", "github-dark", "github-light",
+	                       "sourceforge-dark", "sourceforge-classic" })
+		every_theme = every_theme && all_theme_styles.Find(Format("data-theme=\"%s\"", id)) >= 0;
+	Check(every_theme && all_theme_styles.Find("--st-trouble") >= 0 && all_theme_styles.Find("--accent") >= 0 &&
+	      WebsiteDensityStyles().Find("html[data-density=\"dense\"]") >= 0 &&
+	      WebsiteDensityStyles().Find("--wf-container-width: 100%") >= 0,
+	      "shared theme tokens cover all seven host themes and the dense density default");
+	Check(WebsiteThemeControlsHtml().Find("id=\"wf-btn-theme\"") >= 0 &&
+	      WebsiteThemeControlsHtml().Find("id=\"wf-btn-density\"") >= 0 &&
+	      WebsiteThemeControlsScript().Find("wf_theme") >= 0 && WebsiteThemeControlsScript().Find("wf_density") >= 0 &&
+	      WebsiteThemeControlsScript().Find("sameHost") < 0,
+	      "shared theme and density controls render buttons and a cookie-writing script");
+	Check(WebsiteThemeHeadScript().Find("sameHost") >= 0 && WebsiteThemeHeadScript().Find("wf-density") >= 0,
+	      "website theme script preserves task-052 same-host preference propagation");
+}
+
+static void RunWebAuditSchemaChecks()
+{
+	WebAuditEvent e;
+	e.at = GetSysTime();
+	e.site = "alpha";
+	e.kind = "request";
+	e.route = "GET:/users/*";
+	e.method = "GET";
+	e.outcome = "ok";
+	String error;
+	Check(e.Validate(error), "audit schema accepts bounded categorical event");
+	e.route = "GET:/users/alice?token=secret";
+	Check(!e.Validate(error), "audit schema rejects query and raw path values");
+	e.route = "GET:/users/*";
+	e.actor_user_id = String('x', 97);
+	Check(!e.Validate(error), "audit schema rejects unbounded actor identifiers");
+	e.actor_user_id.Clear();
+	e.duration_ms = 3600001;
+	Check(!e.Validate(error), "audit schema rejects unbounded durations");
+	Check(WebAuditRouteLabel("GET", "users/*") == "GET:/users/*" &&
+	      WebAuditRouteLabel("GET", "users/*?x=1").IsEmpty(),
+	      "audit route labels retain registered patterns and reject query strings");
+	EngineSite https_site;
+	https_site.external_origin = "https://public.example:443/internal";
+	Check(https_site.PublicUrl("/session/sso") == "https://public.example:443/session/sso" &&
+	      https_site.Url("session/sso") == "https://public.example:443/session/sso",
+	      "absolute and SSO URLs honor configured HTTPS origin, not Host or scheme downgrade");
+	https_site.external_origin = "https://user:secret@public.example:443";
+	Check(https_site.PublicUrl("/login").IsEmpty() && https_site.Url("login").IsEmpty(),
+	      "malformed public origins with embedded credentials cannot create redirect authorities");
+	String ref = WebAuditSessionRef();
+	Check(ref.StartsWith("as_") && ref.GetCount() <= 64,
+	      "audit session reference is bounded and opaque");
+}
+
+static void RunWebAuditStorageChecks(const String& root)
+{
+	String site_root = AppendFileName(root, "audit-storage");
+	WebAuditLog log("audittest", site_root, 2);
+	WebAuditEvent e;
+	e.at = GetSysTime() - 10; e.site = "audittest"; e.kind = "request";
+	e.route = "GET:/safe/*"; e.method = "GET"; e.outcome = "ok"; e.status = 200;
+	Check(log.Append(e).ok, "audit event persists through WebStorage");
+	Vector<ValueMap> rows;
+	Check(log.List(e.at - 60, e.at + 60, 0, 10, rows).ok && rows.GetCount() == 1,
+	      "persisted event is queryable from the durable site ledger");
+	e.at = GetSysTime() - 31 * 24 * 60 * 60;
+	Check(log.Append(e).ok, "old audit event fixture persists before retention");
+	e.at = GetSysTime(); e.route = "GET:/new";
+	Check(log.Append(e).ok, "append removes events outside the 30-day retention window");
+	Vector<String> ids;
+	JsonFileStore audit_store("audittest", site_root, "audit_events");
+	StoreResult listed = audit_store.List(ids);
+	Check(listed.ok && ids.GetCount() == 2,
+	      "retention keeps recent history while pruning expired records");
+	rows.Clear();
+	Check(log.List(GetSysTime() - 60, GetSysTime() + 60, 0, 2, rows).ok && rows.GetCount() == 2 &&
+	      (String)rows[0].Get("route") == "GET:/new",
+	      "audit pagination returns newest events first");
+	e.route = "GET:/overflow";
+	log.Record(e);
+	Check(!log.Healthy() && audit_store.List(ids).ok && ids.GetCount() == 2,
+	      "hard event cap rejects writes without exceeding configured capacity");
+	String canary = "raw-query-secret-canary";
+	e.route = "GET:/safe?token=" + canary;
+	Check(!log.Append(e).ok, "event validation rejects query-bearing route labels");
+	bool secret_absent = true;
+	for(const String& id : ids)
+		secret_absent &= LoadFile(AppendFileName(AppendFileName(AppendFileName(site_root, "data"), "audit_events"), id + ".json")).Find(canary) < 0;
+	Check(secret_absent, "durable audit records contain no rejected query secret");
+	e.route = "GET:/safe"; e.at = GetSysTime();
+	ValueMap tampered = e.ToValue(); tampered.Add("cookie", canary);
+	String tampered_rev;
+	Check(audit_store.Put("tampered-record", AsJSON(tampered, true), "", tampered_rev).ok,
+	      "sensitive-field corruption fixture is written to the audit collection");
+	rows.Clear();
+	bool safe_list = log.List(GetSysTime() - 60, GetSysTime() + 60, 0, 10, rows).ok;
+	ValueArray safe_rows;
+	for(const ValueMap& row : rows) safe_rows.Add(row);
+	Check(safe_list && rows.GetCount() == 2 && AsJSON(safe_rows, true).Find(canary) < 0,
+	      "reader rejects stored records containing fields outside the closed schema");
+	String blocked_root = AppendFileName(root, "blocked-audit-root");
+	SaveFile(blocked_root, "not a directory");
+	WebAuditLog failed_log("failedtest", blocked_root, 2);
+	e.site = "failedtest"; e.route = "GET:/safe"; e.at = GetSysTime();
+	failed_log.Record(e);
+	Check(!failed_log.Healthy(), "audit storage failure is reduced to a health signal and Record does not throw");
 }
 
 // AgentIpcClient unit section (task 024 item 3): the argv-only reader driven
@@ -900,6 +1085,31 @@ CONSOLE_APP_MAIN
 		store.List(ids);
 		Cout() << "ids: " << Join(ids, ",") << "\n";
 		Check(ids.GetCount() == 1 && ids[0] == "rec", "list sees record");
+
+		// create-only: a new id is created once; the second create is a typed conflict
+		String created_rev, again_rev;
+		StoreResult c1 = store.Put("once", AsJSON(doc), RecordAbsent(), created_rev);
+		Check(c1.ok && !c1.conflict, "create-only put creates a new record");
+		StoreResult c2 = store.Put("once", AsJSON(doc), RecordAbsent(), again_rev);
+		Check(!c2.ok && c2.conflict, "create-only put on an existing record is a typed conflict");
+		StoreResult stale = store.Put("once", AsJSON(doc), "99", again_rev);
+		Check(!stale.ok && stale.conflict, "stale revision is a typed conflict");
+
+		// transaction: several writes commit under one lock; reads see them
+		{
+			JsonFileStore::Txn txn(store);
+			Check(txn.Ok(), "transaction takes the store lock");
+			String t_rev, got, got_rev;
+			StoreResult ta = txn.Put("txn-a", AsJSON(doc), RecordAbsent(), t_rev);
+			StoreResult tb = txn.Put("txn-b", AsJSON(doc), RecordAbsent(), t_rev);
+			Check(ta.ok && tb.ok, "transaction creates two records");
+			Check(txn.Get("txn-a", got, got_rev).ok && !got.IsEmpty(), "transaction reads its own write");
+		}
+		Vector<String> after_txn;
+		store.List(after_txn);
+		String listed = Join(after_txn, ",");
+		Check(listed.Find("txn-a") >= 0 && listed.Find("txn-b") >= 0,
+		      "transaction writes are visible after commit");
 	}
 
 	// --- unit level: broker tcp stub ---
@@ -1372,6 +1582,9 @@ CONSOLE_APP_MAIN
 	}
 
 
+	RunWebsiteTemplateChecks();
+	RunWebAuditSchemaChecks();
+	RunWebAuditStorageChecks(s_root);
 	RunAgentIpcClientUnitChecks(s_root);
 
 	EngineTestHost host;
@@ -1430,6 +1643,12 @@ CONSOLE_APP_MAIN
 		Check(probe_res.ok, "consent proposes the least-privilege reader role");
 	}
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
+	{
+		ScienceService audit_probe(*s_sci_corpus);
+		Check(audit_probe.AuditOperation("list-papers") == "list-papers" &&
+		      audit_probe.AuditOperation("lookup-secret") == "unclassified",
+		      "Science broker audit operation mapping uses registered operation codes");
+	}
 	TheWebEngine().Broker().Register("company", new FakeCompanyService());
 
 	Thread host_thread;
@@ -1464,8 +1683,23 @@ CONSOLE_APP_MAIN
 		String au_pair;
 		String au_val = CookieOf(rau, "wfs_science", au_pair);
 		String au_cookie = "wfs_science=" + au_val;
+		VectorMap<String, String> admin_f;
+		admin_f.Add("username", "sciadmin");
+		admin_f.Add("password", "pw-admin");
+		HttpReply rad = HttpCall("POST", SCIENCE_PORT, "/login", sci_origin, FormEncode(admin_f));
+		String admin_csrf = (String)ParseJSON(rad.body)["csrf"];
+		String admin_pair;
+		String admin_val = CookieOf(rad, "wfs_science", admin_pair);
+		String admin_cookie = "wfs_science=" + admin_val;
 		Check(rrd.status == 200 && rau.status == 200 && au_csrf.GetCount() > 0 && rd_csrf.GetCount() > 0,
 		      "science reader and author log in");
+		Check(rad.status == 200 && admin_csrf.GetCount() > 0, "science policy admin logs in");
+		VectorMap<String, String> admin_h;
+		SciHeaders(admin_h, admin_cookie, admin_csrf);
+		HttpReply policy_page = HttpCall("GET", SCIENCE_PORT, "/policy", admin_h, "");
+		Check(policy_page.status == 200 && policy_page.body.Find("Secret-link controls require verified HTTPS transport") >= 0 &&
+		      policy_page.body.Find("policy-link-form") < 0,
+		      "science admin cannot create secret links over a plain HTTP origin");
 
 		String article_path = "/api/papers/2612.00002/article";
 		String good = "{\"expected_paper_revision\":\"1\",\"article\":{\"title\":\"Authored\",\"nodes\":["
@@ -1507,6 +1741,238 @@ CONSOLE_APP_MAIN
 		String empty_tree = "{\"expected_paper_revision\":\"1\",\"article\":{\"nodes\":[]}}";
 		HttpReply rempty = HttpCall("POST", SCIENCE_PORT, article_path, au_h, empty_tree, "application/json");
 		Check(rempty.status == 400, "science save with an empty tree gets 400");
+
+		// Explicit reload simulates startup loading the persisted policy fixture.
+		String policy_path = AppendFileName(AppendFileName(s_root, "science"), "content_policy.json");
+		ContentPolicyStore& science_policy = ContentPolicyFor(AppendFileName(s_root, "science"));
+		ContentPolicy hidden_record;
+		hidden_record.level = CONTENT_PRIVATE;
+		science_policy.SetRecord("2612.00001", hidden_record);
+		String policy_error;
+		Check(science_policy.Save(policy_error), "science record visibility fixture is saved");
+		ContentPolicy hidden_article_paper;
+		hidden_article_paper.level = CONTENT_PRIVATE;
+		science_policy.SetRecord("2612.00002", hidden_article_paper);
+		Check(science_policy.Save(policy_error) &&
+		      HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002/author", au_h, "").status == 404,
+		      "science author cannot view the author page for a policy-hidden paper with article content");
+		Check(HttpCall("GET", SCIENCE_PORT, "/api/papers/2612.00002/article", au_h, "").status == 404,
+		      "science hidden paper article API also remains unavailable to its author");
+		hidden_article_paper.level = CONTENT_PROTECTED;
+		science_policy.SetRecord("2612.00002", hidden_article_paper);
+		hidden_record.level = CONTENT_PROTECTED;
+		science_policy.SetRecord("2612.00001", hidden_record);
+		Check(science_policy.Save(policy_error), "science secret-link scope fixtures are saved");
+		EngineSite *science_site = TheWebEngine().FindSite("science");
+		String old_science_origin = science_site ? science_site->external_origin : String();
+		Check(science_site != NULL, "science test site remains registered for TLS policy exchange");
+		String secure_origin = "https://127.0.0.1:" + AsString(SCIENCE_PORT);
+		if(science_site) {
+			science_site->external_origin = secure_origin;
+			science_site->trusted_proxy_peers.Clear();
+		}
+		HttpReply https_origin_direct_access = HttpCall("GET", SCIENCE_PORT, "/policy-access", no_headers, "");
+		VectorMap<String, String> forwarded_h;
+		forwarded_h.Add("X-Forwarded-Proto", "https");
+		HttpReply untrusted_forwarded_access = HttpCall("GET", SCIENCE_PORT, "/policy-access", forwarded_h, "");
+		if(science_site)
+			science_site->trusted_proxy_peers.Add("127.0.0.2");
+		forwarded_h.Add("X-Forwarded-For", "127.0.0.2");
+		HttpReply wrong_peer_access = HttpCall("GET", SCIENCE_PORT, "/policy-access", forwarded_h, "");
+		Check(https_origin_direct_access.status == 403 && untrusted_forwarded_access.status == 403 &&
+		      wrong_peer_access.status == 403,
+		      "HTTPS public origin and spoofed forwarded headers do not make direct HTTP secure");
+		if(science_site) {
+			science_site->trusted_proxy_peers.Clear();
+			science_site->trusted_proxy_peers.Add("127.0.0.1");
+		}
+		VectorMap<String, String> secure_origin_h;
+		secure_origin_h.Add("Origin", secure_origin);
+		secure_origin_h.Add("X-Forwarded-Proto", "https");
+		HttpReply secure_admin_login = HttpCall("POST", SCIENCE_PORT, "/login", secure_origin_h, FormEncode(admin_f));
+		String secure_admin_csrf = (String)ParseJSON(secure_admin_login.body)["csrf"];
+		String secure_admin_pair;
+		String secure_admin_cookie = "wfs_science=" + CookieOf(secure_admin_login, "wfs_science", secure_admin_pair);
+		VectorMap<String, String> secure_admin_h;
+		secure_admin_h.Add("Origin", secure_origin);
+		secure_admin_h.Add("X-Forwarded-Proto", "https");
+		secure_admin_h.Add("Cookie", secure_admin_cookie);
+		secure_admin_h.Add("X-WF-CSRF", secure_admin_csrf);
+		HttpReply secure_policy_page = HttpCall("GET", SCIENCE_PORT, "/policy", secure_admin_h, "");
+		Check(secure_admin_login.status == 200 &&
+		      ToLower(SetCookieLine(secure_admin_login, "wfs_science")).Find("secure") >= 0 &&
+		      secure_policy_page.status == 200 &&
+		      secure_policy_page.body.Find("policy-link-form") >= 0 &&
+		      secure_policy_page.body.Find("u.hash=m.fragment") >= 0 &&
+		      science_site->Url("policy-access").StartsWith("https://"),
+		      "HTTPS origin enables admin fragment-link controls and HTTPS-safe site URLs");
+		VectorMap<String, String> link_form;
+		link_form.Add("scope", "record");
+		link_form.Add("id", "2612.00002");
+		link_form.Add("target", "/papers/2612.00002");
+		link_form.Add("label", "science test resource");
+		VectorMap<String, String> direct_admin_h;
+		direct_admin_h.Add("Origin", secure_origin);
+		direct_admin_h.Add("Cookie", secure_admin_cookie);
+		direct_admin_h.Add("X-WF-CSRF", secure_admin_csrf);
+		Check(HttpCall("POST", SCIENCE_PORT, "/api/policy/link", direct_admin_h, FormEncode(link_form)).status == 403,
+		      "direct cleartext admin request cannot create links despite HTTPS public origin and trusted peer config");
+		HttpReply created_link = HttpCall("POST", SCIENCE_PORT, "/api/policy/link", secure_admin_h, FormEncode(link_form));
+		ValueMap created_link_json = ParseJSON(created_link.body);
+		String fragment = created_link_json.Get("fragment", "");
+		String link_token = fragment.StartsWith("wfcp=") ? fragment.Mid(5, fragment.Find("&to=") - 5) : String();
+		Check(created_link.status == 200 && !link_token.IsEmpty() && fragment.Find("&to=/papers/2612.00002") >= 0 &&
+		      created_link.body.Find("?key=") < 0 && created_link.cache_control.Find("no-store") >= 0 &&
+		      created_link.referrer_policy == "no-referrer",
+		      "science admin creates a one-time shareable fragment link for a protected record");
+		String query_canary = "query-only-test-canary";
+		ContentPolicy paper_link_policy = science_policy.Record("2612.00002");
+		ContentGrant query_canary_grant;
+		query_canary_grant.kind = "link";
+		query_canary_grant.value = ContentLinkHash(query_canary);
+		query_canary_grant.label = "non-secret URL rejection canary";
+		paper_link_policy.grants.Add(pick(query_canary_grant));
+		science_policy.SetRecord("2612.00002", paper_link_policy);
+		Check(science_policy.Save(policy_error), "science query-only canary is persisted by hash");
+		HttpReply query_paper = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002?key=" + query_canary, no_headers, "");
+		HttpReply query_article = HttpCall("GET", SCIENCE_PORT, "/api/papers/2612.00002/article?key=" + query_canary, no_headers, "");
+		Check(query_paper.status == 404 && query_article.status == 404 &&
+		      query_paper.body.Find(query_canary) < 0 && query_article.body.Find(query_canary) < 0,
+		      "Science ignores and never reflects bearer tokens supplied in URL query parameters");
+		Check(HttpCall("GET", SCIENCE_PORT, "/policy-access/" + query_canary, no_headers, "").status == 404 &&
+		      HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange/" + query_canary, no_headers, "").status == 404,
+		      "secret tokens in URL path segments have no access or exchange route");
+		if(science_site)
+			science_site->external_origin = old_science_origin;
+		HttpReply insecure_access = HttpCall("GET", SCIENCE_PORT, "/policy-access", no_headers, "");
+		VectorMap<String, String> insecure_exchange_h;
+		insecure_exchange_h.Add("Origin", old_science_origin);
+		ValueMap insecure_exchange_body;
+		insecure_exchange_body.Add("token", "development-only-dummy");
+		insecure_exchange_body.Add("target", "/papers/2612.00002");
+		HttpReply insecure_exchange = HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange", insecure_exchange_h,
+		                                       AsJSON(insecure_exchange_body), "application/json");
+		HttpReply insecure_create = HttpCall("POST", SCIENCE_PORT, "/api/policy/link", admin_h, FormEncode(link_form));
+		Check(insecure_access.status == 403 && insecure_exchange.status == 403 &&
+		      insecure_exchange.set_cookies.IsEmpty() && insecure_create.status == 403,
+		      "HTTP origins cannot create secret links, access bootstrap, or exchange tokens");
+		if(science_site)
+			science_site->external_origin = secure_origin;
+		HttpReply access_page = HttpCall("GET", SCIENCE_PORT, "/policy-access", secure_origin_h, "");
+		String guest_cookie_pair;
+		String guest_session = CookieOf(access_page, "wfs_science", guest_cookie_pair);
+		String csrf_marker = "'X-WF-CSRF':'";
+		int csrf_start = access_page.body.Find(csrf_marker);
+		int csrf_end = csrf_start >= 0 ? access_page.body.Find('\'', csrf_start + csrf_marker.GetCount()) : -1;
+		String exchange_csrf = csrf_end >= 0
+		                     ? access_page.body.Mid(csrf_start + csrf_marker.GetCount(), csrf_end - csrf_start - csrf_marker.GetCount())
+		                     : String();
+		Check(access_page.status == 200 && access_page.referrer_policy == "no-referrer" &&
+		      access_page.cache_control.Find("no-store") >= 0 && access_page.body.Find("history.replaceState") >= 0 &&
+		      access_page.body.Find("api/policy/exchange") >= 0 && access_page.body.Find("location.replace") >= 0 &&
+		      access_page.body.Find(link_token) < 0 &&
+	      guest_session.GetCount() && exchange_csrf.GetCount() &&
+	      ToLower(SetCookieLine(access_page, "wfs_science")).Find("secure") >= 0,
+		      "fragment landing removes secrets from history and prohibits referrer/cache leakage");
+		VectorMap<String, String> exchange_h;
+		exchange_h.Add("Origin", science_site ? science_site->external_origin : String());
+		exchange_h.Add("X-Forwarded-Proto", "https");
+		exchange_h.Add("Cookie", guest_cookie_pair);
+		exchange_h.Add("X-WF-CSRF", exchange_csrf);
+		ValueMap bad_exchange_body;
+		bad_exchange_body.Add("token", "not-a-valid-link-token");
+		bad_exchange_body.Add("target", "/papers/2612.00002");
+		HttpReply bad_exchange = HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange", exchange_h,
+		                                  AsJSON(bad_exchange_body), "application/json");
+		Check(bad_exchange.status == 404 && bad_exchange.set_cookies.IsEmpty() &&
+		      bad_exchange.body.Find("not-a-valid-link-token") < 0,
+		      "invalid exchange token is rejected without cookie or token reflection");
+		VectorMap<String, String> direct_exchange_h;
+		direct_exchange_h.Add("Origin", secure_origin);
+		direct_exchange_h.Add("Cookie", guest_cookie_pair);
+		direct_exchange_h.Add("X-WF-CSRF", exchange_csrf);
+		ValueMap direct_exchange_body;
+		direct_exchange_body.Add("token", "cleartext-only-dummy");
+		direct_exchange_body.Add("target", "/papers/2612.00002");
+		HttpReply direct_exchange = HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange", direct_exchange_h,
+		                                     AsJSON(direct_exchange_body), "application/json");
+		Check(direct_exchange.status == 403 && direct_exchange.set_cookies.IsEmpty() &&
+		      direct_exchange.body.Find("cleartext-only-dummy") < 0,
+		      "direct cleartext exchange is rejected even with HTTPS origin and trusted peer config");
+		HttpReply query_exchange = HttpCall("POST", SCIENCE_PORT,
+		                                    "/api/policy/exchange?token=" + query_canary,
+		                                    exchange_h, "{\"target\":\"/papers/2612.00002\"}", "application/json");
+		Check(query_exchange.status == 404 && query_exchange.set_cookies.IsEmpty(),
+		      "exchange never accepts bearer tokens from query parameters");
+		ValueMap bad_target_body;
+		bad_target_body.Add("token", link_token);
+		bad_target_body.Add("target", "//evil.example.invalid/");
+		HttpReply bad_target = HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange", exchange_h,
+		                                AsJSON(bad_target_body), "application/json");
+		Check(bad_target.status == 404 && bad_target.set_cookies.IsEmpty() &&
+		      bad_target.body.Find(link_token) < 0,
+		      "valid token cannot exchange into a cross-origin redirect or open URL");
+		ValueMap exchange_body;
+		exchange_body.Add("token", link_token);
+		exchange_body.Add("target", "/papers/2612.00002");
+		HttpReply exchanged = HttpCall("POST", SCIENCE_PORT, "/api/policy/exchange", exchange_h,
+		                               AsJSON(exchange_body), "application/json");
+		String link_cookie_line = SetCookieLine(exchanged, "wfcp_link_science");
+		Vector<String> cookie_fields = Split(link_cookie_line, ';');
+		String opaque_link_cookie = cookie_fields.IsEmpty() ? String() : TrimBoth(cookie_fields[0]);
+		int cookie_eq = opaque_link_cookie.Find('=');
+		String opaque_value = cookie_eq < 0 ? String() : opaque_link_cookie.Mid(cookie_eq + 1);
+		String lower_cookie_line = ToLower(link_cookie_line);
+		Check(exchanged.status == 200 && exchanged.body.Find(link_token) < 0 &&
+		      exchanged.body.Find("/papers/2612.00002") < 0,
+		      "valid POST-body exchange succeeds without echoing its bearer token");
+		Check(lower_cookie_line.Find("secure") >= 0 && lower_cookie_line.Find("httponly") >= 0 &&
+		      lower_cookie_line.Find("samesite=strict") >= 0 && lower_cookie_line.Find("expires=") >= 0 &&
+		      opaque_value.GetCount() >= 32 &&
+		      opaque_value != link_token && opaque_value != ContentLinkHash(link_token),
+		      "exchange issues a secure, HttpOnly, SameSite, opaque short-lived site cookie");
+		VectorMap<String, String> link_reader_h;
+		link_reader_h.Add("Cookie", opaque_link_cookie);
+		Check(HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002", link_reader_h, "").status == 200 &&
+		      HttpCall("GET", SCIENCE_PORT, "/api/papers/2612.00002/article", link_reader_h, "").status == 200,
+		      "fragment-to-POST-equivalent exchange grants the bound protected paper and article");
+		Check(HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002/author", link_reader_h, "").status == 403,
+		      "secret link does not bypass Science author-role checks");
+		Check(HttpCall("GET", SCIENCE_PORT, "/papers/2612.00001", link_reader_h, "").status == 404,
+		      "record-scoped secret link cannot read a different protected paper");
+		ContentPolicy revoked_link_policy = science_policy.Record("2612.00002");
+		for(ContentGrant& grant : revoked_link_policy.grants)
+			if(grant.kind == "link" && grant.value == ContentLinkHash(link_token))
+				grant.revoked = true;
+		science_policy.SetRecord("2612.00002", revoked_link_policy);
+		Check(science_policy.Save(policy_error) &&
+		      HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002", link_reader_h, "").status == 404,
+		      "revoking the stored token invalidates an already issued scoped cookie");
+		Check(HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002", no_headers, "").status == 404,
+		      "protected resource remains inaccessible without the exchange cookie");
+		if(science_site) {
+			science_site->external_origin = old_science_origin;
+			science_site->trusted_proxy_peers.Clear();
+		}
+		hidden_article_paper.level = CONTENT_PUBLIC;
+		science_policy.SetRecord("2612.00002", hidden_article_paper);
+		hidden_record.level = CONTENT_PRIVATE;
+		science_policy.SetRecord("2612.00001", hidden_record);
+		Check(science_policy.Save(policy_error), "science policy fixtures are restored after link tests");
+		HttpReply home = HttpCall("GET", SCIENCE_PORT, "/", no_headers, "");
+		HttpReply visible_list = HttpCall("GET", SCIENCE_PORT, "/api/papers", no_headers, "");
+		ValueMap visible_list_json = ParseJSON(visible_list.body);
+		Check(home.body.Find("1 papers, 1 with structured article") >= 0
+		      && (int)visible_list_json.Get("count", 0) == 1,
+		      "science home aggregate counts use the same visibility filter as the paper list");
+		FileDelete(policy_path);
+		science_policy.Load(AppendFileName(s_root, "science"), policy_error);
+		SaveFile(policy_path, "{broken");
+		science_policy.Load(AppendFileName(s_root, "science"), policy_error);
+		HttpReply hidden = HttpCall("GET", SCIENCE_PORT, "/api/papers/2612.00001", no_headers, "");
+		Check(hidden.status == 404, "science anonymous read fails closed when the persisted policy is corrupt");
+		FileDelete(policy_path);
+		science_policy.Load(AppendFileName(s_root, "science"), policy_error);
 
 		// Paper page: author sees the authored tree and the author link.
 		HttpReply rview = HttpCall("GET", SCIENCE_PORT, "/papers/2612.00002", au_h, "");
@@ -1590,6 +2056,13 @@ CONSOLE_APP_MAIN
 		VectorMap<String, String> mem_h, view_h;
 		PhHeaders(mem_h, mem_cookie, mem_csrf);
 		PhHeaders(view_h, view_cookie, view_csrf);
+		VectorMap<String, String> ph_anon;
+		Check(HttpCall("GET", PRIVATEHUB_PORT, "/policy", ph_anon, "").status == 401,
+		      "privatehub policy administration requires authentication");
+		Check(HttpCall("GET", PRIVATEHUB_PORT, "/policy", view_h, "").status == 403,
+		      "privatehub policy administration requires the admin role");
+		Check(HttpCall("POST", PRIVATEHUB_PORT, "/api/policy/link", view_h, "").status == 403,
+		      "privatehub secret-link creation remains admin-only");
 
 		// Issue create: viewer refused, member allowed.
 		VectorMap<String, String> issue_f;
@@ -1606,6 +2079,37 @@ CONSOLE_APP_MAIN
 		Vector<ForgeIssue> opened;
 		s_ph_backend->ListIssues("oulubsd/demo", opened);
 		String issue_path = repo + "/issues/" + (opened.IsEmpty() ? String("missing") : opened[0].issue_id) + "/comment";
+		if(!opened.IsEmpty()) {
+			String policy_root = AppendFileName(s_root, "privatehub");
+			ContentPolicyStore& store = ContentPolicyFor(policy_root);
+			ContentPolicy issue_policy;
+			issue_policy.level = CONTENT_PRIVATE;
+			ContentGrant member_grant;
+			member_grant.kind = "group";
+			member_grant.value = "member";
+			issue_policy.grants.Add(pick(member_grant));
+			store.SetRecord("oulubsd/demo:" + opened[0].issue_id, issue_policy);
+			String policy_error;
+			Check(store.Save(policy_error), "privatehub issue policy fixture is persisted");
+			String detail = repo + "/issues/" + opened[0].issue_id;
+			HttpReply member_list = HttpCall("GET", PRIVATEHUB_PORT, repo + "/issues", mem_h, "");
+			HttpReply viewer_list = HttpCall("GET", PRIVATEHUB_PORT, repo + "/issues", view_h, "");
+			Check(member_list.body.Find(opened[0].issue_id) >= 0 && viewer_list.body.Find(opened[0].issue_id) < 0,
+			      "privatehub issue list applies group policy after login");
+			Check(HttpCall("GET", PRIVATEHUB_PORT, detail, mem_h, "").status == 200 &&
+			      HttpCall("GET", PRIVATEHUB_PORT, detail, view_h, "").status == 404,
+			      "privatehub issue detail hides records from ungranted authenticated users");
+			issue_policy.level = CONTENT_PUBLIC_ONLY;
+			issue_policy.grants.Clear();
+			store.SetRecord("oulubsd/demo:" + opened[0].issue_id, issue_policy);
+			Check(store.Save(policy_error) &&
+			      HttpCall("GET", PRIVATEHUB_PORT, detail, mem_h, "").status == 404 &&
+			      HttpCall("GET", PRIVATEHUB_PORT, detail, ph_anon, "").status == 302,
+			      "privatehub public-only policy narrows authenticated reads without bypassing login");
+			issue_policy.level = CONTENT_PUBLIC;
+			store.SetRecord("oulubsd/demo:" + opened[0].issue_id, issue_policy);
+			Check(store.Save(policy_error), "privatehub issue policy fixture is restored");
+		}
 		HttpReply vc = HttpCall("POST", PRIVATEHUB_PORT, issue_path, view_h, FormEncode(c_f));
 		Check(vc.status == 403, "privatehub viewer cannot comment on an issue");
 		HttpReply mc = HttpCall("POST", PRIVATEHUB_PORT, issue_path, mem_h, FormEncode(c_f));
@@ -1623,6 +2127,16 @@ CONSOLE_APP_MAIN
 		Check(vp.status == 403, "privatehub viewer cannot post in a discussion topic");
 		HttpReply mp = HttpCall("POST", PRIVATEHUB_PORT, repo + "/discussions/gate-topic/post", mem_h, FormEncode(p_f));
 		Check(mp.status < 400, "privatehub member posts in a discussion topic");
+		String ph_policy_root = AppendFileName(s_root, "privatehub");
+		String ph_policy_path = AppendFileName(ph_policy_root, "content_policy.json");
+		ContentPolicyStore& ph_policy_store = ContentPolicyFor(ph_policy_root);
+		String ph_policy_error;
+		Check(SaveFile(ph_policy_path, "{broken") && !ph_policy_store.Load(ph_policy_root, ph_policy_error),
+		      "privatehub corrupt policy fixture fails loading");
+		Check(HttpCall("GET", PRIVATEHUB_PORT, repo + "/issues", mem_h, "").status == 503,
+		      "privatehub protected list fails closed on corrupt policy data");
+		FileDelete(ph_policy_path);
+		Check(ph_policy_store.Load(ph_policy_root, ph_policy_error), "privatehub policy store recovers after fixture removal");
 	}
 
 	// --- Science broker surface (brief 10 step 3) ---
@@ -1865,6 +2379,484 @@ CONSOLE_APP_MAIN
 	}
 	Check(diag_ok, "broker diagnostics record the cross-site call");
 
+	// Audit producer integration: real engine routes and an in-process broker call.
+	String audit_canary = "unlogged-query-canary";
+	HttpCall("GET", ALPHA_PORT, "/greet/world?token=" + audit_canary, no_headers, "");
+	BrokerCallContext audit_ctx;
+	audit_ctx.from_site = "beta"; audit_ctx.to_site = "alpha";
+	BrokerCall audit_call;
+	audit_call.op = "add"; audit_call.payload.Add("a", 4); audit_call.payload.Add("b", 5);
+	audit_call.payload.Add("secret_marker", audit_canary);
+	Check(TheWebEngine().Broker().Call(audit_ctx, audit_call).ok,
+	      "broker audit fixture completed as an in-process call");
+	BrokerCall audit_failure; audit_failure.op = "missing_operation";
+	audit_failure.payload.Add("secret_marker", audit_canary);
+	Check(!TheWebEngine().Broker().Call(audit_ctx, audit_failure).ok,
+	      "failed in-process broker fixture returns failure");
+	VectorMap<String, String> failed_login_form;
+	failed_login_form.Add("username", "username-secret-canary");
+	failed_login_form.Add("password", "password-secret-canary");
+	VectorMap<String, String> failed_login_headers;
+	failed_login_headers.Add("Accept", "application/json");
+	failed_login_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+	Check(HttpCall("POST", ALPHA_PORT, "/session/login", failed_login_headers, FormEncode(failed_login_form)).status == 401,
+	      "failed password login returns the normal authentication response");
+	auto audit_login = [&](int port, VectorMap<String, String>& headers, String& cookie, String& csrf) {
+		VectorMap<String, String> f; f.Add("username", "auditadmin"); f.Add("password", "pw-audit");
+		VectorMap<String, String> h; h.Add("Accept", "application/json");
+		h.Add("Content-Type", "application/x-www-form-urlencoded");
+		HttpReply login = HttpCall("POST", port, "/session/login", h, FormEncode(f));
+		cookie = CookieOf(login, port == ALPHA_PORT ? "wfs_alpha" : "wfs_beta", csrf);
+		ValueMap body = ParseJSON(login.body);
+		csrf = body.Get("csrf", "");
+		headers.Add("Cookie", (port == ALPHA_PORT ? String("wfs_alpha=") : String("wfs_beta=")) + cookie);
+		headers.Add("X-WF-CSRF", csrf);
+		headers.Add("Origin", Format("http://127.0.0.1:%d", port));
+		headers.Add("Accept", "application/json");
+	};
+	VectorMap<String, String> audit_admin_alpha, audit_admin_beta;
+	String audit_cookie_alpha, audit_cookie_beta, audit_csrf_alpha, audit_csrf_beta;
+	audit_login(ALPHA_PORT, audit_admin_alpha, audit_cookie_alpha, audit_csrf_alpha);
+	audit_login(BETA_PORT, audit_admin_beta, audit_cookie_beta, audit_csrf_beta);
+	VectorMap<String, String> browser_next_form;
+	browser_next_form.Add("username", "auditadmin"); browser_next_form.Add("password", "pw-audit");
+	browser_next_form.Add("next", "https://outside.example/steal?token=redirect-secret-canary");
+	VectorMap<String, String> browser_next_headers;
+	browser_next_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+	Check(HttpCall("POST", ALPHA_PORT, "/session/login", browser_next_headers, FormEncode(browser_next_form)).status == 302,
+	      "browser login rejects an unconfigured return origin and preserves the normal redirect response");
+	TheWebEngine().SetMetaSso(true);
+	VectorMap<String, String> blocked_local_login_headers;
+	blocked_local_login_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+	blocked_local_login_headers.Add("Accept", "text/html");
+	HttpReply blocked_local_login = HttpCall("POST", ALPHA_PORT, "/session/login", blocked_local_login_headers,
+	                                         FormEncode(browser_next_form));
+	Check(blocked_local_login.status == 403,
+	      "local browser password login remains refused while MetaAccount SSO is enabled");
+	{
+		EngineSite *atlas_site = TheWebEngine().FindSite("atlas");
+		EngineSite *science_site = TheWebEngine().FindSite("science");
+		String central_id;
+		bool central_existed = false;
+		Vector<String> basic_roles; basic_roles.Add("member");
+		bool fixture_ok = atlas_site && science_site &&
+		                  TheWebEngine().FindSite("meta")->Accounts().CreateUser("ssoflow", "fixture-password",
+		                  "SSO Flow", basic_roles, central_id, central_existed).ok && !central_existed;
+		String collision_id;
+		fixture_ok = fixture_ok && atlas_site->Accounts().CreateUser("ssoflow", "local-proof-password",
+		                  "Existing Atlas User", basic_roles, collision_id, central_existed).ok && !central_existed;
+		String local_totp_secret;
+		Vector<String> local_recovery_codes;
+		fixture_ok = fixture_ok && atlas_site->Accounts().BeginTotpEnrollment(collision_id, "local-proof-password",
+		                  local_totp_secret, local_recovery_codes).ok &&
+		                  atlas_site->Accounts().ConfirmTotpEnrollment(collision_id,
+		                  TotpCode(local_totp_secret, TotpUnixNow(), 30, 6)).ok;
+		VectorMap<String, String> central_form;
+		central_form.Add("username", "ssoflow"); central_form.Add("password", "fixture-password");
+		central_form.Add("next", Format("http://127.0.0.1:%d/session/sso?next=%%2Fatlas", ATLAS_PORT));
+		VectorMap<String, String> central_headers;
+		central_headers.Add("Accept", "text/html"); central_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		HttpReply central_login = HttpCall("POST", META_PORT, "/login", central_headers, FormEncode(central_form));
+		String central_pair;
+		String central_cookie = CookieOf(central_login, "wfs_meta", central_pair);
+		VectorMap<String, String> atlas_sso_headers;
+		atlas_sso_headers.Add("Cookie", "wfs_meta=" + central_cookie);
+		HttpReply consent_page = HttpCall("GET", ATLAS_PORT, "/session/sso?next=%2Fatlas", atlas_sso_headers, "");
+		String atlas_guest_pair;
+		String atlas_guest = CookieOf(consent_page, "wfs_atlas", atlas_guest_pair);
+		String csrf_marker = "name=\"__wf_csrf__\" value=\"";
+		int csrf_at = consent_page.body.Find(csrf_marker);
+		String atlas_csrf;
+		if(csrf_at >= 0) {
+			int start = csrf_at + csrf_marker.GetCount(), end = consent_page.body.Find('"', start);
+			if(end > start) atlas_csrf = consent_page.body.Mid(start, end - start);
+		}
+		VectorMap<String, String> atlas_post_headers;
+		atlas_post_headers.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		atlas_post_headers.Add("Cookie", "wfs_meta=" + central_cookie + "; wfs_atlas=" + atlas_guest);
+		atlas_post_headers.Add("X-WF-CSRF", atlas_csrf);
+		atlas_post_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		VectorMap<String, String> wrong_proof;
+		wrong_proof.Add("decision", "yes"); wrong_proof.Add("next", "/atlas"); wrong_proof.Add("local_password", "wrong-proof");
+		HttpReply rejected_link = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", atlas_post_headers,
+		                                   FormEncode(wrong_proof));
+		VectorMap<String, String> bad_factor;
+		bad_factor.Add("decision", "yes"); bad_factor.Add("next", "/atlas");
+		bad_factor.Add("local_password", "local-proof-password");
+		HttpReply rejected_factor = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", atlas_post_headers,
+		                                     FormEncode(bad_factor));
+		WebAccountGrant no_link;
+		bool unlinked = !s_meta_grants->FindActive(central_id, "atlas", {"sso"}, no_link);
+		VectorMap<String, String> valid_proof;
+		valid_proof.Add("decision", "yes"); valid_proof.Add("next", "/atlas"); valid_proof.Add("local_password", "local-proof-password");
+		valid_proof.Add("local_code", local_recovery_codes[0]);
+		HttpReply accepted_link = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", atlas_post_headers,
+		                                   FormEncode(valid_proof));
+		VectorMap<String, String> accepted_cookie_h;
+		String atlas_local_pair;
+		String atlas_local_cookie = CookieOf(accepted_link, "wfs_atlas", atlas_local_pair);
+		accepted_cookie_h.Add("Cookie", "wfs_atlas=" + atlas_local_cookie);
+		HttpReply atlas_who = HttpCall("GET", ATLAS_PORT, "/session/whoami", accepted_cookie_h, "");
+		WebAccountUser unchanged;
+		bool safe_link = atlas_site->Accounts().GetUser(collision_id, unchanged) &&
+		                 unchanged.roles.GetCount() == 1 && unchanged.roles[0] == "member";
+		bool recovery_consumed = !atlas_site->Accounts().VerifyTotpOrRecovery(collision_id, local_recovery_codes[0]);
+		Check(fixture_ok && central_login.status == 302 && central_cookie.GetCount() > 0 &&
+		      SetCookieLine(central_login, "wfs_meta").Find("Path=/") >= 0 &&
+		      consent_page.status == 200 && consent_page.body.Find("Allow MetaAccount") >= 0 &&
+		      atlas_guest.GetCount() > 0 && atlas_csrf.GetCount() > 0,
+		      "MetaAccount cookie persists across app ports and first visit presents immediate consent");
+		if(consent_page.status != 200 || csrf_at < 0 || rejected_link.status != 403 || accepted_link.status != 302)
+			Cout() << "SSO flow diagnostic statuses: login=" << central_login.status << " consent=" << consent_page.status
+			       << " csrf=" << (csrf_at >= 0) << " reject=" << rejected_link.status << " accept=" << accepted_link.status
+			       << " callback=" << consent_page.body.Find("Ownership proof") << "\n";
+		if(!(fixture_ok && central_login.status == 302 && central_cookie.GetCount() > 0 &&
+		     SetCookieLine(central_login, "wfs_meta").Find("Path=/") >= 0 && consent_page.status == 200 &&
+		     consent_page.body.Find("Allow MetaAccount") >= 0 && atlas_guest.GetCount() > 0 && atlas_csrf.GetCount() > 0))
+			Cout() << "SSO acceptance checks: fixture=" << fixture_ok << " login=" << central_login.status
+			       << " cookie=" << central_cookie.GetCount() << " cookie_path=" << SetCookieLine(central_login, "wfs_meta").Find("Path=/")
+			       << " consent_text=" << consent_page.body.Find("Allow MetaAccount") << " guest=" << atlas_guest.GetCount()
+			       << " csrf=" << atlas_csrf.GetCount() << "\n";
+		Check(rejected_link.status == 403 && unlinked,
+		      "same-name account is not linked without valid password proof");
+		Check(consent_page.body.Find("local_code") >= 0,
+		      "existing local account proof preserves its enrolled TOTP requirement");
+		Check(rejected_factor.status == 403 && unlinked,
+		      "same-name account is not linked with password alone when local TOTP is enrolled");
+		Check(accepted_link.status == 302 && accepted_link.location == "/atlas" &&
+		      atlas_who.status == 200 && atlas_who.body.Find(collision_id) >= 0 && safe_link && recovery_consumed,
+		      "password plus enrolled recovery proof self-links unchanged account and consumes that code once");
+		String plain_subject, plain_local_id;
+		bool plain_existed = false;
+		bool plain_fixture = TheWebEngine().FindSite("meta")->Accounts().CreateUser("plainflow", "fixture-plain-password",
+		                    "Plain SSO", basic_roles, plain_subject, plain_existed).ok && !plain_existed &&
+		        atlas_site->Accounts().CreateUser("plainflow", "local-plain-password", "Existing Plain Atlas",
+		                    basic_roles, plain_local_id, plain_existed).ok && !plain_existed;
+		VectorMap<String, String> plain_login_form;
+		plain_login_form.Add("username", "plainflow"); plain_login_form.Add("password", "fixture-plain-password");
+		plain_login_form.Add("next", Format("http://127.0.0.1:%d/session/sso?next=%%2Fplain", ATLAS_PORT));
+		HttpReply plain_login = HttpCall("POST", META_PORT, "/login", central_headers, FormEncode(plain_login_form));
+		String plain_meta_pair;
+		String plain_meta_cookie = CookieOf(plain_login, "wfs_meta", plain_meta_pair);
+		VectorMap<String, String> plain_visit_headers;
+		plain_visit_headers.Add("Cookie", "wfs_meta=" + plain_meta_cookie);
+		HttpReply plain_consent = HttpCall("GET", ATLAS_PORT, "/session/sso?next=%2Fplain", plain_visit_headers, "");
+		String plain_guest_pair;
+		String plain_guest = CookieOf(plain_consent, "wfs_atlas", plain_guest_pair);
+		int plain_csrf_at = plain_consent.body.Find(csrf_marker);
+		String plain_csrf;
+		if(plain_csrf_at >= 0) {
+			int start = plain_csrf_at + csrf_marker.GetCount(), end = plain_consent.body.Find('"', start);
+			if(end > start) plain_csrf = plain_consent.body.Mid(start, end - start);
+		}
+		VectorMap<String, String> plain_post_headers;
+		plain_post_headers.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		plain_post_headers.Add("Cookie", "wfs_meta=" + plain_meta_cookie + "; wfs_atlas=" + plain_guest);
+		plain_post_headers.Add("X-WF-CSRF", plain_csrf);
+		plain_post_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		VectorMap<String, String> missing_password; missing_password.Add("decision", "yes"); missing_password.Add("next", "/plain");
+		HttpReply rejected_username_only = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", plain_post_headers,
+		                                            FormEncode(missing_password));
+		WebAccountGrant plain_unlinked;
+		bool no_plain_grant = !s_meta_grants->FindActive(plain_subject, "atlas", {"sso"}, plain_unlinked);
+		VectorMap<String, String> plain_proof;
+		plain_proof.Add("decision", "yes"); plain_proof.Add("next", "/plain");
+		plain_proof.Add("local_password", "local-plain-password");
+		HttpReply accepted_plain_link = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", plain_post_headers,
+		                                         FormEncode(plain_proof));
+		WebAccountUser plain_unchanged;
+		bool plain_roles_unchanged = atlas_site->Accounts().GetUser(plain_local_id, plain_unchanged) &&
+		        !plain_unchanged.totp_enrolled && plain_unchanged.roles.GetCount() == 1 &&
+		        plain_unchanged.roles[0] == "member";
+		Check(plain_fixture && plain_login.status == 302 && plain_consent.status == 200 &&
+		      plain_consent.body.Find("name=\"local_password\"") >= 0 &&
+		      plain_consent.body.Find("name=\"local_code\"") < 0,
+		      "all collisions require password while an unenrolled account has no TOTP prompt");
+		Check(rejected_username_only.status == 403 && no_plain_grant,
+		      "a same-name collision is never linked by MetaAccount username alone");
+		Check(accepted_plain_link.status == 302 && accepted_plain_link.location == "/plain" &&
+		      plain_roles_unchanged,
+		      "password-only proof links a collision iff its local account has no TOTP enrolled");
+		HttpReply atlas_refresh = HttpCall("GET", ATLAS_PORT, "/session/whoami", accepted_cookie_h, "");
+		VectorMap<String, String> science_sso_headers;
+		science_sso_headers.Add("Cookie", "wfs_meta=" + central_cookie);
+		HttpReply science_consent = HttpCall("GET", SCIENCE_PORT, "/session/sso?next=%2Fpapers", science_sso_headers, "");
+		String science_guest_pair;
+		String science_guest = CookieOf(science_consent, "wfs_science", science_guest_pair);
+		int science_csrf_at = science_consent.body.Find(csrf_marker);
+		String science_csrf;
+		if(science_csrf_at >= 0) {
+			int start = science_csrf_at + csrf_marker.GetCount(), end = science_consent.body.Find('"', start);
+			if(end > start) science_csrf = science_consent.body.Mid(start, end - start);
+		}
+		VectorMap<String, String> science_post_headers;
+		science_post_headers.Add("Origin", Format("http://127.0.0.1:%d", SCIENCE_PORT));
+		science_post_headers.Add("Cookie", "wfs_meta=" + central_cookie + "; wfs_science=" + science_guest);
+		science_post_headers.Add("X-WF-CSRF", science_csrf);
+		science_post_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		VectorMap<String, String> science_yes; science_yes.Add("decision", "yes"); science_yes.Add("next", "/papers");
+		HttpReply science_accepted = HttpCall("POST", SCIENCE_PORT, "/session/sso/consent", science_post_headers,
+		                                      FormEncode(science_yes));
+		String science_local_pair;
+		String science_local_cookie = CookieOf(science_accepted, "wfs_science", science_local_pair);
+		WebAccountUser provisioned;
+		bool least_privilege = science_site->Accounts().FindUserByUsername("ssoflow", provisioned) &&
+		                       provisioned.roles.GetCount() == 1 && provisioned.roles[0] == "reader";
+		VectorMap<String, String> science_who_headers;
+		science_who_headers.Add("Cookie", "wfs_science=" + science_local_cookie);
+		HttpReply science_who = HttpCall("GET", SCIENCE_PORT, "/session/whoami", science_who_headers, "");
+		ValueMap atlas_who_json = ParseJSON(atlas_who.body);
+		VectorMap<String, String> replayed_deny_headers;
+		replayed_deny_headers.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		replayed_deny_headers.Add("Cookie", "wfs_meta=" + central_cookie + "; wfs_atlas=" + atlas_local_cookie);
+		replayed_deny_headers.Add("X-WF-CSRF", atlas_who_json.Get("csrf", ""));
+		replayed_deny_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		VectorMap<String, String> replayed_deny_form;
+		replayed_deny_form.Add("decision", "no"); replayed_deny_form.Add("next", "/atlas");
+		HttpReply replayed_deny = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", replayed_deny_headers,
+		                                   FormEncode(replayed_deny_form));
+		HttpReply existing_atlas_still_auth = HttpCall("GET", ATLAS_PORT, "/session/whoami", accepted_cookie_h, "");
+		VectorMap<String, String> atlas_logout_headers;
+		atlas_logout_headers.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		atlas_logout_headers.Add("Cookie", "wfs_atlas=" + atlas_local_cookie);
+		atlas_logout_headers.Add("X-WF-CSRF", atlas_who_json.Get("csrf", ""));
+		atlas_logout_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		HttpReply atlas_logout = HttpCall("POST", ATLAS_PORT, "/session/logout", atlas_logout_headers, "");
+		HttpReply atlas_after_logout = HttpCall("GET", ATLAS_PORT, "/session/whoami", atlas_logout_headers, "");
+		VectorMap<String, String> central_still_headers;
+		central_still_headers.Add("Cookie", "wfs_meta=" + central_cookie);
+		HttpReply central_still = HttpCall("GET", META_PORT, "/", central_still_headers, "");
+		Check(atlas_refresh.status == 200 && atlas_refresh.body.Find(collision_id) >= 0,
+		      "Atlas local SSO session survives refresh");
+		Check(science_consent.status == 200 && science_consent.body.Find("Allow MetaAccount") >= 0 &&
+		      science_accepted.status == 302 && science_accepted.location == "/papers" &&
+		      science_who.status == 200 && least_privilege && science_local_cookie.GetCount() > 0,
+		      "second app requires separate consent, reuses central login and gets its own least-privilege session");
+		Check(atlas_logout.status == 302 && atlas_after_logout.status == 401 && science_who.status == 200 &&
+		      central_still.status == 200 && central_still.body.Find("ssoflow") >= 0,
+		      "Atlas logout is isolated from MetaAccount and the second app session");
+		Check(replayed_deny.status == 403 && SetCookieLine(replayed_deny, "wfs_atlas").IsEmpty() &&
+		      existing_atlas_still_auth.status == 200,
+		      "a stale consent Deny cannot revoke or clear an already authenticated Atlas session");
+		String no_subject;
+		bool no_existed = false;
+		bool no_fixture = TheWebEngine().FindSite("meta")->Accounts().CreateUser("ssono", "fixture-no-password",
+		                    "SSO No", basic_roles, no_subject, no_existed).ok && !no_existed;
+		Vector<String> no_scopes; no_scopes.Add("sso");
+		String no_old_atlas, no_other_site, no_other_subject;
+		bool no_old_exists = false, no_other_site_exists = false, no_other_subject_exists = false;
+		no_fixture = no_fixture && s_meta_grants->RequestProvision(no_subject, "atlas", "sso", "ssono-old",
+		                    "reader", no_scopes, no_old_atlas, no_old_exists).ok && !no_old_exists &&
+		        s_meta_grants->RequestProvision(no_subject, "science", "sso", "ssono-science",
+		                    "reader", no_scopes, no_other_site, no_other_site_exists).ok && !no_other_site_exists &&
+		        s_meta_grants->RequestProvision("sso_unrelated", "atlas", "sso", "unrelated-atlas",
+		                    "reader", no_scopes, no_other_subject, no_other_subject_exists).ok && !no_other_subject_exists;
+		VectorMap<String, String> no_login_form;
+		no_login_form.Add("username", "ssono"); no_login_form.Add("password", "fixture-no-password");
+		no_login_form.Add("next", Format("http://127.0.0.1:%d/session/sso?next=%%2Fatlas", ATLAS_PORT));
+		HttpReply no_login = HttpCall("POST", META_PORT, "/login", central_headers, FormEncode(no_login_form));
+		String no_meta_pair;
+		String no_meta_cookie = CookieOf(no_login, "wfs_meta", no_meta_pair);
+		VectorMap<String, String> no_visit_headers;
+		no_visit_headers.Add("Cookie", "wfs_meta=" + no_meta_cookie);
+		HttpReply no_consent = HttpCall("GET", ATLAS_PORT, "/session/sso?next=%2Fatlas", no_visit_headers, "");
+		String no_guest_pair;
+		String no_guest = CookieOf(no_consent, "wfs_atlas", no_guest_pair);
+		WebAccountSession no_guest_session;
+		bool consent_uses_guest_session = !no_guest.IsEmpty() &&
+		        TheWebEngine().FindSite("atlas")->Accounts().ResolveSession(no_guest, no_guest_session) &&
+		        no_guest_session.user_id.IsEmpty();
+		int no_csrf_at = no_consent.body.Find(csrf_marker);
+		String no_csrf;
+		if(no_csrf_at >= 0) {
+			int start = no_csrf_at + csrf_marker.GetCount(), end = no_consent.body.Find('"', start);
+			if(end > start) no_csrf = no_consent.body.Mid(start, end - start);
+		}
+		VectorMap<String, String> no_headers;
+		no_headers.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
+		no_headers.Add("Cookie", "wfs_meta=" + no_meta_cookie + "; wfs_atlas=" + no_guest);
+		no_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+		VectorMap<String, String> no_form; no_form.Add("decision", "no"); no_form.Add("next", "/atlas");
+		HttpReply no_without_csrf = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", no_headers, FormEncode(no_form));
+		WebAccountSession after_csrf_rejection;
+		WebAccountGrant pending_after_csrf_rejection;
+		bool csrf_rejection_keeps_guest = no_without_csrf.status == 403 &&
+		        TheWebEngine().FindSite("atlas")->Accounts().ResolveSession(no_guest, after_csrf_rejection) &&
+		        SetCookieLine(no_without_csrf, "wfs_atlas").IsEmpty() &&
+		        s_meta_grants->GetGrant(no_old_atlas, pending_after_csrf_rejection) &&
+		        pending_after_csrf_rejection.state == "requested";
+		no_headers.Add("X-WF-CSRF", no_csrf);
+		HttpReply no_result = HttpCall("POST", ATLAS_PORT, "/session/sso/consent", no_headers, FormEncode(no_form));
+		WebAccountUser absent_user;
+		WebAccountGrant no_target_request, other_site_request, other_subject_request;
+		bool old_request_resolved = s_meta_grants->GetGrant(no_old_atlas, no_target_request) &&
+		        no_target_request.state == "denied" &&
+		        s_meta_grants->GetGrant(no_other_site, other_site_request) &&
+		        other_site_request.state == "requested" &&
+		        s_meta_grants->GetGrant(no_other_subject, other_subject_request) &&
+		        other_subject_request.state == "requested";
+		WebAccountGrant no_active_grant;
+		bool no_target_grant = s_meta_grants->FindActive(no_subject, "atlas", {"sso"}, no_active_grant);
+		WebAccountSession after_denial;
+		bool guest_revoked = !TheWebEngine().FindSite("atlas")->Accounts().ResolveSession(no_guest, after_denial);
+		String denied_local_cookie = SetCookieLine(no_result, "wfs_atlas");
+		VectorMap<String, String> stale_guest_headers;
+		stale_guest_headers.Add("Cookie", "wfs_atlas=" + no_guest);
+		HttpReply stale_guest_whoami = HttpCall("GET", ATLAS_PORT, "/session/whoami", stale_guest_headers, "");
+		bool unrelated_cookies_preserved = SetCookieLine(no_result, "wfs_meta").IsEmpty() &&
+		        SetCookieLine(no_result, "wfs_science").IsEmpty();
+		HttpReply science_after_deny = HttpCall("GET", SCIENCE_PORT, "/session/whoami", science_who_headers, "");
+		Check(consent_uses_guest_session && csrf_rejection_keeps_guest,
+		      "consent GET uses only an anonymous CSRF session and missing CSRF cannot deny or clear it");
+		Check(no_fixture && no_login.status == 302 && no_consent.status == 200 && no_result.status == 302 &&
+		      !TheWebEngine().FindSite("atlas")->Accounts().FindUserByUsername("ssono", absent_user) &&
+		      !no_target_grant && old_request_resolved && guest_revoked && denied_local_cookie.Find("wfs_atlas=") >= 0 &&
+		      denied_local_cookie.Find("Expires=") >= 0 && stale_guest_whoami.status == 401 &&
+		      unrelated_cookies_preserved && science_after_deny.status == 200,
+		      "No revokes the guest session, clears only Atlas's cookie, and creates no account or grant without disturbing Science");
+	}
+	TheWebEngine().SetMetaSso(false);
+	String bad_cookie_canary = "raw-cookie-secret-canary";
+	VectorMap<String, String> bad_cookie_header; bad_cookie_header.Add("Cookie", "wfs_alpha=" + bad_cookie_canary);
+	HttpCall("GET", ALPHA_PORT, "/whoami", bad_cookie_header, "");
+	HttpCall("GET", ALPHA_PORT, "/audit-redirect-local", no_headers, "");
+	HttpCall("GET", ALPHA_PORT, "/audit-redirect-external", no_headers, "");
+	VectorMap<String, String> spoofed_sso_host;
+	spoofed_sso_host.Add("Host", "attacker.example:" + AsString(ALPHA_PORT));
+	HttpReply sso_redirect = HttpCall("GET", ALPHA_PORT, "/audit-redirect-sso", spoofed_sso_host, "");
+	EngineSite *meta_public_site = TheWebEngine().FindSite("meta");
+	Check(meta_public_site && sso_redirect.status == 302 && sso_redirect.location == meta_public_site->PublicUrl("/login"),
+	      "SSO redirect uses the configured public origin instead of spoofed Host");
+	VectorMap<String, String> audit_anon;
+	Check(HttpCall("GET", ALPHA_PORT, "/api/audit/events", audit_anon, "").status == 401,
+	      "audit events API rejects anonymous callers with 401");
+	Check(HttpCall("GET", ALPHA_PORT, "/api/audit/events", h_alpha, "").status == 403,
+	      "audit events API rejects signed-in non-admins with 403");
+	Check(HttpCall("GET", ALPHA_PORT, "/api/audit/sessions", audit_anon, "").status == 401 &&
+	      HttpCall("GET", ALPHA_PORT, "/api/audit/sessions", h_alpha, "").status == 403,
+	      "active-session API enforces the same anonymous 401 and non-admin 403 boundary");
+	Check(HttpCall("GET", ALPHA_PORT, "/api/audit/health", audit_anon, "").status == 401 &&
+	      HttpCall("GET", ALPHA_PORT, "/api/audit/health", h_alpha, "").status == 403,
+	      "sanitized health diagnostics are admin-only");
+	HttpReply alpha_audit = HttpCall("GET", ALPHA_PORT, "/api/audit/events?limit=200", audit_admin_alpha, "");
+	HttpReply beta_audit = HttpCall("GET", BETA_PORT, "/api/audit/events", audit_admin_beta, "");
+	ValueMap alpha_audit_json = ParseJSON(alpha_audit.body), beta_audit_json = ParseJSON(beta_audit.body);
+	ValueArray alpha_events = alpha_audit_json.Get("events", ValueArray());
+	ValueArray beta_events = beta_audit_json.Get("events", ValueArray());
+	bool route_seen = false, login_seen = false, login_failure_seen = false, sso_login_refused = false;
+	bool session_seen = false, action_seen = false;
+	bool failed_resolution_seen = false, redirect_local_seen = false, redirect_external_seen = false;
+	bool redirect_sso_seen = false, redirect_rejected_seen = false, recursive_read_seen = false;
+	bool alpha_broker_seen = false;
+	bool query_clean = alpha_audit.body.Find(audit_canary) < 0 &&
+	                   alpha_audit.body.Find("username-secret-canary") < 0 &&
+	                   alpha_audit.body.Find("password-secret-canary") < 0 &&
+	                   alpha_audit.body.Find("redirect-secret-canary") < 0 &&
+	                   alpha_audit.body.Find(bad_cookie_canary) < 0 &&
+	                   alpha_audit.body.Find(audit_cookie_alpha) < 0 &&
+	                   alpha_audit.body.Find(audit_csrf_alpha) < 0;
+	for(const Value& v : alpha_events) {
+		ValueMap e = v;
+		if((String)e.Get("route") == "GET:/greet/*" && (int)e.Get("status") == 200) route_seen = true;
+		if((String)e.Get("kind") == "login" && (String)e.Get("outcome") == "success" &&
+		   !((String)e.Get("session_ref")).IsEmpty()) login_seen = true;
+		if((String)e.Get("kind") == "login" && (String)e.Get("outcome") == "failure") login_failure_seen = true;
+		if((String)e.Get("kind") == "login" && (String)e.Get("operation") == "sso_required" &&
+		   (int)e.Get("status") == 403) sso_login_refused = true;
+		if((String)e.Get("kind") == "session" && (String)e.Get("outcome") == "adopted") session_seen = true;
+		if((String)e.Get("kind") == "action" && (String)e.Get("method") == "POST") action_seen = true;
+		if((String)e.Get("kind") == "session" && (String)e.Get("outcome") == "failed_resolution") failed_resolution_seen = true;
+		if((String)e.Get("kind") == "redirect" && (String)e.Get("outcome") == "approved_local") redirect_local_seen = true;
+		if((String)e.Get("kind") == "redirect" && (String)e.Get("outcome") == "external") redirect_external_seen = true;
+		if((String)e.Get("kind") == "redirect" && (String)e.Get("outcome") == "approved_sso") redirect_sso_seen = true;
+		if((String)e.Get("kind") == "redirect" && (String)e.Get("outcome") == "rejected") redirect_rejected_seen = true;
+		if(((String)e.Get("route")).Find("api/audit/") >= 0) recursive_read_seen = true;
+		if((String)e.Get("kind") == "broker_inprocess") alpha_broker_seen = true;
+	}
+	bool broker_seen = false, broker_failure_seen = false;
+	for(const Value& v : beta_events) {
+		ValueMap e = v;
+		if((String)e.Get("kind") == "broker_inprocess" && (String)e.Get("source_site") == "beta" &&
+		   (String)e.Get("target_site") == "alpha" && (String)e.Get("operation") == "add") broker_seen = true;
+		if((String)e.Get("kind") == "broker_inprocess" && (String)e.Get("outcome") == "failure" &&
+		   (String)e.Get("operation") == "unclassified") broker_failure_seen = true;
+	}
+	Check(alpha_audit.status == 200 && (String)alpha_audit_json.Get("site") == "alpha" && route_seen && login_seen && login_failure_seen &&
+	      sso_login_refused &&
+	      session_seen && action_seen && failed_resolution_seen && redirect_local_seen && redirect_external_seen && redirect_sso_seen &&
+	      redirect_rejected_seen && !alpha_broker_seen && !recursive_read_seen &&
+	      query_clean && alpha_audit.cache_control.Find("no-store") >= 0,
+	      "audit integration state route=" + AsString(route_seen) + " login=" + AsString(login_seen) +
+	      " login_fail=" + AsString(login_failure_seen) + " session=" + AsString(session_seen) +
+	      " failed_resolution=" + AsString(failed_resolution_seen) + " redirect_local=" + AsString(redirect_local_seen) +
+	      " redirect_external=" + AsString(redirect_external_seen) + " redirect_rejected=" + AsString(redirect_rejected_seen) +
+	      " query_clean=" + AsString(query_clean) + " recursive=" + AsString(recursive_read_seen));
+	Check(beta_audit.status == 200 && (String)beta_audit_json.Get("site") == "beta" && broker_seen && broker_failure_seen &&
+	      beta_audit.body.Find(audit_canary) < 0,
+	      "in-process broker ledger omits its payload secret and stays in the source site history");
+	HttpReply active_sessions = HttpCall("GET", ALPHA_PORT, "/api/audit/sessions", audit_admin_alpha, "");
+	ValueMap active_sessions_json = ParseJSON(active_sessions.body);
+	Check(active_sessions.status == 200 && (String)active_sessions_json.Get("site") == "alpha" &&
+	      active_sessions.body.Find("\"session_ref\"") >= 0 &&
+	      active_sessions.body.Find(audit_cookie_alpha) < 0 &&
+	      active_sessions.body.Find(audit_csrf_alpha) < 0 && active_sessions.cache_control.Find("no-store") >= 0,
+	      "admin active-session snapshot omits bearer cookie and CSRF values and is no-store");
+	HttpReply audit_health = HttpCall("GET", ALPHA_PORT, "/api/audit/health", audit_admin_alpha, "");
+	ValueMap audit_health_json = ParseJSON(audit_health.body);
+	Check(audit_health.status == 200 && JsonFlag(audit_health_json, "audit_write_healthy") &&
+	      ((String)audit_health_json.Get("broker_diagnostics")).Find("communications_are_durable_in_WebAudit") >= 0 &&
+	      audit_health.cache_control.Find("no-store") >= 0,
+	      "admin diagnostics expose only sanitized recorder health and operational-ledger separation");
+	HttpReply audit_page = HttpCall("GET", ALPHA_PORT, "/audit", audit_admin_alpha, "");
+	Check(audit_page.status == 200 && audit_page.body.Find("api/audit/events") >= 0 &&
+	      audit_page.body.Find("api/audit/sessions") >= 0 && audit_page.cache_control.Find("no-store") >= 0,
+	      "admin audit page lists sanitized sessions, events, and diagnostics via no-store APIs");
+	Check(HttpCall("GET", ALPHA_PORT, "/api/audit/events?offset=10001", audit_admin_alpha, "").status == 400 &&
+	      HttpCall("GET", ALPHA_PORT, "/api/audit/events?limit=201", audit_admin_alpha, "").status == 400 &&
+	      HttpCall("GET", ALPHA_PORT, "/api/audit/sessions?offset=10001", audit_admin_alpha, "").status == 400 &&
+	      HttpCall("GET", ALPHA_PORT, "/api/audit/sessions?limit=201", audit_admin_alpha, "").status == 400,
+	      "event and active-session APIs reject unbounded offset and page size");
+	VectorMap<String, String> audit_admin_backup;
+	String audit_cookie_backup, audit_csrf_backup;
+	audit_login(ALPHA_PORT, audit_admin_backup, audit_cookie_backup, audit_csrf_backup);
+	VectorMap<String, String> audit_admin_expiry;
+	String audit_cookie_expiry, audit_csrf_expiry;
+	audit_login(ALPHA_PORT, audit_admin_expiry, audit_cookie_expiry, audit_csrf_expiry);
+	JsonFileStore alpha_sessions("alpha", AppendFileName(s_root, "alpha"), "sessions");
+	String expiry_json, expiry_rev, expiry_new_rev;
+	WebAccountSession expiry_session;
+	bool expiry_fixture = alpha_sessions.Get(audit_cookie_expiry, expiry_json, expiry_rev).ok;
+	if(expiry_fixture) {
+		LoadFromJsonValue(expiry_session, ParseJSON(expiry_json));
+		expiry_session.expires = GetSysTime() - 1;
+		expiry_fixture = alpha_sessions.Put(audit_cookie_expiry, StoreAsJson(expiry_session, true), expiry_rev, expiry_new_rev).ok;
+	}
+	Check(expiry_fixture, "expired-session fixture is persisted without changing its cookie reference");
+	VectorMap<String, String> expired_cookie_header;
+	expired_cookie_header.Add("Cookie", "wfs_alpha=" + audit_cookie_expiry);
+	Check(HttpCall("GET", ALPHA_PORT, "/whoami", expired_cookie_header, "").status == 200,
+	      "expired session resolution does not corrupt the normal response");
+	HttpReply after_expiry = HttpCall("GET", ALPHA_PORT, "/api/audit/events", audit_admin_backup, "");
+	ValueArray after_expiry_events = ValueMap(ParseJSON(after_expiry.body)).Get("events", ValueArray());
+	bool expiry_seen = false;
+	for(const Value& v : after_expiry_events) {
+		ValueMap e = v;
+		if((String)e.Get("kind") == "session" && (String)e.Get("outcome") == "expired") expiry_seen = true;
+	}
+	Check(expiry_seen && after_expiry.body.Find(audit_cookie_expiry) < 0,
+	      "expired-cookie lifecycle event persists without the raw session bearer");
+	HttpReply logout_admin = HttpCall("POST", ALPHA_PORT, "/session/logout", audit_admin_alpha, "");
+	Check(logout_admin.status == 200,
+	      "session logout completes normally (status=" + AsString(logout_admin.status) + ") after emitting lifecycle audit event");
+	HttpReply after_logout = HttpCall("GET", ALPHA_PORT, "/api/audit/events", audit_admin_backup, "");
+	ValueArray after_logout_events = ValueMap(ParseJSON(after_logout.body)).Get("events", ValueArray());
+	bool logout_seen = false;
+	for(const Value& v : after_logout_events) {
+		ValueMap e = v;
+		if((String)e.Get("route") == "session:logout" && (String)e.Get("outcome") == "revoked") logout_seen = true;
+	}
+	Check(logout_seen, "durable history includes session logout/revoke event");
+
 	// 17. broker: unknown target fails explicitly
 	HttpReply rc2 = HttpCall("POST", BETA_PORT, "/call-nowhere", no_headers, "");
 	{
@@ -1873,6 +2865,16 @@ CONSOLE_APP_MAIN
 		Check(!JsonFlag(m, "ok") && ((String)m.Get("error")).Find("ghost-site") >= 0,
 		      "broker call to unknown site fails explicitly");
 	}
+	HttpReply missing_service_audit = HttpCall("GET", BETA_PORT, "/api/audit/events", audit_admin_beta, "");
+	ValueArray missing_service_events = ValueMap(ParseJSON(missing_service_audit.body)).Get("events", ValueArray());
+	bool unavailable_target_seen = false;
+	for(const Value& v : missing_service_events) {
+		ValueMap e = v;
+		if((String)e.Get("kind") == "broker_inprocess" && (String)e.Get("target_site") == "unregistered" &&
+		   (String)e.Get("operation") == "unavailable") unavailable_target_seen = true;
+	}
+	Check(unavailable_target_seen && missing_service_audit.body.Find("ghost-site") < 0,
+	      "missing broker service is categorized without persisting caller-supplied target text");
 
 	// 18. logout invalidates the session
 	{
@@ -1908,7 +2910,10 @@ CONSOLE_APP_MAIN
 	h_meta.Add("Cookie", meta_pair);
 	h_meta.Add("X-WF-CSRF", meta_csrf);
 	VectorMap<String, String> begin_f;
-	begin_f.Add("password", "pw-meta");
+	begin_f.Add("password", "totp-enrollment-password-canary");
+	Check(HttpCall("POST", META_PORT, "/totp/begin", h_meta, FormEncode(begin_f)).status == 403,
+	      "TOTP enrollment refuses a bad password before issuing secrets");
+	begin_f.GetAdd("password") = "pw-meta";
 	HttpReply mtb = HttpCall("POST", META_PORT, "/totp/begin", h_meta, FormEncode(begin_f));
 	String secret;
 	Vector<String> recovery;
@@ -1929,12 +2934,35 @@ CONSOLE_APP_MAIN
 	Check(secret.GetCount() >= 32 && recovery.GetCount() == 8, "totp secret + 8 recovery codes issued");
 
 	VectorMap<String, String> confirm_f;
-	confirm_f.Add("code", TotpCode(secret, TotpUnixNow()));
+	confirm_f.Add("code", "totp-code-secret-canary");
+	Check(HttpCall("POST", META_PORT, "/totp/confirm", h_meta, FormEncode(confirm_f)).status == 403,
+	      "TOTP enrollment rejects an invalid code without changing the response");
+	confirm_f.GetAdd("code") = TotpCode(secret, TotpUnixNow());
 	HttpReply mtc = HttpCall("POST", META_PORT, "/totp/confirm", h_meta, FormEncode(confirm_f));
 	{
 		Value v = ParseJSON(mtc.body);
 		Check(JsonFlag(v.Is<ValueMap>() ? (ValueMap)v : ValueMap(), "ok"), "totp enrollment confirmed with live code");
 	}
+	VectorMap<String, String> disable_bad_f;
+	disable_bad_f.Add("password", "totp-disable-password-canary");
+	Check(HttpCall("POST", META_PORT, "/totp/disable", h_meta, FormEncode(disable_bad_f)).status == 403,
+	      "TOTP disable refuses a bad password and records a failure category");
+	VectorMap<String, String> browser_meta_headers;
+	browser_meta_headers.Add("Accept", "text/html");
+	browser_meta_headers.Add("Content-Type", "application/x-www-form-urlencoded");
+	VectorMap<String, String> browser_meta_form;
+	browser_meta_form.Add("username", "mallory"); browser_meta_form.Add("password", "pw-meta");
+	browser_meta_form.Add("code", TotpCode(secret, TotpUnixNow()));
+	EngineSite *alpha_public_site = TheWebEngine().FindSite("alpha");
+	String allowed_return = alpha_public_site ? alpha_public_site->PublicUrl("/session/sso?next=%2F") : String();
+	browser_meta_form.Add("next", allowed_return);
+	HttpReply allowed_return_reply = HttpCall("POST", META_PORT, "/login", browser_meta_headers, FormEncode(browser_meta_form));
+	Check(!allowed_return.IsEmpty() && allowed_return_reply.status == 302 && allowed_return_reply.location == allowed_return,
+	      "MetaAccount permits return targets only at a configured site public origin and safe path");
+	browser_meta_form.GetAdd("next") = "https://evil.example/steal?token=return-target-secret";
+	HttpReply rejected_return_reply = HttpCall("POST", META_PORT, "/login", browser_meta_headers, FormEncode(browser_meta_form));
+	Check(rejected_return_reply.status == 302 && rejected_return_reply.location == TheWebEngine().FindSite("meta")->PublicUrl("/"),
+	      "unconfigured SSO return origin is rejected in favor of the configured MetaAccount origin");
 
 	// After enrollment, login requires the second factor.
 	HttpCall("POST", META_PORT, "/logout", h_meta, "");
@@ -1964,6 +2992,36 @@ CONSOLE_APP_MAIN
 	      "recovery code login passes");
 	HttpReply rrr2 = HttpCall("POST", META_PORT, "/login", origin_meta, FormEncode(rec_login));
 	Check(rrr2.status == 401, "used recovery code is rejected");
+	Vector<ValueMap> meta_audit_rows;
+	StoreResult meta_audit_result = TheWebEngine().FindSite("meta")->Audit().List(
+		GetSysTime() - 24 * 60 * 60, GetSysTime() + 1, 0, 200, meta_audit_rows);
+	ValueArray meta_audit_array;
+	for(const ValueMap& e : meta_audit_rows) meta_audit_array.Add(e);
+	String meta_audit_json = AsJSON(meta_audit_array, true);
+	bool totp_method_seen = false, recovery_method_seen = false, second_factor_failure_seen = false;
+	bool totp_begin_failure = false, totp_confirm_failure = false, totp_disable_failure = false;
+	for(const ValueMap& e : meta_audit_rows) {
+		if((String)e.Get("kind") == "login") {
+			totp_method_seen |= (String)e.Get("operation") == "password_totp";
+			recovery_method_seen |= (String)e.Get("operation") == "password_recovery";
+			second_factor_failure_seen |= (String)e.Get("outcome") == "failure" &&
+			                              (String)e.Get("operation") == "password_second_factor";
+		}
+		if((String)e.Get("kind") == "sensitive_action" && (String)e.Get("outcome") == "failure") {
+			totp_begin_failure |= (String)e.Get("route") == "account:totp_begin" && (int)e.Get("status") == 403;
+			totp_confirm_failure |= (String)e.Get("route") == "account:totp_confirm" && (int)e.Get("status") == 403;
+			totp_disable_failure |= (String)e.Get("route") == "account:totp_disable" && (int)e.Get("status") == 403;
+		}
+	}
+	Check(meta_audit_result.ok && totp_method_seen && recovery_method_seen && second_factor_failure_seen &&
+	      totp_begin_failure && totp_confirm_failure && totp_disable_failure &&
+	      meta_audit_json.Find(secret) < 0 && meta_audit_json.Find(recovery[0]) < 0 &&
+	      meta_audit_json.Find("pw-meta") < 0 && meta_audit_json.Find("mallory") < 0 &&
+	      meta_audit_json.Find("return-target-secret") < 0 &&
+	      meta_audit_json.Find("totp-enrollment-password-canary") < 0 &&
+	      meta_audit_json.Find("totp-code-secret-canary") < 0 &&
+	      meta_audit_json.Find("totp-disable-password-canary") < 0,
+	      "MetaAccount login and TOTP failures use safe categories without credentials or username");
 
 	// --- consent grants across sites via broker ---
 	VectorMap<String, String> consent_f;
@@ -2039,6 +3097,18 @@ CONSOLE_APP_MAIN
 		BrokerResult res = TheWebEngine().Broker().Call(ctx, call);
 		Check(res.ok && !(bool)res.payload.Get("active"), "revoked grant is inactive via check-grant");
 	}
+	Vector<ValueMap> grant_audit_rows;
+	StoreResult grant_audit_read = TheWebEngine().FindSite("meta")->Audit().List(
+		GetSysTime() - 24 * 60 * 60, GetSysTime() + 1, 0, 200, grant_audit_rows);
+	ValueArray grant_audit_values;
+	bool grant_revoke_seen = false;
+	for(const ValueMap& e : grant_audit_rows) {
+		grant_audit_values.Add(e);
+		if((String)e.Get("kind") == "sensitive_action" && (String)e.Get("route") == "meta:grant_revoke")
+			grant_revoke_seen = true;
+	}
+	Check(grant_audit_read.ok && grant_revoke_seen && AsJSON(grant_audit_values, true).Find(grant_id) < 0,
+	      "grant revoke audit event records action category without grant identifier");
 
 	// --- TaskFoundry linked-consent round trip (task 009): the client site's
 	// user links to a meta identity; the meta subject decides on the meta site;
@@ -2134,6 +3204,59 @@ CONSOLE_APP_MAIN
 		Check(rb1.status == 200, "taskfoundry board serves with the approved linked grant");
 		HttpReply rc1 = HttpCall("POST", TASKFOUNDRY_PORT, "/candidates/create", tf_h, FormEncode(cc_f));
 		Check(rc1.status == 302, "candidate create with the approved linked grant");
+		Check(HttpCall("GET", TASKFOUNDRY_PORT, "/policy", VectorMap<String, String>(), "").status == 401,
+		      "taskfoundry policy administration requires authentication");
+		Check(HttpCall("GET", TASKFOUNDRY_PORT, "/policy", tf_h, "").status == 403,
+		      "taskfoundry policy administration requires the admin role");
+		Check(HttpCall("POST", TASKFOUNDRY_PORT, "/api/policy/link", tf_h, "").status == 403,
+		      "taskfoundry secret-link creation remains admin-only");
+		TfResult tf_board = s_tf_service->Board();
+		ValueArray tf_candidates = tf_board.payload.Get("candidates", ValueArray());
+		if(tf_candidates.GetCount()) {
+			String candidate_id = (String)((ValueMap)tf_candidates[0]).Get("id", "");
+			String tf_policy_root = AppendFileName(s_root, "taskfoundry");
+			ContentPolicyStore& policy_store = ContentPolicyFor(tf_policy_root);
+			ContentPolicy candidate_policy;
+			candidate_policy.level = CONTENT_PRIVATE;
+			ContentGrant candidate_grant;
+			candidate_grant.kind = "user";
+			candidate_grant.value = "tfdev";
+			candidate_policy.grants.Add(pick(candidate_grant));
+			policy_store.SetRecord(candidate_id, candidate_policy);
+			String policy_error;
+			Check(policy_store.Save(policy_error), "taskfoundry candidate policy fixture is persisted");
+			Check(HttpCall("GET", TASKFOUNDRY_PORT, "/candidates/" + candidate_id, tf_h, "").status == 200,
+			      "taskfoundry policy grant works only within the approved site grant");
+			candidate_policy.grants.Clear();
+			policy_store.SetRecord(candidate_id, candidate_policy);
+			Check(policy_store.Save(policy_error), "taskfoundry candidate policy deny fixture is persisted");
+			HttpReply hidden_candidate = HttpCall("GET", TASKFOUNDRY_PORT, "/candidates/" + candidate_id, tf_h, "");
+			HttpReply filtered_board = HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "");
+			Check(hidden_candidate.status == 404 && filtered_board.body.Find("Linked") < 0,
+			      "taskfoundry hides denied candidate detail and omits it from the board");
+			candidate_policy.level = CONTENT_PUBLIC;
+			policy_store.SetRecord(candidate_id, candidate_policy);
+			Check(policy_store.Save(policy_error), "taskfoundry candidate public policy is restored");
+			candidate_policy.level = CONTENT_PUBLIC_ONLY;
+			policy_store.SetRecord(candidate_id, candidate_policy);
+			Check(policy_store.Save(policy_error) &&
+			      HttpCall("GET", TASKFOUNDRY_PORT, "/candidates/" + candidate_id, tf_h, "").status == 404 &&
+			      HttpCall("GET", TASKFOUNDRY_PORT, "/candidates/" + candidate_id, VectorMap<String, String>(), "").status == 302,
+			      "taskfoundry public-only policy narrows granted reads without bypassing the approved grant");
+			candidate_policy.level = CONTENT_PUBLIC;
+			policy_store.SetRecord(candidate_id, candidate_policy);
+			Check(policy_store.Save(policy_error), "taskfoundry candidate policy is restored after public-only test");
+		}
+		String tf_policy_root = AppendFileName(s_root, "taskfoundry");
+		String tf_policy_path = AppendFileName(tf_policy_root, "content_policy.json");
+		ContentPolicyStore& tf_policy_store = ContentPolicyFor(tf_policy_root);
+		String tf_policy_error;
+		Check(SaveFile(tf_policy_path, "{broken") && !tf_policy_store.Load(tf_policy_root, tf_policy_error),
+		      "taskfoundry corrupt policy fixture fails loading");
+		Check(HttpCall("GET", TASKFOUNDRY_PORT, "/", tf_h, "").status == 503,
+		      "taskfoundry granted board fails closed on corrupt policy data");
+		FileDelete(tf_policy_path);
+		Check(tf_policy_store.Load(tf_policy_root, tf_policy_error), "taskfoundry policy store recovers after fixture removal");
 
 		// The subject revokes; access closes on the next request.
 		VectorMap<String, String> no_f;
@@ -2284,19 +3407,76 @@ CONSOLE_APP_MAIN
 		String ch_raw;
 		String ch_cookie = "wfs_channels=" + CookieOf(rcl, "wfs_channels", ch_raw);
 		Check(rcl.status == 200 && ch_csrf.GetCount() > 0, "channels session login");
+		VectorMap<String, String> ch_anon_policy;
+		Check(HttpCall("GET", CHANNELS_PORT, "/policy", ch_anon_policy, "").status == 401,
+		      "channels policy administration requires authentication");
 
-		// Anonymous callers are redirected.
+		// The overview is a public landing; the channel detail remains protected.
 		VectorMap<String, String> anon_h;
 		anon_h.Add("Origin", ch_origin);
 		HttpReply rca = HttpCall("GET", CHANNELS_PORT, "/overview", anon_h, "");
-		Check(rca.status == 302, "channels overview anonymous redirects");
+		Check(rca.status == 200 && rca.body.Find("Channels show the agent activity") >= 0,
+		      "channels overview serves its public landing anonymously");
 
 		VectorMap<String, String> ch_h;
 		ch_h.Add("Origin", ch_origin);
 		ch_h.Add("Cookie", ch_cookie);
+		ch_h.Add("X-WF-CSRF", ch_csrf);
+		Check(HttpCall("GET", CHANNELS_PORT, "/policy", ch_h, "").status == 403,
+		      "channels policy administration requires the admin role");
+		Check(HttpCall("POST", CHANNELS_PORT, "/api/policy/link", ch_h, "").status == 403,
+		      "channels secret-link creation remains admin-only");
 		HttpReply rco = HttpCall("GET", CHANNELS_PORT, "/overview", ch_h, "");
 		Check(rco.status == 200 && rco.body.Find("SKYLARK-MANAGER") >= 0
 		      && rco.body.Find("AGENTLAB") >= 0, "channels overview lists the node's channels");
+		ContentPolicyStore& channel_policy = ContentPolicyFor(AppendFileName(s_root, "channels"));
+		ContentPolicy shown_channel;
+		shown_channel.level = CONTENT_PRIVATE;
+		ContentGrant channel_grant;
+		channel_grant.kind = "user";
+		channel_grant.value = "viewer";
+		shown_channel.grants.Add(pick(channel_grant));
+		ContentPolicy hidden_channel;
+		hidden_channel.level = CONTENT_PRIVATE;
+		channel_policy.SetRecord("skylark/SKYLARK-MANAGER", shown_channel);
+		channel_policy.SetRecord("skylark/AGENTLAB", hidden_channel);
+		String channel_policy_error;
+		Check(channel_policy.Save(channel_policy_error), "channels policy fixtures are persisted");
+		HttpReply filtered_channels = HttpCall("GET", CHANNELS_PORT, "/overview", ch_h, "");
+		Check(filtered_channels.status == 200 && filtered_channels.body.Find("SKYLARK-MANAGER") >= 0 &&
+		      filtered_channels.body.Find("AGENTLAB") < 0,
+		      "channels overview filters metadata by channel policy after login");
+		Check(HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER", ch_h, "").status == 200 &&
+		      HttpCall("GET", CHANNELS_PORT, "/channels/skylark/AGENTLAB", ch_h, "").status == 404,
+		      "channels detail applies policy before returning cached or fetched messages");
+		shown_channel.grants.Clear();
+		channel_policy.SetRecord("skylark/SKYLARK-MANAGER", shown_channel);
+		Check(channel_policy.Save(channel_policy_error), "channels all-hidden fixture is persisted");
+		HttpReply no_visible_channels = HttpCall("GET", CHANNELS_PORT, "/overview", ch_h, "");
+		Check(no_visible_channels.status == 200 && no_visible_channels.body.Find("No channels have been used") >= 0 &&
+		      no_visible_channels.body.Find("<table>") < 0,
+		      "channels all-hidden overview has the same empty response without an existence/count leak");
+		hidden_channel.level = CONTENT_PUBLIC_ONLY;
+		channel_policy.SetRecord("skylark/AGENTLAB", hidden_channel);
+		Check(channel_policy.Save(channel_policy_error) &&
+		      HttpCall("GET", CHANNELS_PORT, "/channels/skylark/AGENTLAB", ch_h, "").status == 404 &&
+		      HttpCall("GET", CHANNELS_PORT, "/channels/skylark/AGENTLAB", ch_anon_policy, "").status == 302,
+		      "channels public-only policy narrows authenticated reads without bypassing login");
+		shown_channel.level = CONTENT_PUBLIC;
+		hidden_channel.level = CONTENT_PUBLIC;
+		channel_policy.SetRecord("skylark/SKYLARK-MANAGER", shown_channel);
+		channel_policy.SetRecord("skylark/AGENTLAB", hidden_channel);
+		Check(channel_policy.Save(channel_policy_error), "channels policy fixtures are restored");
+		String channel_policy_root = AppendFileName(s_root, "channels");
+		String channel_policy_path = AppendFileName(channel_policy_root, "content_policy.json");
+		Check(SaveFile(channel_policy_path, "{broken") && !channel_policy.Load(channel_policy_root, channel_policy_error),
+		      "channels corrupt policy fixture fails loading");
+		Check(HttpCall("GET", CHANNELS_PORT, "/overview", ch_h, "").status == 503,
+		      "channels metadata overview fails closed on corrupt policy data");
+		Check(HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER", ch_h, "").status == 503,
+		      "channels cached message view fails closed on corrupt policy data");
+		FileDelete(channel_policy_path);
+		Check(channel_policy.Load(channel_policy_root, channel_policy_error), "channels policy store recovers after fixture removal");
 		HttpReply rcp = HttpCall("GET", CHANNELS_PORT, "/channels/skylark/SKYLARK-MANAGER", ch_h, "");
 		Check(rcp.status == 200 && rcp.body.Find("ACK hello") >= 0, "channels page renders the shimmed messages");
 		Check(rcp.body.Find("<script>alert(1)") < 0 && rcp.body.Find("&lt;script&gt;") >= 0,
@@ -2354,11 +3534,15 @@ CONSOLE_APP_MAIN
 		String view_cookie, view_csrf, fin_cookie, fin_csrf;
 		Check(FinLogin("fviewer", "pw-fin", view_cookie, view_csrf), "financials viewer login");
 		Check(FinLogin("ffin", "pw-fin2", fin_cookie, fin_csrf), "financials finance login");
+		VectorMap<String, String> fin_anon_policy;
+		Check(HttpCall("GET", FINANCIALS_PORT, "/policy", fin_anon_policy, "").status == 401,
+		      "financials policy administration requires authentication");
 
 		VectorMap<String, String> anon_h;
 		anon_h.Add("Origin", fin_origin);
 		HttpReply rfa = HttpCall("GET", FINANCIALS_PORT, "/financials", anon_h, "");
-		Check(rfa.status == 302, "financials summary anonymous redirects");
+		Check(rfa.status == 200 && rfa.body.Find("ledger totals") < 0,
+		      "financials summary serves a public landing without totals");
 
 		VectorMap<String, String> view_h;
 		view_h.Add("Origin", fin_origin);
@@ -2366,6 +3550,11 @@ CONSOLE_APP_MAIN
 		VectorMap<String, String> fin_h;
 		fin_h.Add("Origin", fin_origin);
 		fin_h.Add("Cookie", fin_cookie);
+		fin_h.Add("X-WF-CSRF", fin_csrf);
+		Check(HttpCall("GET", FINANCIALS_PORT, "/policy", view_h, "").status == 403,
+		      "financials policy administration requires the admin role");
+		Check(HttpCall("POST", FINANCIALS_PORT, "/api/policy/link", fin_h, "").status == 403,
+		      "financials secret-link creation remains admin-only");
 
 		HttpReply rvs = HttpCall("GET", FINANCIALS_PORT, "/financials", view_h, "");
 		Check(rvs.status == 200 && rvs.body.Find("500") >= 0, "the viewer sees the ledger summary");
@@ -2382,6 +3571,75 @@ CONSOLE_APP_MAIN
 		      "the finance role reads the contracts with escaped text");
 		HttpReply rfs = HttpCall("GET", FINANCIALS_PORT, "/financials", fin_h, "");
 		Check(rfs.status == 200 && rfs.body.Find("500") >= 0, "the finance role sees the summary too");
+		ContentPolicyStore& fin_policy_store = ContentPolicyFor(AppendFileName(s_root, "financials"));
+		ContentPolicy summary_policy;
+		summary_policy.level = CONTENT_PRIVATE;
+		ContentGrant finance_grant;
+		finance_grant.kind = "group";
+		finance_grant.value = "finance";
+		summary_policy.grants.Add(pick(finance_grant));
+		fin_policy_store.SetModule("summary", summary_policy);
+		ContentPolicy ledger_row;
+		ledger_row.level = CONTENT_PRIVATE;
+		fin_policy_store.SetRecord("2", ledger_row);
+		ContentPolicy contract_row;
+		contract_row.level = CONTENT_PRIVATE;
+		fin_policy_store.SetRecord("ctr_fake", contract_row);
+		String finance_policy_error;
+		Check(fin_policy_store.Save(finance_policy_error), "financials policy fixtures are persisted");
+		Check(HttpCall("GET", FINANCIALS_PORT, "/financials", view_h, "").status == 404 &&
+		      HttpCall("GET", FINANCIALS_PORT, "/financials", fin_h, "").status == 404,
+		      "financials hides aggregates when restrictive row policy prevents safe source filtering");
+		HttpReply filtered_ledger = HttpCall("GET", FINANCIALS_PORT, "/ledger", fin_h, "");
+		HttpReply filtered_contracts = HttpCall("GET", FINANCIALS_PORT, "/contracts", fin_h, "");
+		Check(filtered_ledger.status == 200 && filtered_ledger.body.Find("fixed &lt;bug&gt;") < 0 &&
+		      filtered_ledger.body.Find("No ledger entries yet.") >= 0 &&
+		      filtered_contracts.status == 200 && filtered_contracts.body.Find("Fake &lt;contract&gt;") < 0 &&
+		      filtered_contracts.body.Find("No contracts yet.") >= 0,
+		      "financials filters rows before rendering and hides existence when all rows are hidden");
+		ContentGrant finance_row_grant;
+		finance_row_grant.kind = "user";
+		finance_row_grant.value = "ffin";
+		ledger_row.grants.Add(pick(finance_row_grant));
+		fin_policy_store.SetRecord("2", ledger_row);
+		Check(fin_policy_store.Save(finance_policy_error) &&
+		      HttpCall("GET", FINANCIALS_PORT, "/ledger", fin_h, "").body.Find("fixed &lt;bug&gt;") >= 0,
+		      "financials record grant works only after finance-role authorization");
+		contract_row.level = CONTENT_PUBLIC_ONLY;
+		fin_policy_store.SetRecord("ctr_fake", contract_row);
+		Check(fin_policy_store.Save(finance_policy_error) &&
+		      HttpCall("GET", FINANCIALS_PORT, "/contracts", fin_h, "").body.Find("Fake &lt;contract&gt;") < 0 &&
+		      HttpCall("GET", FINANCIALS_PORT, "/contracts", VectorMap<String, String>(), "").status == 302,
+		      "financials public-only row policy does not bypass login or finance-role authorization");
+		contract_row.level = CONTENT_PUBLIC;
+		summary_policy.level = CONTENT_PUBLIC;
+		ledger_row.level = CONTENT_PUBLIC;
+		ledger_row.grants.Clear();
+		contract_row.level = CONTENT_PUBLIC;
+		fin_policy_store.SetModule("summary", summary_policy);
+		fin_policy_store.SetRecord("2", ledger_row);
+		fin_policy_store.SetRecord("ctr_fake", contract_row);
+		Check(fin_policy_store.Save(finance_policy_error) &&
+		      HttpCall("GET", FINANCIALS_PORT, "/financials", fin_h, "").status == 200,
+		      "financials aggregate returns after restrictive row policies are cleared");
+		ContentPolicy hidden_ledger_module;
+		hidden_ledger_module.level = CONTENT_PRIVATE;
+		fin_policy_store.SetModule("ledger", hidden_ledger_module);
+		Check(fin_policy_store.Save(finance_policy_error) &&
+		      HttpCall("GET", FINANCIALS_PORT, "/financials", fin_h, "").status == 404,
+		      "financials aggregate also respects restrictive source-module policy");
+		hidden_ledger_module.level = CONTENT_PUBLIC;
+		fin_policy_store.SetModule("ledger", hidden_ledger_module);
+		Check(fin_policy_store.Save(finance_policy_error), "financials ledger module policy is restored");
+		String fin_policy_root = AppendFileName(s_root, "financials");
+		String fin_policy_path = AppendFileName(fin_policy_root, "content_policy.json");
+		Check(SaveFile(fin_policy_path, "{broken") && !fin_policy_store.Load(fin_policy_root, finance_policy_error),
+		      "financials corrupt policy fixture fails loading");
+		Check(HttpCall("GET", FINANCIALS_PORT, "/financials", view_h, "").status == 503 &&
+		      HttpCall("GET", FINANCIALS_PORT, "/ledger", fin_h, "").status == 503,
+		      "financials aggregate and finance rows fail closed on corrupt policy data");
+		FileDelete(fin_policy_path);
+		Check(fin_policy_store.Load(fin_policy_root, finance_policy_error), "financials policy store recovers after fixture removal");
 
 		// The module-side scope gate: a ledger:read caller without admin is
 		// refused the per-user rows even at the broker.
@@ -2404,12 +3662,12 @@ CONSOLE_APP_MAIN
 		Check(rff.status == 503, "a failing module answers with the unavailable page");
 	}
 
-	// --- LAN authority (task 032): the fence and the absolute URLs follow the Host the client used ---
+	// --- Host authority cannot override configured public origin or force a downgrade ---
 	{
 		String lan_host = Format("192.168.1.169:%d", ATLAS_PORT);
-		String lan_origin = "http://" + lan_host;
+		String configured_origin = Format("http://127.0.0.1:%d", ATLAS_PORT);
 		VectorMap<String, String> lo;
-		lo.Add("Origin", lan_origin);
+		lo.Add("Origin", configured_origin);
 		lo.Add("Host", lan_host);
 		lo.Add("accept", "application/json");
 		VectorMap<String, String> lf;
@@ -2419,10 +3677,11 @@ CONSOLE_APP_MAIN
 		String lan_csrf = (String)ParseJSON(rlan.body)["csrf"];
 		String lan_raw;
 		String lan_cookie = "wfs_atlas=" + CookieOf(rlan, "wfs_atlas", lan_raw);
-		Check(rlan.status == 200 && lan_csrf.GetCount() > 0, "a LAN-authority login POST succeeds with the Host it was sent to");
+		Check(rlan.status == 200 && lan_csrf.GetCount() > 0,
+		      "literal Host spoof cannot override the exact configured Origin");
 
 		VectorMap<String, String> lh;
-		lh.Add("Origin", lan_origin);
+		lh.Add("Origin", configured_origin);
 		lh.Add("Host", lan_host);
 		lh.Add("Cookie", lan_cookie);
 		VectorMap<String, String> lc;
@@ -2432,34 +3691,40 @@ CONSOLE_APP_MAIN
 		lc.Add("__wf_csrf__", lan_csrf);
 		HttpReply rlc = HttpCall("POST", ATLAS_PORT, "/atlas/create", lh, FormEncode(lc));
 		Check(rlc.status == 302, "a LAN-authority mutation succeeds");
-		Check(rlc.location == Format("http://%s/atlas/lan-v1", lan_host),
-		      "the redirect Location uses the request's Host authority");
+		Check(rlc.location == configured_origin + "/atlas/lan-v1",
+		      "redirect Location stays pinned to configured origin despite literal Host spoof");
 		HttpReply rlm = HttpCall("GET", ATLAS_PORT, "/atlas/lan-v1", lh, "");
-		Check(rlm.status == 200 && rlm.body.Find(Format("href=\"http://%s/atlas\"", lan_host)) >= 0,
-		      "absolute links on a LAN page use the Host authority");
+		Check(rlm.status == 200 && rlm.body.Find("href=\"" + configured_origin + "/atlas\"") >= 0,
+		      "absolute links on a Host-spoofed page use the configured public origin");
 
 		VectorMap<String, String> foreign;
 		foreign.Add("Origin", "http://evil.example:" + AsString(ATLAS_PORT));
 		foreign.Add("Host", lan_host);
 		foreign.Add("accept", "application/json");
 		Check(HttpCall("POST", ATLAS_PORT, "/session/login", foreign, FormEncode(lf)).status == 403,
-		      "a foreign Origin is refused on a LAN Host (the fence is still exact)");
+		      "a foreign Origin is refused regardless of literal Host header");
 
 		VectorMap<String, String> mismatch;
-		mismatch.Add("Origin", Format("http://127.0.0.1:%d", ATLAS_PORT));
-		mismatch.Add("Host", lan_host);
+		mismatch.Add("Origin", Format("http://localhost:%d", ATLAS_PORT));
+		mismatch.Add("Host", Format("localhost:%d", ATLAS_PORT));
 		mismatch.Add("accept", "application/json");
 		Check(HttpCall("POST", ATLAS_PORT, "/session/login", mismatch, FormEncode(lf)).status == 403,
-		      "an Origin that is not the request's own authority is refused");
+		      "localhost Host/Origin spoof is refused when not the configured public origin");
 
-		// DNS names are never trusted as the served authority: a rebinding page
-		// would send Origin and Host with the same attacker name.
+		// A matching DNS Host and Origin must not be trusted as a rebindable origin.
 		VectorMap<String, String> rebind;
 		rebind.Add("Origin", Format("http://attacker.example:%d", ATLAS_PORT));
 		rebind.Add("Host", Format("attacker.example:%d", ATLAS_PORT));
 		rebind.Add("accept", "application/json");
 		Check(HttpCall("POST", ATLAS_PORT, "/session/login", rebind, FormEncode(lf)).status == 403,
-		      "a DNS-name Host (rebinding) is refused, Origin equal to Host or not");
+			"a matching DNS Host and Origin is refused despite a valid local listener");
+		VectorMap<String, String> dns_configured;
+		dns_configured.Add("Host", Format("attacker.example:%d", ATLAS_PORT));
+		dns_configured.Add("Origin", configured_origin);
+		dns_configured.Add("accept", "application/json");
+		HttpReply dns_page = HttpCall("GET", ATLAS_PORT, "/atlas/lan-v1", dns_configured, "");
+		Check(dns_page.status == 200 && dns_page.body.Find("href=\"" + configured_origin + "/atlas\"") >= 0,
+		      "DNS Host cannot alter links or downgrade the configured origin");
 	}
 
 	// --- Atlas map webapp (task 029): admin edits, viewer reads, every write revision-checked ---
@@ -2484,7 +3749,8 @@ CONSOLE_APP_MAIN
 
 		VectorMap<String, String> anon_h;
 		anon_h.Add("Origin", atl_origin);
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "").status == 302, "atlas list anonymous redirects");
+		HttpReply atlas_public = HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "");
+		Check(atlas_public.status == 200, "atlas list is publicly readable");
 
 		VectorMap<String, String> adm_h;
 		adm_h.Add("Origin", atl_origin);
@@ -2492,6 +3758,17 @@ CONSOLE_APP_MAIN
 		VectorMap<String, String> vw_h;
 		vw_h.Add("Origin", atl_origin);
 		vw_h.Add("Cookie", vw_cookie);
+		Check(HttpCall("GET", ATLAS_PORT, "/policy", anon_h, "").status == 401,
+		      "atlas policy administration requires authentication");
+		Check(HttpCall("GET", ATLAS_PORT, "/policy", vw_h, "").status == 403,
+		      "atlas policy administration requires the admin role");
+		HttpReply atlas_policy_page = HttpCall("GET", ATLAS_PORT, "/policy", adm_h, "");
+		Check(atlas_policy_page.status == 200 &&
+		      atlas_policy_page.body.Find("Secret-link controls require verified HTTPS transport") >= 0 &&
+		      atlas_policy_page.body.Find("policy-link-form") < 0,
+		      "atlas policy administration withholds secret-link creation over HTTP");
+		Check(HttpCall("GET", ATLAS_PORT, "/api/policy", adm_h, "").status == 200,
+		      "atlas policy API is available to the site admin");
 
 		// Creating a map version: fenced, admin-only, one document per version.
 		VectorMap<String, String> cf;
@@ -2503,6 +3780,46 @@ CONSOLE_APP_MAIN
 		Check(rcreate.status == 302, "the admin creates a map version");
 		HttpReply rdup = HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(cf));
 		Check(rdup.status == 409, "a second create of the same version is refused");
+		ContentPolicyStore& atlas_policy = ContentPolicyFor(AppendFileName(s_root, "atlas"));
+		ContentPolicy private_map;
+		private_map.level = CONTENT_PRIVATE;
+		ContentPolicy all_maps_hidden;
+		all_maps_hidden.level = CONTENT_PRIVATE;
+		atlas_policy.Site() = all_maps_hidden;
+		ContentGrant atlas_grant;
+		atlas_grant.kind = "user";
+		atlas_grant.value = "aview";
+		private_map.grants.Add(pick(atlas_grant));
+		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		String atlas_policy_error;
+		Check(atlas_policy.Save(atlas_policy_error), "atlas private map policy is persisted");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 404,
+		      "atlas anonymous reads hide a private map");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 200,
+		      "atlas named-user policy grant preserves authenticated map access");
+		HttpReply hidden_index = HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "");
+		Check(hidden_index.status == 200, "atlas hidden-map index remains readable");
+		Check(hidden_index.body.Find("pkr-v0.0.1") < 0, "atlas hidden-map index omits hidden map identity");
+		Check(hidden_index.body.Find("No maps yet.") >= 0,
+		      "atlas all-hidden map index uses the no-maps state");
+		Check(hidden_index.body.Find("<table>") < 0,
+		      "atlas all-hidden map index does not reveal collection existence through an empty table");
+		private_map.grants.Clear();
+		private_map.level = CONTENT_PUBLIC;
+		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		all_maps_hidden.level = CONTENT_PUBLIC;
+		atlas_policy.Site() = all_maps_hidden;
+		Check(atlas_policy.Save(atlas_policy_error), "atlas public map policy is restored");
+		private_map.level = CONTENT_PUBLIC_ONLY;
+		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		Check(atlas_policy.Save(atlas_policy_error) &&
+		      HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 200 &&
+		      HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 404,
+		      "atlas public-only policy narrows authenticated reads while preserving anonymous reads");
+		private_map.level = CONTENT_PUBLIC;
+		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		atlas_policy.Site() = all_maps_hidden;
+		Check(atlas_policy.Save(atlas_policy_error), "atlas map policy restored after public-only test");
 		VectorMap<String, String> nocsrf;
 		nocsrf.Add("map", "pkr2");
 		nocsrf.Add("version", "v1");
@@ -2534,6 +3851,11 @@ CONSOLE_APP_MAIN
 		Check(rev1.GetCount() > 0, "the map page embeds its revision");
 		Check(rmap.body.Find("PKR &lt;v0.0.1&gt;") >= 0 && rmap.body.Find("PKR <v0.0.1>") < 0,
 		      "the map title is escaped");
+		Check(rmap.body.Find("id=\"atlas-maximize\"") >= 0 && rmap.body.Find("id=\"atlas-contents\"") >= 0 &&
+		      rmap.body.Find("id=\"atlas-fit\"") >= 0 && rmap.body.Find("id=\"atlas-actual\"") >= 0 &&
+		      rmap.body.Find("id=\"wf-btn-theme\"") >= 0 && rmap.body.Find("id=\"wf-btn-density\"") >= 0 &&
+		      rmap.body.Find("data-theme=\"light\"") < 0,
+		      "the map page has the maximize, contents, fit and 1:1 controls and the shared theme buttons");
 
 		// Seed import: a hand-transcribed containment list plus one edge.
 		VectorMap<String, String> sf;
@@ -2542,6 +3864,40 @@ CONSOLE_APP_MAIN
 		sf.Add("__wf_csrf__", adm_csrf);
 		HttpReply rseed = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf));
 		Check(rseed.status == 302, "the admin seeds the empty map");
+		ContentPolicy hidden_element;
+		hidden_element.level = CONTENT_PRIVATE;
+		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		Check(atlas_policy.Save(atlas_policy_error), "atlas element policy is persisted");
+		HttpReply element_filtered_map = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "");
+		Check(element_filtered_map.status == 200, "atlas policy-filtered map remains viewable");
+		Check(element_filtered_map.body.Find("e_child") < 0 && element_filtered_map.body.Find(">Child<") < 0,
+		      "atlas map view filters hidden element ids and names from its HTML and embedded map");
+		HttpReply element_filtered_index = HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "");
+		Check(element_filtered_index.body.Find("<td>2</td><td>0</td>") >= 0,
+		      "atlas map index counts only visible elements and roads");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", anon_h, "").status == 404,
+		      "atlas element detail hides a policy-restricted element");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "").status == 404,
+		      "atlas element policy does not grant access to an authenticated stranger");
+		ContentGrant element_grant;
+		element_grant.kind = "user";
+		element_grant.value = "aview";
+		hidden_element.grants.Add(pick(element_grant));
+		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		bool element_grant_saved = atlas_policy.Save(atlas_policy_error);
+		ContentPrincipal element_principal;
+		element_principal.authenticated = true;
+		element_principal.username = "aview";
+		ContentPolicy stored_element_policy = atlas_policy.Record("pkr-v0.0.1:element:e_child");
+		Check(element_grant_saved && ContentVisible(stored_element_policy, element_principal),
+		      "atlas element policy stores the named-user grant");
+		HttpReply element_granted = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "");
+		Check(element_granted.status == 200,
+		      "atlas per-element named-user grant allows the element after map visibility");
+		hidden_element.grants.Clear();
+		hidden_element.level = CONTENT_PUBLIC;
+		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		Check(atlas_policy.Save(atlas_policy_error), "atlas public element policy is restored");
 		HttpReply rmap2 = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
 		String rev2 = AtlasRevisionOf(rmap2.body);
 		Check(rmap2.body.Find("3 elements") >= 0 && rmap2.body.Find("1 roads") >= 0,
@@ -2638,6 +3994,20 @@ CONSOLE_APP_MAIN
 		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 200
 		      && HttpCall("GET", ATLAS_PORT, "/atlas/no-such-map", vw_h, "").status == 404,
 		      "an unknown map is not found");
+		String atlas_policy_root = AppendFileName(s_root, "atlas");
+		String atlas_policy_path = AppendFileName(atlas_policy_root, "content_policy.json");
+		Check(SaveFile(atlas_policy_path, "{broken"), "atlas corrupt-policy HTTP fixture is written");
+		String atlas_load_error;
+		Check(!atlas_policy.Load(atlas_policy_root, atlas_load_error) && !atlas_policy.LoadError().IsEmpty(),
+		      "atlas corrupt policy fails to load");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "").status == 503,
+		      "atlas corrupt policy fails closed on the map index");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 503,
+		      "atlas corrupt policy fails closed on map detail");
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", anon_h, "").status == 503,
+		      "atlas corrupt policy fails closed on element detail");
+		FileDelete(atlas_policy_path);
+		Check(atlas_policy.Load(atlas_policy_root, atlas_load_error), "atlas policy store recovers after corrupt fixture removal");
 	}
 
 	// Command manifest: the registry shape, and the session routes checked against their descriptors.
@@ -2698,8 +4068,8 @@ CONSOLE_APP_MAIN
 			}
 			covered = covered && found;
 		}
-		// login, logout, sso/link and sso/provision (task 042) with the switch on.
-		Check(posts == 4 && covered && cmds.GetCount() == 5,
+		// login, logout, sso/link, sso/provision and explicit sso/consent with the switch on.
+		Check(posts == 5 && covered && cmds.GetCount() == 6,
 		      "session POST routes each have a manifest command with the same path and method");
 		TheWebEngine().SetMetaSso(false);
 		EngineSite quiet;
@@ -2777,10 +4147,45 @@ CONSOLE_APP_MAIN
 		store.SetRecord("paper-1", only);
 		Check(store.Save(err), "a content policy is saved");
 		ContentPolicyStore again;
-		Check(again.Load(dir, err) && again.Effective("news", "paper-1", CONTENT_PRIVATE).level == CONTENT_PUBLIC_ONLY
+		bool inherited_loaded = again.Load(dir, err);
+		Check(inherited_loaded && again.Effective("news", "paper-1", CONTENT_PRIVATE).level == CONTENT_PUBLIC_ONLY
 		      && again.Effective("news", "other", CONTENT_PRIVATE).level == CONTENT_PUBLIC
 		      && again.Effective("zoo", "other", CONTENT_PRIVATE).level == CONTENT_PRIVATE,
-		      "a saved policy reloads with record, module and site inheritance intact");
+		      "a saved policy reloads with record, module and site inheritance intact: " + err);
+		FileDelete(AppendFileName(dir, "content_policy.json"));
+		String valid = "{\"version\":1,\"site\":{\"level\":\"\",\"grants\":[]},\"modules\":{},\"records\":{}}";
+		bool valid_fixture_saved = SaveFile(AppendFileName(dir, "content_policy.json"), valid);
+		bool valid_fixture_loaded = valid_fixture_saved && again.Load(dir, err);
+		Check(valid_fixture_loaded, "a complete version-1 policy document loads: " + err);
+		Vector<String> malformed;
+		malformed << "{\"version\":1,\"site\":null,\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":[],\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":{\"news\":false},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":{\"news\":{\"level\":\"invalid\",\"grants\":[]}},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":{},\"records\":{\"paper\":[]}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":{},\"records\":{\"paper\":{\"level\":\"protected\",\"grants\":[false]}}}"
+		          << "{\"version\":1,\"site\":{\"level\":7,\"grants\":[]},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"unknown\",\"grants\":[]},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":{}},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[null]},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[{\"kind\":\"user\",\"value\":\"alice\",\"label\":\"\",\"revoked\":\"no\"}]},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[{\"kind\":\"mystery\",\"value\":\"x\",\"label\":\"\",\"revoked\":false}]},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[],\"ignored\":true},\"modules\":{},\"records\":{}}"
+		          << "{\"version\":1,\"site\":{\"level\":\"public\",\"grants\":[]},\"modules\":{},\"records\":{},\"ignored\":true}";
+		for(int i = 0; i < malformed.GetCount(); i++) {
+			SaveFile(AppendFileName(dir, "content_policy.json"), malformed[i]);
+			ContentPolicyStore bad;
+			Check(!bad.Load(dir, err) && !bad.LoadError().IsEmpty(),
+			      Format("malformed version-1 policy %d fails closed", i + 1));
+		}
+		Check(SaveFile(AppendFileName(dir, "content_policy.json"), "{broken"), "a corrupt policy fixture is written");
+		ContentPolicyStore corrupt;
+		Check(!corrupt.Load(dir, err) && !corrupt.LoadError().IsEmpty(),
+		      "a corrupt persisted policy fails loading with an actionable error");
+		Check(SaveFile(AppendFileName(dir, "content_policy.json"), "{\"version\":999}"), "an unsupported policy fixture is written");
+		ContentPolicyStore unsupported;
+		Check(!unsupported.Load(dir, err) && err.Find("version") >= 0,
+		      "an unsupported persisted policy version fails loading with a version error");
 		FileDelete(AppendFileName(dir, "content_policy.json"));
 		DeleteFolderDeep(dir);
 	}

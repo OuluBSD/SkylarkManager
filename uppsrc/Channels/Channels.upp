@@ -1,6 +1,7 @@
 description "Channels webapp: read-only AgentIPC frontend over the argv-only client\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	Skylark,
 	WebStorage,

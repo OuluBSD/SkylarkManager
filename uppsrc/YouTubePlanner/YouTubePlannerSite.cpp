@@ -1,4 +1,5 @@
 #include "YouTubePlannerSite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -74,13 +75,9 @@ int YouTubePlannerLevelIndex(const String& slug)
 static String YouTubePlannerStylesheet()
 {
 	return R"YTP(<style>
-:root { --bg: #f7f7f5; --fg: #1b1b1b; --muted: #5c5c5c; --line: #d0d0cc; --panel: #ffffff; --link: #1864ab; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-}
-:root[data-theme="dark"] { --bg: #151515; --fg: #ececec; --muted: #a0a0a0; --line: #3a3a3a; --panel: #1f1f1f; --link: #74c0fc; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; margin: 0; }
-main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+:root { --link: var(--accent); }
+body { background: var(--bg); color: var(--fg); font: var(--fs)/1.45 system-ui, sans-serif; margin: 0; }
+main { padding: calc(var(--pad) * 2); max-width: var(--wf-container-width); margin: 0 auto; }
 a { color: var(--link); }
 nav.ytp-nav { padding: 10px 16px; border-bottom: 1px solid var(--line); }
 nav.ytp-nav a { font-weight: 600; text-decoration: none; }
@@ -156,12 +153,12 @@ String YouTubePlannerLevelBody(int index)
 
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 	       "<title>" + Esc(title) + " - YouTubePlanner</title>" + YouTubePlannerStylesheet() + "</head>"
 	       "<body>"
-	       "<nav class=\"ytp-nav\"><a href=\"" + Esc(r.Site().Url("")) + "\">YouTubePlanner</a> " + SessionChromeHtml(r) + "</nav>"
-	       "<main>" + body + "</main></body></html>");
+	       "<nav class=\"ytp-nav\"><a href=\"" + Esc(r.Site().Url("")) + "\">YouTubePlanner</a> " + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</nav>"
+	       "<main>" + body + "</main>" + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static void Overview(WebRequest& r)

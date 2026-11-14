@@ -1,6 +1,7 @@
 description "arXiv-style Science webapp: read-only corpus frontend over flat paper records with validated structured article sidecars\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	WebStorage,
 	ForgeCore,

@@ -6,7 +6,9 @@ uses
 	WebStorage,
 	WebBroker,
 	WebAccounts,
-	WebAuth;
+	WebAuth,
+	WebsiteTemplates,
+	WebAudit;
 
 file
 	AGENTS.md,
@@ -28,6 +30,7 @@ file
 	WebEngine.cpp,
 	SessionRoutes.h,
 	SessionRoutes.cpp,
+	AuditRoutes.cpp,
 	CommandConsole.h,
 	CommandConsole.cpp,
 	Host readonly separator,

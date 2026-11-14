@@ -2,6 +2,7 @@
 #define _WebEngine_ContentPolicy_h_
 
 #include <Core/Core.h>
+#include "Request.h"
 
 NAMESPACE_UPP
 
@@ -14,7 +15,7 @@ NAMESPACE_UPP
 //   private      named users, groups or admins only
 //   public-only  anonymous visitors only; hidden from signed-in users
 //
-// A link token is kept only as a keyed hash. The plain token is never stored, logged or shown after creation.
+// The token is shown once in a URL fragment, exchanged by same-origin POST, and retained only as a keyed hash.
 
 enum ContentLevel {
 	CONTENT_UNSET,
@@ -45,7 +46,7 @@ struct ContentPolicy : Moveable<ContentPolicy> {
 	void Copy(const ContentPolicy& s) { level = s.level; grants.Clear(); grants.Append(s.grants); }
 
 	ValueMap ToValue() const;
-	static ContentPolicy FromValue(const ValueMap& m);
+	static bool FromValue(const ValueMap& m, ContentPolicy& policy, String& error);
 };
 
 // Who is asking. A link token is the plain secret as presented; it is hashed before comparison.
@@ -54,7 +55,8 @@ struct ContentPrincipal {
 	String         username;
 	Vector<String> groups;
 	bool           admin = false;
-	String         link_token;
+	String         link_token; // direct model/test input only; HTTP routes never read tokens from URLs
+	String         link_hash; // from a site/resource-bound short-lived HttpOnly cookie
 };
 
 // The keyed hash stored for a link token.
@@ -75,19 +77,28 @@ public:
 
 	bool Load(const String& data_root, String& error);
 	bool Save(String& error) const;
+	const String& LoadError() const { return load_error; }
 
 	const ContentPolicy& Site() const { return site; }
 	ContentPolicy&       Site()       { return site; }
 	ContentPolicy        Module(const String& name) const;
 	ContentPolicy        Record(const String& id) const;
+	bool                 HasRestrictiveRecordPolicies() const {
+		for(int i = 0; i < records.GetCount(); i++)
+			if(records[i].level != CONTENT_UNSET && records[i].level != CONTENT_PUBLIC)
+				return true;
+		return false;
+	}
 	void                 SetModule(const String& name, const ContentPolicy& p);
 	void                 SetRecord(const String& id, const ContentPolicy& p);
+	bool                 FindLinkGrant(const String& token, String& scope, String& id, String& hash) const;
 
 	// The effective policy for a record: record, then its module, then the site.
 	ContentPolicy Effective(const String& module, const String& record_id, ContentLevel fallback) const;
 
 private:
 	String                root;
+	String                load_error;
 	ContentPolicy         site;
 	VectorMap<String, ContentPolicy> modules;
 	VectorMap<String, ContentPolicy> records;
@@ -95,6 +106,17 @@ private:
 
 // The store for a site's data root, loaded on first use and reloaded when the file changes.
 ContentPolicyStore& ContentPolicyFor(const String& data_root);
+
+// Evaluate policy after a site's own authorization checks. Returns 0 when
+// visible, 404 when hidden, and 503 when the persisted policy is unreadable.
+int ContentPolicyReadStatus(WebRequest& request, const String& module, const String& record_id,
+                            ContentLevel fallback);
+void ContentPolicyApplyLinkSession(WebRequest& request, const String& module, const String& record_id,
+                                   ContentPrincipal& principal);
+
+// Exchanges a fragment-submitted token for a short-lived, site/scope-bound cookie.
+bool CreateContentPolicyLinkSession(WebRequest& request, const String& scope, const String& id,
+                                    const String& link_hash, int lifetime_seconds = 900);
 
 END_UPP_NAMESPACE
 

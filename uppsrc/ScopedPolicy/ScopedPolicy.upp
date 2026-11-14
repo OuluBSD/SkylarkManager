@@ -1,0 +1,13 @@
+description "Core-only scoped content policy types and evaluation";
+
+uses
+	Core;
+
+file
+	ScopedPolicy.h,
+	ScopedPolicy.cpp,
+	ScopedPolicyIdentity.cpp,
+	ScopedPolicyRegistry.cpp,
+	ScopedPolicyAncestry.cpp,
+	ScopedPolicySelfTests.cpp,
+	ScopedPolicyInternal.h;

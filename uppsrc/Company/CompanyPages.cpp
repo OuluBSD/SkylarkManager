@@ -1,4 +1,5 @@
 #include "CompanyViews.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -51,15 +52,15 @@ String CompanyViews::RenderPage(WebRequest& http, const String& title, const Str
 
 	StringBuffer b;
 	b << "<!doctype html><html lang=\"en\"" << ThemeHtmlAttrs(http) << "><head><meta charset=\"utf-8\">"
-	  << ThemeHeadScript()
+	  << ThemeHeadScript() << WebsitePageStyles()
 	  << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 	  << "<title>" << CompanyHtmlEsc(title) << " - Company Portal</title>"
 	  << "<style>\n" << CompanyCss() << "\n</style></head><body>"
 	  << "<header class=\"cs-nav\"><a href=\"/\" class=\"cs-brand\">Company Portal</a>"
-	  << "<nav>" << String(nav) << "</nav>" << SessionChromeHtml(http) << "</header>"
+	  << "<nav>" << String(nav) << "</nav>" << SessionChromeHtml(http) << WebsiteThemeControlsHtml() << "</header>"
 	  << "<main class=\"cs-main\">" << body_content << "</main>"
 	  << "<footer class=\"cs-footer\">Company Portal &bull; proposals, review, and compensation for human and AI contributors</footer>"
-	  << "</body></html>";
+	  << WebsiteThemeControlsScript() << "</body></html>";
 	return String(b);
 }
 
@@ -155,7 +156,8 @@ String CompanyViews::RenderFormError(const String& message)
 const char* CompanyCss()
 {
 	return
-	":root{--cs-accent:#00a1c5;--cs-accent-soft:rgba(0,161,197,0.12);--cs-emerald:#10b981;"
+	":root{--wf-bg-view:var(--panel);--wf-bg-alt:var(--control);--wf-fg-normal:var(--fg);--wf-fg-inactive:var(--muted);"
+	"--wf-border-color:var(--line);--cs-accent:var(--accent);--cs-accent-soft:rgba(0,161,197,0.12);--cs-emerald:#10b981;"
 	"--cs-amber:#f59e0b;--cs-red:#ef4444;--cs-violet:#8b5cf6}\n"
 	"main.wf-page-body{max-width:var(--wf-container-width,1500px);margin:0 auto}\n"
 	".cs-card{background:var(--wf-bg-view,#151d2b);border:1px solid var(--wf-border-color,rgba(0,161,197,0.2));"

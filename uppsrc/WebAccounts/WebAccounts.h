@@ -93,6 +93,13 @@ struct WebAccountSession : Moveable<WebAccountSession> {
 	}
 };
 
+struct WebAccountSessionSnapshot : Moveable<WebAccountSessionSnapshot> {
+	String user_id;
+	String audit_ref;
+	Time created;
+	Time expires;
+};
+
 class SiteAccounts {
 public:
 	SiteAccounts(const String& site_id, const String& data_root, int session_ttl_hours = 12);
@@ -127,10 +134,11 @@ public:
 	// a central identity has been validated and mapped (task 039). Always a new id.
 	StoreResult AdoptUserSession(const String& user_id, const String& ip,
 	                             String& session_id, String& csrf_token, String& error);
-	bool        ResolveSession(const String& raw_session_id, WebAccountSession& out);
+	bool        ResolveSession(const String& raw_session_id, WebAccountSession& out, bool *expired = NULL);
 	StoreResult Logout(const String& raw_session_id);
 	StoreResult SaveSessionData(const String& raw_session_id, const ValueMap& data);
 	void        CleanupExpired();
+	StoreResult ListActiveSessionSnapshots(Vector<WebAccountSessionSnapshot>& out, int offset = 0, int limit = 100);
 
 	// --- new session without login (guest session, e.g. to carry a CSRF
 	// token for anonymous forms). Still site-stamped. ---
@@ -145,6 +153,7 @@ public:
 	StoreResult DisableTotp(const String& user_id, const String& password);
 	// Verifies a live TOTP code or consumes one single-use recovery code.
 	bool        VerifyTotpOrRecovery(const String& user_id, const String& code);
+	bool        VerifyTotpOrRecovery(const String& user_id, const String& code, bool& used_recovery);
 	bool        TotpEnrolled(const String& user_id);
 
 	static bool ValidUsername(const String& username);

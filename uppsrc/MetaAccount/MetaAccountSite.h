@@ -22,9 +22,11 @@ public:
 		: accounts(accounts), grants(grants) {}
 
 	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override;
+	String AuditOperation(const String& op) const override;
 
 	static bool SupportedOp(const String& op) {
-		return op == "ping" || op == "authenticate" || op == "request-consent" || op == "request-provision"
+		return op == "ping" || op == "authenticate" || op == "request-consent" || op == "grant-consent"
+		    || op == "clear-provision-requests" || op == "request-provision"
 		    || op == "check-grant" || op == "revoke-grant" || op == "notify" || op == "resolve-session";
 	}
 

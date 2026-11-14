@@ -1,0 +1,9 @@
+description "Privacy-safe bounded audit event recorder for fenced webapps\377";
+
+uses
+	Core,
+	WebStorage;
+
+file
+	WebAudit.h,
+	WebAudit.cpp;

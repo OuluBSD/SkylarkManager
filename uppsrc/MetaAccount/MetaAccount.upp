@@ -7,7 +7,8 @@ uses
 	WebStorage,
 	WebBroker,
 	WebAccounts,
-	WebEngine;
+	WebEngine,
+	WebsiteTemplates;
 
 file
 	AGENTS.md,

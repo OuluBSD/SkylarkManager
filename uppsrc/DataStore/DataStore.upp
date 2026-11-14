@@ -1,0 +1,18 @@
+description "Core-only recursive JSON data store with atomic writes and recovery";
+
+uses
+	Core;
+
+file
+	DataStore.h,
+	DataStore.cpp,
+	DataStoreSchema.cpp,
+	DataStoreValidate.cpp,
+	DataStoreQuery.cpp,
+	DataStoreLock.cpp,
+	DataStoreJournal.cpp,
+	DataStorePrepare.cpp,
+	DataStoreWrite.cpp,
+	DataStoreInternal.h,
+	DataStoreSelfTests.cpp,
+	DataStoreSelfTests.h;

@@ -63,14 +63,14 @@ behind `WebEngineHost`, each on its own listener port, plus the Company module:
 | `meta` | 18214 | `<site-dir>/engine/meta` | `--meta-port` |
 | `channels` | 18215 | `<site-dir>/engine/channels` | `--channels-port`, `--agentipc-*` (see `uppsrc/Channels/AGENTS.md`) |
 | `financials` | 18216 | `<site-dir>/engine/financials` | `--financials-port`, `--set-financials-user`, `--financials-role` (see `uppsrc/Financials/AGENTS.md`) |
-| Company module (no site) | none | `<site-dir>/engine/company` | `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
+| `company` | 18219 | store `<site-dir>/engine/company`, site `<site-dir>/engine/company-site` | `--company-port`, `--company-root`, `--company-repos` (comma list; default none, so every proposal is refused) |
 
 **Host-compose direction only.** ManagerSkylark composes the Company module from
-`uppsrc/CompanyComposed`, which opens its own store under `--company-root`. The
-host reaches Company only through the broker surface (`create-proposal-draft`,
-`get-proposal-status`) that `CompanyBrokerSite` registers as `company`. It never
-touches the Company store, config or records. CompanySkylark never depends on
-this package or on ManagerSkylark (CompanySkylark AGENTS.md rule 8).
+`uppsrc/Company` (`CompanyComposed.h`), which opens its own store under `--company-root`. The
+host installs the Company site (`InstallCompanySite`) and reaches Company only through the broker
+surface (`create-proposal-draft`, `get-proposal-status`, and the read-only ledger and contract
+ops) that `CompanyBrokerSite` registers as `company`. It never touches the Company store, config or
+records. The Company package never depends on this application.
 
 Broker services registered in the composed process: `science` (ScienceService),
 `privatehub` (PrivateHub read and write operations, including `repo.info`),
@@ -81,8 +81,8 @@ request-consent, check-grant, revoke-grant, notify). TaskFoundry and the
 Financials site call them; the
 meta site owns the shared grant store under `<site-dir>/engine/grants`.
 
-Build note: ManagerSkylark links the Company packages, so its build needs the
-sibling source path: `uppbuilder -m CLANG -a ../CompanySkylark/uppsrc ManagerSkylark`.
+Build note: ManagerSkylark links the Company package from this assembly's `uppsrc/Company`;
+no sibling checkout or `-a` path is needed: `uppbuilder -m CLANG ManagerSkylark`.
 
 Accounts are per site. Provision them with
 `MANAGERSKYLARK_PRIVATEHUB_PASSWORD=... ManagerSkylark --set-privatehub-user NAME`,
@@ -180,13 +180,17 @@ Decided (planner, 2026-11-11): the file-writing and build-starting routes (`work
 
 ## GitHub views and witz templates
 
-The GitHub repo views render from witz templates in `templates/` (T02 brief 09
-and 09B). Interim state:
+The GitHub route handlers and views live in `uppsrc/GitHubForge` with their
+backend and witz templates. The package depends on generic `Manager` and
+`WebFramework` packages only; it receives navigation, auth/menu, local-store,
+markdown, and Agent dashboard services through `GitHubForgeHost`. The app
+installs those callbacks in `ManagerSkylarkApp` construction, keeping the
+dependency direction one-way.
 
 - Templates render through the app's default template root, which is the
-  executable's directory. `deploy-templates.sh <bin_dir>` copies `templates/*.witz`
-  there. Run it before a binary renders GitHub pages.
-- `GitHubTemplates.cpp` is the string bridge. `RenderGitHubTemplate` returns the
+  executable's directory. `uppsrc/GitHubForge/deploy-templates.sh <bin_dir>`
+  copies the package's `*.witz` there. Run it before a binary renders GitHub pages.
+- `GitHubForge/GitHubTemplates.cpp` is the string bridge. `RenderGitHubTemplate` returns the
   rendered text with `\n` line ends (witz produces `\r\n`), and throws if the
   template does not compile. `GitHubJsEscape` escapes values for single-quoted
   JavaScript literals inside `<script>` blocks.
@@ -234,3 +238,21 @@ and 09B). Interim state:
 ## Verification
 
 Build with `bin/build -m CLANG reference/ManagerSkylark` and run `./bin/CLANG/ManagerSkylark --test`.
+
+## Scoped policy boundary
+
+Pure policy types, registry validation/parsing, identity and ancestry logic,
+evaluation, redacted results, and policy self-tests live in the Core-only
+`uppsrc/ScopedPolicy` package. `ManagerSkylark` depends on that package. Site
+configuration loading, request/session enforcement, and application-specific
+adapters remain here; `ScopedPolicy` must not depend on this application.
+
+## DataStore boundary
+
+The recursive JSON engine, schema validation, source locks, atomic writes,
+journal, receipts, recovery, and hard-path self-tests live in the Core-only
+`uppsrc/DataStore` package. `ManagerSkylark` owns application configuration and
+provides registration-path setup; `SystemAuthService` remains the trusted
+issuer of private `DataWriteAuthorization` capabilities. DataStore must not
+depend on ManagerSkylark, SystemAuth, or WebEngine. Fixture-root loading is an
+internal self-test seam, not a production caller API.

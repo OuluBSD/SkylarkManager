@@ -1,4 +1,5 @@
 #include "ChannelsSite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -60,10 +61,10 @@ static bool RequireLogin(WebRequest& r)
 
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<title>" + Esc(title) + "</title></head><body>"
-	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Channels</a> " + SessionChromeHtml(r) + "</nav>"
-	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
+	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Channels</a> " + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</nav>"
+	       "<h1>" + Esc(title) + "</h1>" + body + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static void NodeProblem(WebRequest& r, const String& error)
@@ -72,6 +73,20 @@ static void NodeProblem(WebRequest& r, const String& error)
 	Page(r, "Channels unavailable",
 	     "<p>The AgentIPC node did not answer, so this view cannot be shown.</p>"
 	     "<p><code>" + Esc(error) + "</code></p>");
+}
+
+static bool ChannelPolicyStoreHealthy(WebRequest& r)
+{
+	if(ContentPolicyFor(r.Site().data_root).LoadError().IsEmpty())
+		return true;
+	r.Status(503, "content policy is unavailable");
+	Page(r, "Channels unavailable", "<p>Content policy is unavailable.</p>");
+	return false;
+}
+
+static bool ChannelPolicyVisible(WebRequest& r, const String& server, const String& channel)
+{
+	return ContentPolicyReadStatus(r, "channels", server + "/" + channel, CONTENT_PUBLIC) == 0;
 }
 
 static uint64 TickMs()
@@ -128,23 +143,30 @@ static void Overview(WebRequest& r)
 	}
 	if(!RequireLogin(r))
 		return;
+	if(!ChannelPolicyStoreHealthy(r))
+		return;
 	Vector<AgentIpcChannelInfo> infos;
 	String error;
 	if(!AgentIpcOverview(*s_cfg, 200 * 1024, infos, error)) {
 		NodeProblem(r, "no node records: " + error);
 		return;
 	}
+	Vector<AgentIpcChannelInfo> visible;
+	for(const AgentIpcChannelInfo& info : infos)
+		if(ChannelPolicyVisible(r, info.server, info.chan))
+			visible.Add(info);
 	StringBuffer b;
-	if(infos.IsEmpty())
+	if(visible.IsEmpty())
 		b << "<p>No channels have been used on the node yet.</p>";
 	else {
 		b << "<table><tr><th>Server</th><th>Channel</th><th>Last activity</th><th>Last sender</th></tr>";
-		for(const AgentIpcChannelInfo& info : infos)
+		for(const AgentIpcChannelInfo& info : visible) {
 			b << "<tr><td>" << Esc(info.server) << "</td><td><a href=\""
 			  << Esc(r.Site().Url("channels/*/*", Vector<Value>()
 			          << Value(info.server) << Value(info.chan)))
 			  << "\">#" << Esc(info.chan) << "</a></td><td>" << Esc(info.last_ts)
 			  << "</td><td>" << Esc(info.last_user) << "</td></tr>";
+		}
 		b << "</table>";
 	}
 	Page(r, "Channels", String(b));
@@ -158,6 +180,11 @@ static void ChannelView(WebRequest& r)
 	String chan = r.PathArg(1);
 	if(!AgentIpcValidChannel(chan)) {
 		r.Status(400, "invalid channel name");
+		return;
+	}
+	int policy_status = ContentPolicyReadStatus(r, "channels", server + "/" + chan, CONTENT_PUBLIC);
+	if(policy_status != 0) {
+		r.Status(policy_status, policy_status == 503 ? "content policy is unavailable" : "channel not found");
 		return;
 	}
 	Vector<AgentIpcMessage> msgs;

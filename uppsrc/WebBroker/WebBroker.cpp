@@ -35,6 +35,16 @@ BrokerResult WebBroker::Call(const BrokerCallContext& ctx, const BrokerCall& cal
 		r = svc->Handle(c, copy);
 	}
 	int ms = (int)(msecs() - t0);
+	if(audit_observer) {
+		String audit_correlation = "bc_" + ToLower(AsString(Uuid::Create()));
+		audit_correlation.Replace("-", "");
+		String audit_op = svc ? svc->AuditOperation(call.op) : String("unavailable");
+		try {
+			audit_observer->OnBrokerCall(c.from_site, c.to_site, audit_op, audit_correlation,
+			                             r.ok ? "ok" : "failure", min(ms, 3600000));
+		}
+		catch(...) {}
+	}
 
 	BrokerDiagEntry& e = diag.Add();
 	e.at = GetSysTime();

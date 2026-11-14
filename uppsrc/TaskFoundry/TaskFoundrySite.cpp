@@ -1,4 +1,5 @@
 #include "TaskFoundrySite.h"
+#include <WebsiteTemplates/WebsiteTemplates.h>
 
 NAMESPACE_UPP
 
@@ -121,12 +122,42 @@ static bool RequireLogin(WebRequest& r)
 	return false;
 }
 
+static void Failed(WebRequest& r, const TfResult& res);
+
+static bool PolicyRead(WebRequest& r, const String& module, const String& record)
+{
+	int status = ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC);
+	if(status == 0)
+		return true;
+	TfResult res;
+	res.status = status;
+	res.error = status == 503 ? "content policy is unavailable" : "content not found";
+	Failed(r, res);
+	return false;
+}
+
+static bool PolicyListVisible(WebRequest& r, const String& module, const String& record)
+{
+	return ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC) == 0;
+}
+
+static bool PolicyStoreHealthy(WebRequest& r)
+{
+	if(ContentPolicyFor(r.Site().data_root).LoadError().IsEmpty())
+		return true;
+	TfResult res;
+	res.status = 503;
+	res.error = "content policy is unavailable";
+	Failed(r, res);
+	return false;
+}
+
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + WebsitePageStyles() + 
 	       "<title>" + Esc(title) + "</title></head><body>"
-	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Board</a> " + SessionChromeHtml(r) + "</nav>"
-	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");
+	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Board</a> " + SessionChromeHtml(r) + WebsiteThemeControlsHtml() + "</nav>"
+	       "<h1>" + Esc(title) + "</h1>" + body + WebsiteThemeControlsScript() + "</body></html>");
 }
 
 static void Failed(WebRequest& r, const TfResult& res)
@@ -173,6 +204,8 @@ static void Board(WebRequest& r)
 	}
 	if(!RequireGrant(r))
 		return;
+	if(!PolicyStoreHealthy(r))
+		return;
 	TfResult res = Service().Board();
 	if(!res.ok) {
 		Failed(r, res);
@@ -183,6 +216,8 @@ static void Board(WebRequest& r)
 	ValueArray cands = res.payload.Get("candidates", ValueArray());
 	for(int i = 0; i < cands.GetCount(); i++) {
 		ValueMap c = cands[i];
+		if(!PolicyListVisible(r, "candidates", SiteText(c, "id")))
+			continue;
 		b << ListItem(r.Site().Url("candidates/*", IdArgs(SiteText(c, "id"))), SiteText(c, "title"),
 		              "paper " + SiteText(c, "paper_id"));
 	}
@@ -197,6 +232,8 @@ static void Board(WebRequest& r)
 	ValueArray props = res.payload.Get("proposals", ValueArray());
 	for(int i = 0; i < props.GetCount(); i++) {
 		ValueMap p = props[i];
+		if(!PolicyListVisible(r, "proposals", SiteText(p, "id")))
+			continue;
 		b << ListItem(r.Site().Url("proposals/*", IdArgs(SiteText(p, "id"))), SiteText(p, "title"), SiteText(p, "status"));
 	}
 	b << "</ul>";
@@ -224,6 +261,8 @@ static void CandidateDetail(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "candidates", id))
+		return;
 	TfResult res = Service().GetCandidate(id);
 	if(!res.ok) {
 		Failed(r, res);
@@ -241,6 +280,8 @@ static void CandidateDetail(WebRequest& r)
 static void CandidatePropose(WebRequest& r)
 {
 	if(!RequireGrant(r))
+		return;
+	if(!PolicyRead(r, "candidates", r.PathArg(0)))
 		return;
 	TfResult res = Service().CreateProposal(Actor(r), r.PathArg(0));
 	if(!res.ok) {
@@ -264,6 +305,8 @@ static void ProposalEditor(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "proposals", id))
+		return;
 	TfResult res = Service().GetProposal(id);
 	if(!res.ok) {
 		Failed(r, res);
@@ -321,6 +364,8 @@ static void ProposalEdit(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "proposals", id))
+		return;
 	double hours = ScanDouble(r.Param("estimated_hours"));
 	TfResult res = Service().EditProposal(Actor(r), id, r.Param("title"), r.Param("body"),
 	                                      r.Param("repository"), hours);
@@ -336,6 +381,8 @@ static void ProposalEvidence(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "proposals", id))
+		return;
 	TfResult res = Service().AttachEvidence(Actor(r), id, r.Param("kind"), r.Param("ref"), r.Param("node_id"));
 	if(!res.ok) {
 		Failed(r, res);
@@ -349,6 +396,8 @@ static void ProposalValidate(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "proposals", id))
+		return;
 	TfResult res = Service().Validate(Actor(r), id);
 	if(!res.ok) {
 		Failed(r, res);
@@ -362,6 +411,8 @@ static void ProposalSubmit(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String prop = r.PathArg(0);
+	if(!PolicyRead(r, "proposals", prop))
+		return;
 	TfResult res = Service().Submit(Actor(r), prop);
 	if(!res.ok) {
 		Failed(r, res);
@@ -379,6 +430,8 @@ static void SubmissionStatus(WebRequest& r)
 	if(!RequireGrant(r))
 		return;
 	String id = r.PathArg(0);
+	if(!PolicyRead(r, "submissions", id))
+		return;
 	TfResult res = Service().Status(Actor(r), id);
 	if(!res.ok) {
 		Failed(r, res);

@@ -1,5 +1,5 @@
 #include "ManagerSkylark.h"
-#include "DocsPortal.h"
+#include <WebDocs/DocsPortal.h>
 
 NAMESPACE_UPP
 

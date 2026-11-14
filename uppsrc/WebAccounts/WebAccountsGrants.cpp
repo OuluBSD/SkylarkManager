@@ -231,6 +231,49 @@ StoreResult WebGrants::ApproveProvision(const String& grant_id, const String& cl
 	return Store().Put(grant_id, StoreAsJson(g, true), rev, rev);
 }
 
+StoreResult WebGrants::GrantAs(const String& subject_user_id, const String& client_user_id,
+                               const String& client_site, const String& client_id,
+                               const Vector<String>& scopes, String& grant_id)
+{
+	if(subject_user_id.IsEmpty() || client_user_id.IsEmpty() || client_site.IsEmpty() ||
+	   client_id != "sso" || scopes.GetCount() != 1 || scopes[0] != "sso")
+		return StoreResult("SSO consent grant needs the sso client and only the sso scope");
+	String pending;
+	bool existed = false;
+	StoreResult requested = RequestGrantAs(subject_user_id, client_user_id, client_site, client_id,
+	                                       scopes, pending, existed);
+	if(!requested)
+		return requested;
+	WebAccountGrant g;
+	if(!GetGrant(pending, g))
+		return StoreResult("grant record is unavailable");
+	if(g.state == "granted") {
+		grant_id = pending;
+		return StoreResult(true);
+	}
+	if(g.state != "requested")
+		return StoreResult("grant is not available for consent");
+	StoreResult decided = Decide(pending, true);
+	if(decided)
+		grant_id = pending;
+	return decided;
+}
+
+StoreResult WebGrants::DenyPendingProvision(const String& subject_user_id, const String& client_site)
+{
+	Vector<WebAccountGrant> pending;
+	StoreResult listed = ListForSubject(subject_user_id, "requested", pending);
+	if(!listed)
+		return listed;
+	for(const WebAccountGrant& g : pending)
+		if(g.client_site == client_site && !g.proposed_username.IsEmpty()) {
+			StoreResult denied = Decide(g.grant_id, false);
+			if(!denied)
+				return denied;
+		}
+	return StoreResult(true);
+}
+
 StoreResult WebGrants::Revoke(const String& grant_id)
 {
 	WebAccountGrant g;

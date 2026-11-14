@@ -1,6 +1,7 @@
 description "Financials webapp: read-only manager-portal view over the Company broker surface\377";
 
 uses
+	WebsiteTemplates,
 	Core,
 	Skylark,
 	WebStorage,
