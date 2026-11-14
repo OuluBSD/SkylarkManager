@@ -622,6 +622,77 @@ static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
 	return String(b);
 }
 
+// The map as it stood at one version: the head's geometry, filtered to what was present then, with the
+// status it had then. An element removed before the head has no stored geometry, so it is not drawn here.
+static const AtlasSubjectState *StateOf(const Vector<AtlasSubjectState>& states, const char *kind, const String& id)
+{
+	for(const AtlasSubjectState& st : states)
+		if(st.kind == kind && st.id == id)
+			return &st;
+	return NULL;
+}
+
+static bool AtlasViewAt(WebRequest& r, const AtlasMap& head, const String& vid, AtlasMap& view, String& err)
+{
+	AtlasFamily f;
+	String frev;
+	if(!AtlasLoadFamily(r.Site().data_root, head.map, f, frev, err))
+		return false;
+	if(f.Find(vid) < 0) {
+		err = "unknown version: " + vid;
+		return false;
+	}
+	Vector<AtlasEvent> events;
+	if(!AtlasLoadEvents(r.Site().data_root, head.map, events, err))
+		return false;
+	Vector<AtlasSubjectState> states;
+	if(!AtlasStateAt(head, f, events, vid, states, err))
+		return false;
+	int at = f.Find(vid);
+	view.map = head.map;
+	view.version = "v" + AtlasVersionLabel(f.versions[at].code);
+	view.title = head.title;
+	view.world = head.world;
+	for(const AtlasElement& e : head.elements) {
+		const AtlasSubjectState *st = StateOf(states, "element", e.id);
+		if(!st || !st->present)
+			continue;
+		AtlasElement x = e;
+		if(st->status.GetCount())
+			x.status = st->status;
+		view.elements.Add(pick(x));
+	}
+	// A child whose parent was not there at this version is not there either.
+	for(bool again = true; again; ) {
+		again = false;
+		for(int i = view.elements.GetCount() - 1; i >= 0; i--) {
+			const String& parent = view.elements[i].parent;
+			if(parent.IsEmpty())
+				continue;
+			bool found = false;
+			for(const AtlasElement& p : view.elements)
+				found = found || p.id == parent;
+			if(!found) {
+				view.elements.Remove(i);
+				again = true;
+			}
+		}
+	}
+	for(const AtlasRoad& rd : head.roads) {
+		const AtlasSubjectState *st = StateOf(states, "road", rd.id);
+		if(!st || !st->present)
+			continue;
+		bool from = false, to = false;
+		for(const AtlasElement& e : view.elements) {
+			from = from || e.id == rd.from;
+			to = to || e.id == rd.to;
+		}
+		if(from && to)
+			view.roads.Add(rd);
+	}
+	return true;
+}
+
 static void MapView(WebRequest& r)
 {
 	String key = r.PathArg(0);
@@ -639,13 +710,29 @@ static void MapView(WebRequest& r)
 		Refuse(r, 404, "map not found");
 		return;
 	}
+	// ?vid= draws the map as it was at that version; the head stays the editable one.
+	String at = r.Param("vid");
+	AtlasMap view;
+	bool viewing = false;
+	String view_err;
+	if(!at.IsEmpty()) {
+		viewing = AtlasViewAt(r, m, at, view, view_err);
+		if(viewing)
+			FilterAtlasMap(r, key, view);
+	}
 	FilterAtlasMap(r, key, m);
-	bool edit = CanEdit(r);
+	AtlasMap& shown = viewing ? view : m;
+	bool edit = CanEdit(r) && !viewing;
 	StringBuffer b;
 	b << RoadmapPanel(r, m, key);
-	b << "<p class=\"meta\">" << Esc(m.map) << " " << Esc(m.version) << " &middot; " << m.elements.GetCount()
-	  << " elements &middot; " << m.roads.GetCount() << " roads &middot; world " << m.world.width << " x "
-	  << m.world.height << "</p>"
+	if(!at.IsEmpty() && !viewing)
+		b << "<p class=\"err\">" << Esc(view_err) << "</p>";
+	if(viewing)
+		b << "<p class=\"ad-note\">Showing the map at version " << Esc(view.version)
+		  << ". Read-only. <a href=\"" << Esc(r.Site().Url("atlas/" + key)) << "\">Back to the head</a>.</p>";
+	b << "<p class=\"meta\">" << Esc(shown.map) << " " << Esc(shown.version) << " &middot; " << shown.elements.GetCount()
+	  << " elements &middot; " << shown.roads.GetCount() << " roads &middot; world " << shown.world.width << " x "
+	  << shown.world.height << "</p>"
 	  << "<div id=\"atlas-stage\">"
 	  << "<div class=\"toolbar\"><span id=\"atlas-plane\"></span> <button type=\"button\" id=\"atlas-up\">Up</button> "
 	  << "<label><input type=\"checkbox\" id=\"atlas-contents\"> Show contents</label>"
@@ -663,13 +750,13 @@ static void MapView(WebRequest& r)
 	  << "<svg id=\"atlas-canvas\" role=\"img\" aria-label=\"Topology map\"></svg></div>"
 	  << "<noscript><p>The canvas needs JavaScript; the lists below show the same map.</p></noscript>"
 	  << "<h2>Elements</h2>";
-	ElementTable(r, m, key, b);
+	ElementTable(r, shown, key, b);
 	b << "<h2>Roads</h2>";
-	RoadTable(m, b);
+	RoadTable(shown, b);
 	if(edit)
 		b << EditPanel(r, m, key, rev);
 
-	String data = "{\"revision\":" + AsJSON(Value(rev)) + ",\"map\":" + StoreAsJson(m) + "}";
+	String data = "{\"revision\":" + AsJSON(Value(rev)) + ",\"map\":" + StoreAsJson(shown) + "}";
 	String attrs = String(" data-editable=\"") + (edit ? "1" : "0") + "\" data-csrf=\"" + Esc(r.CsrfToken())
 	             + "\" data-base=\"" + Esc(r.Site().Url("atlas/" + key)) + "\"";
 	b << "<script type=\"application/json\" id=\"atlas-data\">" << ScriptJson(data) << "</script>"
