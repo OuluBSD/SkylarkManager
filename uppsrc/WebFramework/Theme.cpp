@@ -440,4 +440,18 @@ String ThemeRegistry::GetClientScript()
 	return WebFrameworkAsset("theme.js");
 }
 
+String RenderThemeDensityControls()
+{
+	String h;
+	h << "<div class=\"wf-theme-controls\">\n"
+	  << "  <button id=\"wf-btn-theme\" class=\"wf-btn-icon\" onclick=\"WebThemeManager.toggleTheme()\" title=\"Cycle colour theme\">\n"
+	  << "    " << VividIcon::Get("palette", 16) << " <span class=\"wf-btn-label\">Theme</span>\n"
+	  << "  </button>\n"
+	  << "  <button id=\"wf-btn-density\" class=\"wf-btn-icon\" onclick=\"WebDensityManager.cycleDensity()\" title=\"Cycle layout density (Dense/Compact/Comfortable/Spacious)\">\n"
+	  << "    " << VividIcon::Get("sliders", 16) << " <span id=\"wf-density-label\">Density</span>\n"
+	  << "  </button>\n"
+	  << "</div>\n";
+	return h;
+}
+
 END_UPP_NAMESPACE

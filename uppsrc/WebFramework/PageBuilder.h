@@ -15,6 +15,8 @@ public:
 	PageBuilder& Template(const String& template_id) { this->template_id = template_id; return *this; }
 	PageBuilder& Theme(const String& theme_id) { this->theme_id = theme_id; return *this; }
 	PageBuilder& Density(DensityLevel level) { this->density = DensityConfig::ForLevel(level); return *this; }
+	// Host-wide choices from the wf_theme / wf_density cookies. Unknown values are ignored, so the page default stays.
+	PageBuilder& Preferences(const String& theme_cookie, const String& density_cookie);
 
 	PageBuilder& Content(const String& html) { slots.content = html; return *this; }
 	PageBuilder& Header(const String& html) { slots.header = html; return *this; }

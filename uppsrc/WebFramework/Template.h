@@ -24,6 +24,8 @@ struct DensityConfig : Moveable<DensityConfig> {
 	void Init(DensityLevel lvl);
 	String GetCssVariables() const;
 	static DensityConfig ForLevel(DensityLevel lvl);
+	// Parses a level name (dense, compact, comfortable, spacious). "none" and unknown names are refused.
+	static bool ParseName(const String& name, DensityLevel& lvl);
 	static String GetAllDensityStyles();
 	static String GetClientScript();
 };

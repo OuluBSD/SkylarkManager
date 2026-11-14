@@ -90,4 +90,7 @@ private:
 	static void EnsureBuiltIn();
 };
 
+// Theme and density buttons for the portal header. The theme and density scripts keep their labels current.
+String RenderThemeDensityControls();
+
 #endif

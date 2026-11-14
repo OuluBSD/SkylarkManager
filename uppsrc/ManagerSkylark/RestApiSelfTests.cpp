@@ -192,6 +192,31 @@ static bool PortalShellSelfTests()
 		Cerr() << "FAILED: a guest's log in does not open inside the frame and return to the selected hub\n";
 		return false;
 	}
+	// Theme and density live in the portal header, read host-wide cookies, and refuse values outside the whitelist.
+	String header_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
+	if(header_page.Find("id=\"wf-btn-theme\"") < 0 || header_page.Find("id=\"wf-btn-density\"") < 0
+	   || header_page.Find("id=\"wf-density-label\"") < 0 || header_page.Find("class=\"portal-head\"") < 0) {
+		Cerr() << "FAILED: portal header does not carry the theme and density controls\n";
+		return false;
+	}
+	String cookie_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites, "vivid-light", "spacious");
+	if(cookie_page.Find("data-theme=\"vivid-light\"") < 0 || cookie_page.Find("data-density=\"spacious\"") < 0) {
+		Cerr() << "FAILED: a valid wf_theme or wf_density cookie is not applied to the portal page\n";
+		return false;
+	}
+	String refused_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites, "<script>x</script>", "none");
+	if(refused_page.Find("data-theme=\"vivid-dark\"") < 0 || refused_page.Find("data-density=\"none\"") < 0
+	   || refused_page.Find("<script>x</script>") >= 0) {
+		Cerr() << "FAILED: an invalid wf_theme or wf_density cookie was not refused\n";
+		return false;
+	}
+	String webapp_nav = PageBuilder().Title("Webapp").Build();
+	if(webapp_nav.Find("id=\"wf-btn-theme\"") >= 0 || webapp_nav.Find("id=\"wf-btn-density\"") >= 0
+	   || webapp_nav.Find("id=\"wf-btn-sound\"") < 0) {
+		Cerr() << "FAILED: webapp top nav still carries theme and density buttons, or lost the sound button\n";
+		return false;
+	}
+
 	String fallback = RenderPortalShell("", "no-such-app", guest, sites);
 	if(fallback.Find("src=\"http://127.0.0.1:18217/\"") < 0) {
 		Cerr() << "FAILED: an unknown app does not fall back to the first webapp\n";

@@ -214,13 +214,8 @@ String MegaMenuRenderer::Render(const NavigationModel& nav, const String& brand_
 	h << "  </nav>\n";
 
 	// Right utility actions
+	// Theme and density are host-wide controls, rendered by the portal header (RenderThemeDensityControls).
 	h << "  <div class=\"wf-nav-actions\">\n"
-	  << "    <button id=\"wf-btn-theme\" class=\"wf-btn-icon\" onclick=\"WebThemeManager.toggleTheme()\" title=\"Toggle Vivid Dark / Light Theme\">\n"
-	  << "      " << VividIcon::Get("palette", 16) << " <span class=\"wf-btn-label\">Theme</span>\n"
-	  << "    </button>\n"
-	  << "    <button id=\"wf-btn-density\" class=\"wf-btn-icon\" onclick=\"WebDensityManager.cycleDensity()\" title=\"Cycle Layout Density (Dense/Compact/Comfortable)\">\n"
-	  << "      " << VividIcon::Get("sliders", 16) << " <span id=\"wf-density-label\">Density</span>\n"
-	  << "    </button>\n"
 	  << "    <button id=\"wf-btn-sound\" class=\"wf-btn-icon\" onclick=\"WebAudio.toggle()\" title=\"Toggle Procedural UI Sound Cues\">\n"
 	  << "      " << VividIcon::Get("volume", 16) << "\n"
 	  << "    </button>\n";

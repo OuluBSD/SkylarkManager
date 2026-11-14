@@ -147,6 +147,7 @@ static String PortalShellStyles()
 	"  .portal-login { padding: 0.3rem 0.6rem; border-radius: 8px; background: #4a4fb8; color: #ffffff; }\n"
 	"  .portal-main { position: relative; flex: 1 1 auto; min-width: 0; min-height: 420px; background: #0f1326; border-radius: 16px; overflow: hidden; }\n"
 	"  .portal-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }\n"
+	"  .portal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem 1rem; font-weight: 700; }\n"
 	"  .portal-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1rem; background: rgba(15,19,38,0.9); color: #d6dcf5; text-align: center; }\n"
 	"  .portal-status button, .portal-status a { padding: 0.4rem 0.9rem; border-radius: 8px; border: 0; background: #4a4fb8; color: #ffffff; text-decoration: none; cursor: pointer; font-size: 0.85rem; }\n"
 	"  @media (max-width: 640px) { .portal-shell { --rail-w: 3.25rem; --rail-w-open: 9rem; --rail-m: 0.25rem; } }\n"
@@ -213,7 +214,7 @@ static String PortalShellScript(const String& first_src)
 }
 
 String RenderPortalShell(const String& host_header, const String& selected, const UserSession& sess,
-                         const Vector<EngineSiteListing>& sites)
+                         const Vector<EngineSiteListing>& sites, const String& theme_cookie, const String& density_cookie)
 {
 	Vector<PortalWebapp> apps = ListWebapps(host_header, sites);
 	int sel = 0;
@@ -262,7 +263,8 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 	  .Template("megamenu")
 	  .Theme("vivid-dark")
 	  .Density(DENSITY_NONE)
-	  .Header("<div style=\"padding:0.6rem 1rem; font-weight:700;\">Manager Skylark</div>")
+	  .Preferences(theme_cookie, density_cookie)
+	  .Header("<div class=\"portal-head\"><span>Manager Skylark</span>" + RenderThemeDensityControls() + "</div>")
 	  .Content(content)
 	  .ExtraHead(PortalShellStyles())
 	  .ExtraScripts(PortalShellScript(apps[sel].url));
@@ -277,7 +279,9 @@ SKYLARK(PortalShellPage, "")
 		sess = SystemAuthService::BridgeMetaSession(http, false);
 	http.ContentType("text/html; charset=utf-8") << RenderPortalShell(http.GetHeader("host"), http["app"],
 	                                                               sess,
-	                                                               TheWebEngine().ListSites());
+	                                                               TheWebEngine().ListSites(),
+	                                                               SystemAuthService::ExtractCookie(http, "wf_theme"),
+	                                                               SystemAuthService::ExtractCookie(http, "wf_density"));
 }
 
 // Hub roots (task 035): each hub's address opens its first page, which carries

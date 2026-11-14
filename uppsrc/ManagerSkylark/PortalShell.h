@@ -37,6 +37,7 @@ String RenderShellAccountRow(const UserSession& sess, const String& return_url);
 // mounted while webapps switch; the frame shows a loading state and a timeout
 // fallback. An unknown or empty selection falls back to the first webapp.
 String RenderPortalShell(const String& host_header, const String& selected, const UserSession& sess,
-                         const Vector<EngineSiteListing>& sites);
+                         const Vector<EngineSiteListing>& sites,
+                         const String& theme_cookie = Null, const String& density_cookie = Null);
 
 #endif

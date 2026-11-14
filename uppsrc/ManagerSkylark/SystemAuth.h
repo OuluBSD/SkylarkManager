@@ -51,9 +51,10 @@ public:
 	static String RenderLoginForm(const String& redirect_url = "", const String& error_msg = "");
 	static String RenderUserMenu(const UserSession& session);
 
+	static String ExtractCookie(const Http& http, const char* name);
+
 private:
 	static VectorMap<String, UserSession>& Sessions();
-	static String ExtractCookie(const Http& http, const char* name);
 };
 
 END_UPP_NAMESPACE

@@ -46,6 +46,16 @@ String PageBuilder::GetSplashScreenHtml()
 		"</script>\n";
 }
 
+PageBuilder& PageBuilder::Preferences(const String& theme_cookie, const String& density_cookie)
+{
+	if(ThemeRegistry::Find(theme_cookie))
+		theme_id = theme_cookie;
+	DensityLevel lvl;
+	if(DensityConfig::ParseName(density_cookie, lvl))
+		density = DensityConfig::ForLevel(lvl);
+	return *this;
+}
+
 String PageBuilder::Build() const
 {
 	const WebTemplate* tmpl = TemplateRegistry::Find(template_id);

@@ -50,6 +50,16 @@ void DensityConfig::Init(DensityLevel lvl)
 	}
 }
 
+bool DensityConfig::ParseName(const String& name, DensityLevel& lvl)
+{
+	if(name == "dense") lvl = DENSITY_DENSE;
+	else if(name == "compact") lvl = DENSITY_COMPACT;
+	else if(name == "comfortable") lvl = DENSITY_COMFORTABLE;
+	else if(name == "spacious") lvl = DENSITY_SPACIOUS;
+	else return false;
+	return true;
+}
+
 DensityConfig DensityConfig::ForLevel(DensityLevel lvl)
 {
 	DensityConfig c;
