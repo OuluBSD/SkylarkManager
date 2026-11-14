@@ -55,7 +55,8 @@ static String ScriptJson(const String& json)
 static String NowIso()
 {
 	Time t = GetUtcTime();
-	return Format("%04d-%02d-%02dT%02d:%02d:%02dZ", t.year, t.month, t.day, t.hour, t.minute, t.second);
+	// The literal T and Z sit outside Format: Format reads a letter after a spec as its type.
+	return Format("%04d-%02d-%02d", t.year, t.month, t.day) + "T" + Format("%02d:%02d:%02d", t.hour, t.minute, t.second) + "Z";
 }
 
 static String JoinLines(const Vector<String>& v)
@@ -101,6 +102,113 @@ bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
                   const String& expected_revision, String& new_revision, String& error)
 {
 	StoreResult p = Maps(data_root).Put(key, StoreAsJson(m), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+static const char *ATLAS_FAMILY_COLLECTION = "families";
+static const char *ATLAS_EVENT_COLLECTION = "events";
+
+String AtlasNowIso()
+{
+	return NowIso();
+}
+
+static IRecordCollection& Families(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_FAMILY_COLLECTION);
+}
+
+static IRecordCollection& Events(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_EVENT_COLLECTION);
+}
+
+// An event document is keyed "<family>.<event id>", so one family's events list with one prefix.
+static String EventKey(const String& family, const String& event_id)
+{
+	return family + "." + event_id;
+}
+
+bool AtlasLoadFamily(const String& data_root, const String& family, AtlasFamily& f, String& revision, String& error)
+{
+	String json;
+	StoreResult g = Families(data_root).Get(family, json, revision);
+	if(!g.ok) {
+		error = "version list not found for " + family + "; initialise it with init";
+		return false;
+	}
+	f = AtlasFamily();
+	if(!LoadFromJson(f, json)) {
+		error = "version list is unreadable: " + family;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasSaveFamily(const String& data_root, const String& family, const AtlasFamily& f,
+                     const String& expected_revision, String& new_revision, String& error)
+{
+	StoreResult p = Families(data_root).Put(family, StoreAsJson(f), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasCreateFamily(const String& data_root, const String& family, const AtlasFamily& f,
+                       String& new_revision, String& error)
+{
+	String json, rev;
+	if(Families(data_root).Get(family, json, rev).ok) {
+		error = "a version list already exists for " + family;
+		return false;
+	}
+	return AtlasSaveFamily(data_root, family, f, String(), new_revision, error);
+}
+
+bool AtlasLoadEvents(const String& data_root, const String& family, Vector<AtlasEvent>& out, String& error)
+{
+	out.Clear();
+	Vector<String> ids;
+	StoreResult l = Events(data_root).List(ids);
+	if(!l.ok) {
+		error = l.error;
+		return false;
+	}
+	String prefix = family + ".";
+	for(const String& id : ids) {
+		if(!id.StartsWith(prefix))
+			continue;
+		String json, rev;
+		StoreResult g = Events(data_root).Get(id, json, rev);
+		if(!g.ok) {
+			error = g.error;
+			return false;
+		}
+		AtlasEvent e;
+		if(!LoadFromJson(e, json)) {
+			error = "event record is unreadable: " + id;
+			return false;
+		}
+		out.Add(pick(e));
+	}
+	return true;
+}
+
+// Events are append-only: an event id that is already stored is refused, never overwritten.
+bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEvent& e, String& error)
+{
+	String json, rev;
+	if(Events(data_root).Get(EventKey(family, e.id), json, rev).ok) {
+		error = "event already exists: " + e.id;
+		return false;
+	}
+	StoreResult p = Events(data_root).Put(EventKey(family, e.id), StoreAsJson(e), String(), rev);
 	if(!p.ok) {
 		error = p.error;
 		return false;
@@ -256,6 +364,21 @@ static void MapList(WebRequest& r)
 static bool AtlasElementVisible(WebRequest& r, const String& key, const String& element_id)
 {
 	return AtlasPolicyStatus(r, "elements", key + ":element:" + element_id) == 0;
+}
+
+bool AtlasCanEdit(WebRequest& r)
+{
+	return CanEdit(r);
+}
+
+bool AtlasMapReadable(WebRequest& r, const String& head_key)
+{
+	return AtlasPolicyStatus(r, "maps", head_key) == 0;
+}
+
+bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& element_id)
+{
+	return AtlasElementVisible(r, head_key, element_id);
 }
 
 static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map)
@@ -760,6 +883,7 @@ void InstallAtlasSite(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-element", "GET", "atlas/*/element/*", "session account",
 	                                        "html", "One element: containment path, roads, goal",
 	                                        { "map:string:required", "id:string:required" }));
+	InstallAtlasApi(site);
 }
 
 END_UPP_NAMESPACE

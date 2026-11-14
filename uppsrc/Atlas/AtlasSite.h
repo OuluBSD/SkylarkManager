@@ -23,6 +23,25 @@ bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, Strin
 bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
                   const String& expected_revision, String& new_revision, String& error);
 
+// Version lists and events, per map family ("pkr"). The head document is named by the list.
+String AtlasNowIso();
+bool AtlasLoadFamily(const String& data_root, const String& family, AtlasFamily& f, String& revision, String& error);
+bool AtlasSaveFamily(const String& data_root, const String& family, const AtlasFamily& f,
+                     const String& expected_revision, String& new_revision, String& error);
+// Creates a family's list; refused, with error "already exists", when one is stored.
+bool AtlasCreateFamily(const String& data_root, const String& family, const AtlasFamily& f,
+                       String& new_revision, String& error);
+bool AtlasLoadEvents(const String& data_root, const String& family, Vector<AtlasEvent>& out, String& error);
+bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEvent& e, String& error);
+
+// Access for the API: the role check, the map's content policy, and per-element visibility.
+bool AtlasCanEdit(WebRequest& r);
+bool AtlasMapReadable(WebRequest& r, const String& head_key);
+bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& element_id);
+
+// The JSON API of the roadmap (AtlasApi.cpp); called by InstallAtlasSite.
+void InstallAtlasApi(EngineSite& site);
+
 // Self-tests: the pure model (validation, containment, seed parser and layout)
 // and a store round trip under scratch_dir. Run from ManagerSkylark --test.
 bool RunAtlasSelfTests(const String& scratch_dir);

@@ -101,6 +101,103 @@ Vector<String> AtlasPath(const AtlasMap& m, const String& id);
 // Element ids whose parent is the given plane ("" = world plane).
 Vector<String> AtlasPlaneElements(const AtlasMap& m, const String& plane);
 
+// A version is one int32 code: major*1000000 + minor*1000 + patch, each part 0..999, so the largest
+// is 999.999.999 = 999999999. -1 is "no version". v1.0.0 = 1000000, v1.2.3 = 1002003.
+const int ATLAS_VERSION_UNSET = -1;
+const int ATLAS_VERSION_MAX   = 999999999;
+
+// "a.b.c", with an optional leading 'v'. Returns the code, or ATLAS_VERSION_UNSET when malformed.
+int    AtlasVersionCode(const String& label);
+// "a.b.c" for a valid code.
+String AtlasVersionLabel(int code);
+bool   AtlasVersionValid(int code);
+
+// One version of a map family. The vid is stable; the code can change, and events refer to vid only.
+struct AtlasVersion : Moveable<AtlasVersion> {
+	String vid;
+	int    code = ATLAS_VERSION_UNSET;
+
+	void Jsonize(JsonIO& io) { io("vid", vid)("code", code); }
+};
+
+// The version list of one map family ("pkr"). versions are ascending by code. The last one is the
+// head: the head document holds its topology, and every earlier version is rebuilt by replaying events.
+struct AtlasFamily : Moveable<AtlasFamily> {
+	String               head_key;   // document key of the head map, e.g. "pkr-v0.0.1"
+	Vector<AtlasVersion> versions;
+
+	void Jsonize(JsonIO& io) { io("head", head_key)("versions", versions); }
+
+	int Find(const String& vid) const;  // index in versions, -1 when absent
+	int Head() const { return versions.GetCount() - 1; }
+};
+
+// Inserts a label, bumping every version at or above it at the insert level: inserting 0.0.2 moves
+// the old 0.0.2 to 0.0.3 and the old 0.0.3 to 0.0.4; inserting 0.1.0 moves 0.1.x to 0.2.x. Nothing
+// changes when the label is malformed, the vid exists, or a bump would pass 999 in a part.
+bool AtlasInsertVersion(AtlasFamily& f, const String& label, const String& vid, String& err);
+// Relabels one version. Refused, with nothing changed, when another version already has the code.
+bool AtlasRenameVersion(AtlasFamily& f, const String& vid, const String& label, String& err);
+
+// One change to one subject at one version. The snapshot fields keep a removed or disconnected
+// subject readable at the versions before it went away, since its document entry is gone.
+struct AtlasEvent : Moveable<AtlasEvent> {
+	String id;
+	String at;            // ISO-8601 UTC
+	String actor;
+	String vid;
+	String subject_kind;  // element | road
+	String subject_id;
+	String type;          // created | removed | stage | status | note | connected | disconnected | modified
+	String stage;         // for stage events
+	String status;        // for status events
+	String text;          // multi-line note
+	String name;          // snapshot: element name
+	String from, to;      // snapshot: road endpoints
+	String road_kind;     // snapshot: road kind
+	String label;         // snapshot: road label
+	Vector<String> requires;  // atom names the event needs; "!name" needs it false
+	Vector<String> effects;   // atom names the event sets; "!name" clears it
+
+	void Jsonize(JsonIO& io) {
+		io("id", id)("at", at)("actor", actor)("vid", vid)("subject_kind", subject_kind)
+		  ("subject_id", subject_id)("type", type)("stage", stage)("status", status)("text", text)
+		  ("name", name)("from", from)("to", to)("road_kind", road_kind)("label", label)
+		  ("requires", requires)("effects", effects);
+	}
+};
+
+// Stages, in the pull-request order: planned -> implementation_research -> implementation -> trials -> merge_to_master.
+bool AtlasStageValid(const String& stage);
+int  AtlasStageRank(const String& stage);     // position in the order, -1 when not a stage
+bool AtlasEventTypeValid(const String& subject_kind, const String& type);
+void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMap& head, AtlasCheck& out);
+
+// The state of one subject at one version.
+struct AtlasSubjectState : Moveable<AtlasSubjectState> {
+	String kind, id, name;
+	String from, to, road_kind, label;
+	String stage, status;
+	bool   present = false;   // exists at the version
+	bool   in_head = false;   // exists in the head document
+	bool   scheduled = false; // has at least one event; unscheduled subjects exist at the head only
+	int    notes = 0;         // note events up to the version
+
+	void Jsonize(JsonIO& io) {
+		io("kind", kind)("id", id)("name", name)("from", from)("to", to)("road_kind", road_kind)
+		  ("label", label)("stage", stage)("status", status)("present", present)("in_head", in_head)
+		  ("scheduled", scheduled)("notes", notes);
+	}
+};
+
+// The map as it stood at one version: the events of versions up to and including vid, replayed over
+// the head document. Subjects removed from the head still appear when events show them.
+// Sorts events by version, then time, then id: the order the replay applies them in.
+void AtlasSortEvents(Vector<AtlasEvent>& events, const AtlasFamily& f);
+
+bool AtlasStateAt(const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
+                  const String& vid, Vector<AtlasSubjectState>& out, String& err);
+
 // Seed import. The transcription format (one element or edge per line):
 //   * '#' lines and blank lines are ignored.
 //   * Containment: 2 spaces per level, then "Name | kind | status | note".

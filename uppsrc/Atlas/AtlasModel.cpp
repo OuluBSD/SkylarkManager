@@ -514,4 +514,339 @@ void AtlasCoverWorld(AtlasMap& m)
 		m.world.height = max(m.world.height, h + PAD);
 }
 
+// ---------------------------------------------------------------------------
+// Version codes and the version list.
+// ---------------------------------------------------------------------------
+
+static const int VERSION_PART_MAX = 999;
+
+// Part k of a code: 0 major, 1 minor, 2 patch.
+static int PartOf(int code, int level)
+{
+	if(level == 0)
+		return code / 1000000;
+	if(level == 1)
+		return (code / 1000) % 1000;
+	return code % 1000;
+}
+
+// The code step of one part: a bump at level k adds this to a code.
+static int StepOf(int level)
+{
+	return level == 0 ? 1000000 : level == 1 ? 1000 : 1;
+}
+
+bool AtlasVersionValid(int code)
+{
+	return code >= 0 && code <= ATLAS_VERSION_MAX;
+}
+
+int AtlasVersionCode(const String& label)
+{
+	String text = label.StartsWith("v") ? label.Mid(1) : label;
+	Vector<String> p = Split(text, '.');
+	if(p.GetCount() != 3)
+		return ATLAS_VERSION_UNSET;
+	int part[3];
+	for(int i = 0; i < 3; i++) {
+		const String& d = p[i];
+		if(d.IsEmpty() || d.GetCount() > 3)
+			return ATLAS_VERSION_UNSET;
+		int v = 0;
+		for(int k = 0; k < d.GetCount(); k++) {
+			if(d[k] < '0' || d[k] > '9')
+				return ATLAS_VERSION_UNSET;
+			v = v * 10 + (d[k] - '0');
+		}
+		if(v > VERSION_PART_MAX)
+			return ATLAS_VERSION_UNSET;
+		part[i] = v;
+	}
+	return part[0] * 1000000 + part[1] * 1000 + part[2];
+}
+
+String AtlasVersionLabel(int code)
+{
+	return Format("%d.%d.%d", PartOf(code, 0), PartOf(code, 1), PartOf(code, 2));
+}
+
+int AtlasFamily::Find(const String& vid) const
+{
+	for(int i = 0; i < versions.GetCount(); i++)
+		if(versions[i].vid == vid)
+			return i;
+	return -1;
+}
+
+// Sorts the list ascending by code. Codes are integers, so this is one comparison.
+static void SortVersions(Vector<AtlasVersion>& list)
+{
+	for(int i = 1; i < list.GetCount(); i++)
+		for(int k = i; k > 0 && list[k - 1].code > list[k].code; k--) {
+			AtlasVersion tmp = pick(list[k - 1]);
+			list[k - 1] = pick(list[k]);
+			list[k] = pick(tmp);
+		}
+}
+
+bool AtlasInsertVersion(AtlasFamily& f, const String& label, const String& vid, String& err)
+{
+	int code = AtlasVersionCode(label);
+	if(code == ATLAS_VERSION_UNSET) {
+		err = "version label must be a.b.c with each part 0..999: " + label;
+		return false;
+	}
+	if(code == 0) {
+		err = "0.0.0 is not a version";
+		return false;
+	}
+	if(!AtlasIdValid(vid)) {
+		err = "version id is not valid: " + vid;
+		return false;
+	}
+	if(f.Find(vid) >= 0) {
+		err = "version id already exists: " + vid;
+		return false;
+	}
+	// The insert level is the last non-zero part: inserting 0.1.0 bumps the minor, 0.0.2 the patch.
+	int level = PartOf(code, 0) ? 0 : PartOf(code, 1) ? 1 : 2;
+	int unit = StepOf(level) * 1000;  // the codes that share the higher parts
+	// Bump into a copy first, so a refusal leaves f untouched.
+	Vector<AtlasVersion> next;
+	for(const AtlasVersion& v : f.versions) {
+		AtlasVersion copy;
+		copy.vid = v.vid;
+		copy.code = v.code;
+		bool same_prefix = v.code / unit == code / unit;
+		if(same_prefix && PartOf(v.code, level) >= PartOf(code, level)) {
+			if(PartOf(v.code, level) + 1 > VERSION_PART_MAX) {
+				err = "inserting " + label + " would move " + AtlasVersionLabel(v.code) + " past 999";
+				return false;
+			}
+			copy.code = v.code + StepOf(level);
+		}
+		next.Add(pick(copy));
+	}
+	AtlasVersion added;
+	added.vid = vid;
+	added.code = code;
+	next.Add(pick(added));
+	SortVersions(next);
+	f.versions = pick(next);
+	return true;
+}
+
+bool AtlasRenameVersion(AtlasFamily& f, const String& vid, const String& label, String& err)
+{
+	int code = AtlasVersionCode(label);
+	if(code == ATLAS_VERSION_UNSET) {
+		err = "version label must be a.b.c with each part 0..999: " + label;
+		return false;
+	}
+	int i = f.Find(vid);
+	if(i < 0) {
+		err = "unknown version: " + vid;
+		return false;
+	}
+	for(int k = 0; k < f.versions.GetCount(); k++)
+		if(k != i && f.versions[k].code == code) {
+			err = "another version already has the label " + label;
+			return false;
+		}
+	f.versions[i].code = code;
+	SortVersions(f.versions);
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Events.
+// ---------------------------------------------------------------------------
+
+bool AtlasStageValid(const String& stage)
+{
+	return AtlasStageRank(stage) >= 0;
+}
+
+int AtlasStageRank(const String& stage)
+{
+	static const char *order[] = { "planned", "implementation_research", "implementation", "trials", "merge_to_master" };
+	for(int i = 0; i < 5; i++)
+		if(stage == order[i])
+			return i;
+	return -1;
+}
+
+bool AtlasEventTypeValid(const String& subject_kind, const String& type)
+{
+	if(subject_kind == "element")
+		return type == "created" || type == "removed" || type == "stage" || type == "status" || type == "note";
+	if(subject_kind == "road")
+		return type == "connected" || type == "disconnected" || type == "modified" || type == "note";
+	return false;
+}
+
+// Whether the subject must exist in the head document. A removal, a disconnection, and the creation of
+// an element or road that later went away do not need it; a change to a live subject does.
+static bool NeedsHeadSubject(const String& type)
+{
+	return type == "note" || type == "stage" || type == "status" || type == "modified";
+}
+
+void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMap& head, AtlasCheck& out)
+{
+	if(!AtlasIdValid(e.id))
+		out.errors.Add("event id is not valid: " + e.id);
+	if(f.Find(e.vid) < 0)
+		out.errors.Add("event " + e.id + " names an unknown version: " + e.vid);
+	if(!AtlasEventTypeValid(e.subject_kind, e.type)) {
+		out.errors.Add("event " + e.id + ": type '" + e.type + "' does not apply to a " + e.subject_kind);
+		return;
+	}
+	if(e.subject_id.IsEmpty())
+		out.errors.Add("event " + e.id + " names no subject");
+	else if(NeedsHeadSubject(e.type)) {
+		bool found = e.subject_kind == "element" ? head.FindElement(e.subject_id) >= 0
+		                                          : head.FindRoad(e.subject_id) >= 0;
+		if(!found)
+			out.errors.Add("event " + e.id + ": " + e.subject_kind + " " + e.subject_id + " is not in the head map");
+	}
+	if(e.type == "stage" && !AtlasStageValid(e.stage))
+		out.errors.Add("event " + e.id + ": unknown stage '" + e.stage + "'");
+	if(e.type == "status" && !AtlasStatusValid(e.status))
+		out.errors.Add("event " + e.id + ": unknown status '" + e.status + "'");
+	if(e.subject_kind == "road" && (e.type == "connected" || e.type == "disconnected")
+	   && (e.from.IsEmpty() || e.to.IsEmpty()))
+		out.errors.Add("event " + e.id + ": a road event needs both endpoints in the snapshot");
+}
+
+// ---------------------------------------------------------------------------
+// State replay.
+// ---------------------------------------------------------------------------
+
+static int FindSubject(const Vector<AtlasSubjectState>& v, const String& kind, const String& id)
+{
+	for(int i = 0; i < v.GetCount(); i++)
+		if(v[i].kind == kind && v[i].id == id)
+			return i;
+	return -1;
+}
+
+// Whether event a happens before event b: version order, then time, then id.
+static bool EventBefore(const AtlasEvent& a, const AtlasEvent& b, const AtlasFamily& f)
+{
+	int ia = f.Find(a.vid), ib = f.Find(b.vid);
+	if(ia != ib)
+		return ia < ib;
+	if(a.at != b.at)
+		return a.at < b.at;
+	return a.id < b.id;
+}
+
+// Event indices of the events whose versions are known, sorted by EventBefore.
+static Vector<int> OrderedEvents(const Vector<AtlasEvent>& events, const AtlasFamily& f)
+{
+	Vector<int> order;
+	for(int i = 0; i < events.GetCount(); i++)
+		if(f.Find(events[i].vid) >= 0)
+			order.Add(i);
+	for(int i = 1; i < order.GetCount(); i++)
+		for(int k = i; k > 0 && EventBefore(events[order[k]], events[order[k - 1]], f); k--) {
+			int tmp = order[k];
+			order[k] = order[k - 1];
+			order[k - 1] = tmp;
+		}
+	return order;
+}
+
+void AtlasSortEvents(Vector<AtlasEvent>& events, const AtlasFamily& f)
+{
+	for(int i = 1; i < events.GetCount(); i++)
+		for(int k = i; k > 0 && EventBefore(events[k], events[k - 1], f); k--) {
+			AtlasEvent tmp = pick(events[k]);
+			events[k] = pick(events[k - 1]);
+			events[k - 1] = pick(tmp);
+		}
+}
+
+static void Snapshot(AtlasSubjectState& s, const AtlasEvent& e)
+{
+	if(e.name.GetCount())
+		s.name = e.name;
+	if(e.from.GetCount())
+		s.from = e.from;
+	if(e.to.GetCount())
+		s.to = e.to;
+	if(e.road_kind.GetCount())
+		s.road_kind = e.road_kind;
+	if(e.label.GetCount())
+		s.label = e.label;
+}
+
+bool AtlasStateAt(const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
+                  const String& vid, Vector<AtlasSubjectState>& out, String& err)
+{
+	int t = f.Find(vid);
+	if(t < 0) {
+		err = "unknown version: " + vid;
+		return false;
+	}
+	bool is_head = t == f.Head();
+	out.Clear();
+	for(const AtlasElement& e : head.elements) {
+		AtlasSubjectState s;
+		s.kind = "element";
+		s.id = e.id;
+		s.name = e.name;
+		s.status = e.status;
+		s.in_head = true;
+		out.Add(pick(s));
+	}
+	for(const AtlasRoad& r : head.roads) {
+		AtlasSubjectState s;
+		s.kind = "road";
+		s.id = r.id;
+		s.from = r.from;
+		s.to = r.to;
+		s.road_kind = r.kind;
+		s.label = r.label;
+		s.in_head = true;
+		out.Add(pick(s));
+	}
+	Vector<int> order = OrderedEvents(events, f);
+	// Every subject with an event is scheduled, whatever version the event is at.
+	for(int k : order) {
+		const AtlasEvent& e = events[k];
+		int i = FindSubject(out, e.subject_kind, e.subject_id);
+		if(i < 0) {
+			AtlasSubjectState s;
+			s.kind = e.subject_kind;
+			s.id = e.subject_id;
+			out.Add(pick(s));
+			i = out.GetCount() - 1;
+		}
+		out[i].scheduled = true;
+	}
+	// Unscheduled subjects exist at the head only; scheduled ones start absent and follow their events.
+	for(AtlasSubjectState& s : out)
+		s.present = !s.scheduled && is_head;
+	for(int k : order) {
+		const AtlasEvent& e = events[k];
+		if(f.Find(e.vid) > t)
+			continue;
+		AtlasSubjectState& s = out[FindSubject(out, e.subject_kind, e.subject_id)];
+		Snapshot(s, e);
+		if(e.type == "created" || e.type == "connected")
+			s.present = true;
+		else if(e.type == "removed" || e.type == "disconnected")
+			s.present = false;
+		else if(e.type == "stage")
+			s.stage = e.stage;
+		else if(e.type == "status")
+			s.status = e.status;
+		else if(e.type == "note")
+			s.notes++;
+	}
+	return true;
+}
+
 END_UPP_NAMESPACE

@@ -14,5 +14,6 @@ file
 	AtlasModel.cpp,
 	AtlasSite.h,
 	AtlasSite.cpp,
+	AtlasApi.cpp,
 	AtlasClient.cpp,
 	AtlasSelfTests.cpp;

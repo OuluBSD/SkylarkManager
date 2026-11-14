@@ -283,6 +283,228 @@ static void StoreChecks(const String& scratch)
 	      "a missing map is reported as not found");
 }
 
+static AtlasVersion Ver(const char *vid, const char *label)
+{
+	AtlasVersion v;
+	v.vid = vid;
+	v.code = AtlasVersionCode(label);
+	return v;
+}
+
+static String LabelOf(const AtlasFamily& f, const char *vid)
+{
+	int i = f.Find(vid);
+	return i < 0 ? String("<none>") : AtlasVersionLabel(f.versions[i].code);
+}
+
+// Version codes: parsing, formatting and the bump rule with its refusals.
+static void VersionChecks()
+{
+	Check(AtlasVersionCode("0.0.1") == 1 && AtlasVersionCode("v1.0.0") == 1000000,
+	      "a label becomes a code: 0.0.1 is 1, v1.0.0 is 1000000");
+	Check(AtlasVersionCode("1.2.3") == 1002003 && AtlasVersionLabel(1002003) == "1.2.3",
+	      "1.2.3 is code 1002003 and back");
+	Check(AtlasVersionCode("999.999.999") == ATLAS_VERSION_MAX && AtlasVersionValid(ATLAS_VERSION_MAX),
+	      "999.999.999 is the largest code, 999999999");
+	Check(AtlasVersionCode("1.2") == ATLAS_VERSION_UNSET && AtlasVersionCode("1.2.1000") == ATLAS_VERSION_UNSET
+	      && AtlasVersionCode("1000.0.0") == ATLAS_VERSION_UNSET && AtlasVersionCode("1.x.0") == ATLAS_VERSION_UNSET,
+	      "a label needs three parts, each 0..999");
+	Check(!AtlasVersionValid(ATLAS_VERSION_UNSET) && AtlasVersionCode("0.0.0") == 0,
+	      "-1 is no version, and 0.0.0 is a code but not an insertable version");
+
+	AtlasFamily f;
+	f.head_key = "t-v0.0.1";
+	String err;
+	Check(AtlasInsertVersion(f, "0.0.1", "v1", err) && f.versions.GetCount() == 1, "the first version is added");
+	Check(AtlasInsertVersion(f, "0.0.2", "v2", err) && LabelOf(f, "v2") == "0.0.2" && f.Head() == 1,
+	      "a version after the head is added without bumping");
+
+	Check(AtlasInsertVersion(f, "0.0.2", "v3", err) && LabelOf(f, "v3") == "0.0.2" && LabelOf(f, "v2") == "0.0.3",
+	      "inserting 0.0.2 moves the old 0.0.2 to 0.0.3");
+	Check(AtlasInsertVersion(f, "0.0.3", "v4", err) && LabelOf(f, "v4") == "0.0.3" && LabelOf(f, "v2") == "0.0.4"
+	      && LabelOf(f, "v3") == "0.0.2", "inserting 0.0.3 moves 0.0.3 to 0.0.4 and leaves 0.0.2");
+	Check(f.versions[0].vid == "v1" && f.versions[1].vid == "v3" && f.versions[2].vid == "v4" && f.versions[3].vid == "v2",
+	      "versions stay sorted by label after an insert");
+
+	Check(AtlasInsertVersion(f, "0.1.0", "v5", err) && LabelOf(f, "v5") == "0.1.0" && LabelOf(f, "v2") == "0.0.4",
+	      "inserting 0.1.0 leaves the 0.0.x versions alone");
+	Check(AtlasInsertVersion(f, "0.1.0", "v6", err) && LabelOf(f, "v6") == "0.1.0" && LabelOf(f, "v5") == "0.2.0",
+	      "inserting 0.1.0 again moves 0.1.x to 0.2.x");
+	Check(AtlasInsertVersion(f, "1.0.0", "v7", err) && f.Head() == 6 && f.versions[6].vid == "v7",
+	      "1.0.0 becomes the head");
+
+	AtlasFamily full;
+	full.versions.Add(pick(Ver("top", "0.0.999")));
+	Check(!AtlasInsertVersion(full, "0.0.999", "x", err) && err.Find("past 999") >= 0 && LabelOf(full, "top") == "0.0.999",
+	      "a bump past 999 is refused and changes nothing");
+	Check(!AtlasInsertVersion(f, "0.0.0", "z1", err) && !AtlasInsertVersion(f, "1.2", "z2", err)
+	      && !AtlasInsertVersion(f, "0.0.2", "v2", err), "0.0.0, a short label and a repeated vid are refused");
+
+	AtlasFamily r;
+	r.versions.Add(pick(Ver("a", "0.0.1")));
+	r.versions.Add(pick(Ver("b", "0.0.2")));
+	Check(!AtlasRenameVersion(r, "b", "0.0.1", err) && LabelOf(r, "b") == "0.0.2",
+	      "a rename onto another version's label is refused");
+	Check(AtlasRenameVersion(r, "b", "0.0.5", err) && LabelOf(r, "b") == "0.0.5", "a rename to a free label applies");
+}
+
+static AtlasEvent Ev(const char *id, const char *vid, const char *kind, const char *subject, const char *type)
+{
+	AtlasEvent e;
+	e.id = id;
+	e.at = "2026-01-01T00:00:00Z";
+	e.vid = vid;
+	e.subject_kind = kind;
+	e.subject_id = subject;
+	e.type = type;
+	return e;
+}
+
+static AtlasSubjectState StateOf(const Vector<AtlasSubjectState>& v, const char *kind, const char *id)
+{
+	for(const AtlasSubjectState& s : v)
+		if(s.kind == kind && s.id == id)
+			return s;
+	return AtlasSubjectState();
+}
+
+// Event validation and the state replay over a two-version family.
+static void EventChecks()
+{
+	String now = AtlasNowIso();
+	Check(now.GetCount() == 20 && now[10] == 'T' && now[19] == 'Z' && now.Find('<') < 0,
+	      "a timestamp reads YYYY-MM-DDTHH:MM:SSZ with no format leftovers");
+	AtlasMap head = SmallMap();
+	AtlasFamily f;
+	f.head_key = "t-v0.0.2";
+	f.versions.Add(pick(Ver("v1", "0.0.1")));
+	f.versions.Add(pick(Ver("v2", "0.0.2")));
+
+	AtlasCheck c;
+	AtlasEvent good = Ev("ev-ok", "v2", "element", "b", "note");
+	good.text = "two lines\nof detail";
+	AtlasValidateEvent(good, f, head, c);
+	Check(c.Ok(), "a note on a head element is valid");
+
+	c = AtlasCheck();
+	AtlasValidateEvent(Ev("ev-v", "vX", "element", "b", "note"), f, head, c);
+	Check(HasError(c, "unknown version"), "an event at an unknown version is refused");
+
+	c = AtlasCheck();
+	AtlasValidateEvent(Ev("ev-s", "v2", "element", "nope", "note"), f, head, c);
+	Check(HasError(c, "not in the head map"), "a note on an element absent from the head is refused");
+
+	c = AtlasCheck();
+	AtlasValidateEvent(Ev("ev-r", "v2", "element", "nope", "removed"), f, head, c);
+	Check(c.Ok(), "a removed event may name an element the head no longer has");
+
+	AtlasEvent bad_stage = Ev("ev-st", "v2", "element", "b", "stage");
+	bad_stage.stage = "shipping";
+	c = AtlasCheck();
+	AtlasValidateEvent(bad_stage, f, head, c);
+	Check(HasError(c, "unknown stage"), "an unknown stage is refused");
+
+	AtlasEvent trial = Ev("ev-t", "v2", "element", "b", "stage");
+	trial.stage = "trials";
+	Check(AtlasStageRank("trials") == 3 && AtlasStageRank("merge_to_master") == 4 && AtlasStageRank("x") < 0
+	      && AtlasStageValid(trial.stage), "stages rank in the pull-request order");
+
+	c = AtlasCheck();
+	AtlasEvent road_no_ends = Ev("ev-rc", "v2", "road", "r_1", "connected");
+	AtlasValidateEvent(road_no_ends, f, head, c);
+	Check(HasError(c, "both endpoints"), "a connected road event needs its endpoints in the snapshot");
+
+	c = AtlasCheck();
+	AtlasValidateEvent(Ev("ev-bad", "v2", "road", "r_1", "stage"), f, head, c);
+	Check(HasError(c, "does not apply"), "a stage cannot be recorded on a road");
+
+	// The replay: element b is created at v1; c is created at v1 and removed at v2; road r_1 is
+	// connected at v1 and disconnected at v2; element a and the road are unscheduled up to the head.
+	AtlasMap h = SmallMap();
+	h.elements.Remove(h.FindElement("c"));
+	Vector<AtlasEvent> events;
+	AtlasEvent ev1 = Ev("ev-1", "v1", "element", "b", "created");
+	ev1.name = "Beta";
+	events.Add(pick(ev1));
+	AtlasEvent ev2 = Ev("ev-2", "v2", "element", "b", "stage");
+	ev2.stage = "trials";
+	events.Add(pick(ev2));
+	AtlasEvent ev3 = Ev("ev-3", "v2", "element", "b", "note");
+	events.Add(pick(ev3));
+	AtlasEvent ev4 = Ev("ev-4", "v1", "element", "c", "created");
+	ev4.name = "Gamma";
+	events.Add(pick(ev4));
+	AtlasEvent ev5 = Ev("ev-5", "v2", "element", "c", "removed");
+	ev5.name = "Gamma";
+	events.Add(pick(ev5));
+	AtlasEvent ev6 = Ev("ev-6", "v1", "road", "r_1", "connected");
+	ev6.from = "a";
+	ev6.to = "d";
+	ev6.road_kind = "progress";
+	events.Add(pick(ev6));
+	AtlasEvent ev7 = Ev("ev-7", "v2", "road", "r_1", "disconnected");
+	ev7.from = "a";
+	ev7.to = "d";
+	events.Add(pick(ev7));
+	c = AtlasCheck();
+	for(const AtlasEvent& e : events)
+		AtlasValidateEvent(e, f, h, c);
+	// Removal and disconnection need no head subject; the others were checked above against h.
+	Check(c.Ok(), "a history with removal and disconnection validates against the head");
+
+	Vector<AtlasSubjectState> at1, at2, bad;
+	String err;
+	Check(AtlasStateAt(h, f, events, "v1", at1, err) && AtlasStateAt(h, f, events, "v2", at2, err),
+	      "the state replays at both versions");
+	Check(!StateOf(at1, "element", "a").present && StateOf(at2, "element", "a").present,
+	      "an unscheduled element exists at the head only");
+	Check(!StateOf(at1, "element", "b").present == false && StateOf(at1, "element", "b").present,
+	      "an element created at v1 exists at v1");
+	Check(StateOf(at1, "element", "b").stage == "" && StateOf(at2, "element", "b").stage == "trials",
+	      "a stage appears from the version it was set at");
+	Check(StateOf(at1, "element", "b").notes == 0 && StateOf(at2, "element", "b").notes == 1,
+	      "a note counts from its own version");
+	Check(StateOf(at1, "element", "c").present && !StateOf(at2, "element", "c").present
+	      && StateOf(at1, "element", "c").name == "Gamma",
+	      "a removed element stays readable before its removal");
+	Check(StateOf(at1, "road", "r_1").present && !StateOf(at2, "road", "r_1").present
+	      && StateOf(at1, "road", "r_1").from == "a" && StateOf(at1, "road", "r_1").to == "d",
+	      "a disconnected road keeps its endpoints before it went away");
+	Check(!AtlasStateAt(h, f, events, "vX", bad, err) && err.Find("unknown version") >= 0,
+	      "a state at an unknown version is refused");
+}
+
+// The version list and the event log, stored per family, round-trip through the store.
+static void RoadmapStoreChecks(const String& scratch)
+{
+	String root = AppendFileName(scratch, "roadmap");
+	RealizeDirectory(root);
+	AtlasFamily f;
+	f.head_key = "pkr-v0.0.1";
+	f.versions.Add(pick(Ver("v1", "0.0.1")));
+	String rev, next, err;
+	Check(AtlasCreateFamily(root, "pkr", f, rev, err) && !rev.IsEmpty(), "a new version list is created");
+	Check(!AtlasCreateFamily(root, "pkr", f, next, err) && err.Find("already exists") >= 0,
+	      "a second version list with the same name is refused, not overwritten");
+
+	AtlasFamily back;
+	String loaded_rev;
+	Check(AtlasLoadFamily(root, "pkr", back, loaded_rev, err) && back.head_key == "pkr-v0.0.1"
+	      && back.versions.GetCount() == 1 && loaded_rev == rev, "the version list loads with its revision");
+	Check(!AtlasLoadFamily(root, "none", back, loaded_rev, err) && err.Find("initialise") >= 0,
+	      "a missing version list says how to create it");
+
+	AtlasEvent e = Ev("ev-store-1", "v1", "element", "e_a", "note");
+	e.text = "stored";
+	Check(AtlasPutEvent(root, "pkr", e, err), "an event saves");
+	Check(!AtlasPutEvent(root, "pkr", e, err), "an event id cannot be written twice");
+	AtlasEvent other = Ev("ev-store-2", "v1", "element", "e_b", "note");
+	AtlasPutEvent(root, "other", other, err);
+	Vector<AtlasEvent> got;
+	Check(AtlasLoadEvents(root, "pkr", got, err) && got.GetCount() == 1 && got[0].text == "stored",
+	      "a family lists only its own events, with their text");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -290,6 +512,9 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	ModelChecks();
 	SeedChecks();
 	StoreChecks(scratch_dir);
+	VersionChecks();
+	EventChecks();
+	RoadmapStoreChecks(scratch_dir);
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }
