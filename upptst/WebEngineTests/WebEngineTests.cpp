@@ -1,3 +1,4 @@
+#include <WebAuth/WebAuth.h>
 #include <Core/Core.h>
 #ifdef PLATFORM_POSIX
 #include <unistd.h>
@@ -2710,6 +2711,78 @@ CONSOLE_APP_MAIN
 			if(quiet.Router()[i].pattern.Find("sso") >= 0)
 				sso_routes++;
 		Check(sso_routes == 0, "with SSO off no session/sso route is registered");
+	}
+
+	// Content visibility policy (task 053): level matrix, grants, link tokens, inheritance and persistence.
+	{
+		ContentPrincipal anon;
+		ContentPrincipal user;
+		user.authenticated = true;
+		user.username = "alice";
+		user.groups.Add("editor");
+		ContentPrincipal stranger;
+		stranger.authenticated = true;
+		stranger.username = "bob";
+		ContentPrincipal admin;
+		admin.authenticated = true;
+		admin.admin = true;
+		admin.username = "root";
+
+		ContentPolicy pub;    pub.level = CONTENT_PUBLIC;
+		ContentPolicy only;   only.level = CONTENT_PUBLIC_ONLY;
+		ContentPolicy priv;   priv.level = CONTENT_PRIVATE;
+		ContentPolicy shared; shared.level = CONTENT_PRIVATE;
+		ContentGrant ug; ug.kind = "user"; ug.value = "alice";
+		ContentGrant gg; gg.kind = "group"; gg.value = "editor";
+		shared.grants.Add(ug);
+		shared.grants.Add(gg);
+
+		Check(ContentVisible(pub, anon) && ContentVisible(pub, user), "public is visible to anonymous and signed-in");
+		Check(ContentVisible(only, anon) && !ContentVisible(only, user), "public-only is visible to anonymous only");
+		Check(!ContentVisible(priv, anon) && !ContentVisible(priv, stranger) && ContentVisible(priv, admin),
+		      "private is hidden from anonymous and strangers, visible to admins");
+		Check(ContentVisible(shared, user) && !ContentVisible(shared, stranger) && !ContentVisible(shared, anon),
+		      "private grants reach a named user and a group, not others");
+
+		ContentPolicy prot; prot.level = CONTENT_PROTECTED;
+		String token = "tok-" + WebAuthRandomBytes(16);
+		ContentGrant lg; lg.kind = "link"; lg.value = ContentLinkHash(token); lg.label = "review";
+		prot.grants.Add(lg);
+		ContentPrincipal with_link; with_link.link_token = token;
+		ContentPrincipal wrong_link; wrong_link.link_token = "tok-wrong";
+		Check(!ContentVisible(prot, anon) && ContentVisible(prot, with_link) && !ContentVisible(prot, wrong_link),
+		      "protected opens only with the matching link token");
+		Check(ContentLinkHash(token) != token && lg.value != token, "a link token is stored and compared only as its hash");
+		prot.grants[0].revoked = true;
+		Check(!ContentVisible(prot, with_link), "a revoked link no longer opens protected content");
+		ContentPolicy prot_user; prot_user.level = CONTENT_PROTECTED; prot_user.grants.Add(ug);
+		Check(ContentVisible(prot_user, user) && !ContentVisible(prot_user, anon), "protected named-user grant needs sign-in");
+
+		Vector<ContentPolicy> chain;
+		chain.Add(ContentPolicy());   // record: unset
+		chain.Add(pub);                // module
+		chain.Add(priv);               // site
+		Check(ContentResolve(chain, CONTENT_PRIVATE).level == CONTENT_PUBLIC,
+		      "an unset record passes through to the module's explicit policy");
+		Vector<ContentPolicy> none;
+		Check(ContentResolve(none, CONTENT_PRIVATE).level == CONTENT_PRIVATE, "with no explicit policy the fallback applies");
+
+		String dir = GetExeDirFile("content-policy-check");
+		RealizeDirectory(dir);
+		ContentPolicyStore store;
+		String err;
+		store.Load(dir, err);
+		store.Site().level = CONTENT_PRIVATE;
+		store.SetModule("news", pub);
+		store.SetRecord("paper-1", only);
+		Check(store.Save(err), "a content policy is saved");
+		ContentPolicyStore again;
+		Check(again.Load(dir, err) && again.Effective("news", "paper-1", CONTENT_PRIVATE).level == CONTENT_PUBLIC_ONLY
+		      && again.Effective("news", "other", CONTENT_PRIVATE).level == CONTENT_PUBLIC
+		      && again.Effective("zoo", "other", CONTENT_PRIVATE).level == CONTENT_PRIVATE,
+		      "a saved policy reloads with record, module and site inheritance intact");
+		FileDelete(AppendFileName(dir, "content_policy.json"));
+		DeleteFolderDeep(dir);
 	}
 
 	host.StopEngines();

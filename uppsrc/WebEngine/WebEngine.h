@@ -7,5 +7,6 @@
 #include "Engine.h"
 #include "Host.h"
 #include "SessionRoutes.h"
+#include "ContentPolicy.h"
 
 #endif

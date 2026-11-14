@@ -99,10 +99,53 @@ static void ScienceHome(WebRequest& r)
 		+ "<p><a href=\"" + r.Site().Url("papers") + "\">Browse papers</a></p>");
 }
 
+// Paper visibility (task 053). The record's own policy wins; otherwise the envelope's visibility field gives
+// the record level, and a paper with neither is private. A site or module policy applies below the record.
+static ContentLevel EnvelopeLevel(const String& visibility)
+{
+	if(visibility == "public") return CONTENT_PUBLIC;
+	if(visibility == "public-only") return CONTENT_PUBLIC_ONLY;
+	if(visibility == "protected") return CONTENT_PROTECTED;
+	return CONTENT_PRIVATE;
+}
+
+static ContentPrincipal ViewerOf(WebRequest& r)
+{
+	ContentPrincipal who;
+	if(r.HasUser()) {
+		who.authenticated = true;
+		who.username = r.User().username;
+		for(const String& role : r.User().roles)
+			who.groups.Add(role);
+		for(const String& role : r.User().roles)
+			if(role == "admin")
+				who.admin = true;
+	}
+	who.link_token = r.Param("key");
+	return who;
+}
+
+static bool MayView(WebRequest& r, const SciencePaper& p)
+{
+	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+	Vector<ContentPolicy> chain;
+	ContentPolicy record = store.Record(p.id);
+	if(record.level == CONTENT_UNSET)
+		record.level = EnvelopeLevel(p.visibility);
+	chain.Add(record);
+	chain.Add(store.Module(SCIENCE_CONTENT_MODULE));
+	chain.Add(store.Site());
+	return ContentVisible(ContentResolve(chain, CONTENT_PRIVATE), ViewerOf(r));
+}
+
 static void SciencePaperList(WebRequest& r)
 {
+	Vector<SciencePaper> all;
+	Corpus().ListPapers(all);
 	Vector<SciencePaper> papers;
-	Corpus().ListPapers(papers);
+	for(const SciencePaper& p : all)
+		if(MayView(r, p))
+			papers.Add(p);
 	StringBuffer body;
 	body << "<ul>";
 	for(const SciencePaper& p : papers) {
@@ -148,7 +191,7 @@ static void SciencePaperPage(WebRequest& r)
 {
 	String id = r.PathArg(0);
 	SciencePaper paper;
-	if(!Corpus().GetPaper(id, paper)) {
+	if(!Corpus().GetPaper(id, paper) || !MayView(r, paper)) {
 		r.Status(404, "paper not found");
 		return;
 	}
@@ -177,8 +220,12 @@ static void SciencePaperPage(WebRequest& r)
 
 static void ScienceApiPapers(WebRequest& r)
 {
+	Vector<SciencePaper> all;
+	Corpus().ListPapers(all);
 	Vector<SciencePaper> papers;
-	Corpus().ListPapers(papers);
+	for(const SciencePaper& p : all)
+		if(MayView(r, p))
+			papers.Add(p);
 	ValueArray arr;
 	for(const SciencePaper& p : papers) {
 		ValueMap m;
@@ -203,7 +250,7 @@ static void ScienceApiPaper(WebRequest& r)
 {
 	String id = r.PathArg(0);
 	SciencePaper paper;
-	if(!Corpus().GetPaper(id, paper)) {
+	if(!Corpus().GetPaper(id, paper) || !MayView(r, paper)) {
 		r.Json(JsonOk(false, "paper not found"), 404);
 		return;
 	}
@@ -226,6 +273,11 @@ static void ScienceApiPaper(WebRequest& r)
 static void ScienceApiArticle(WebRequest& r)
 {
 	String id = r.PathArg(0);
+	SciencePaper paper;
+	if(!Corpus().GetPaper(id, paper) || !MayView(r, paper)) {
+		r.Json(JsonOk(false, "paper not found"), 404);
+		return;
+	}
 	ScienceArticleTree tree;
 	ForgeResult ar = Corpus().GetArticleTree(id, tree);
 	if(!ar.ok) {

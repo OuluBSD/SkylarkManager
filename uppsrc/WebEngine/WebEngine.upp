@@ -5,7 +5,8 @@ uses
 	Skylark,
 	WebStorage,
 	WebBroker,
-	WebAccounts;
+	WebAccounts,
+	WebAuth;
 
 file
 	AGENTS.md,
@@ -13,6 +14,8 @@ file
 	Model readonly separator,
 	Router.h,
 	Router.cpp,
+	ContentPolicy.h,
+	ContentPolicy.cpp,
 	Site.h,
 	Site.cpp,
 	Request.h,

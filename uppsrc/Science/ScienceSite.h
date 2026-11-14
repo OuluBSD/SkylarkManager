@@ -10,6 +10,7 @@ NAMESPACE_UPP
 
 // Role that lets a site user author structured articles.
 #define SCIENCE_AUTHOR_ROLE  "science-author"
+#define SCIENCE_CONTENT_MODULE "papers"
 // Grant scope that lets a caller author structured articles.
 #define SCIENCE_AUTHOR_SCOPE "science.author"
 // Request header carrying a meta-account grant id (bearer-style).
