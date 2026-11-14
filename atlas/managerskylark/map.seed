@@ -1,0 +1,37 @@
+# ManagerSkylark topology: the composed web server and its sites, as the
+# repository's own AGENTS.md and README describe them. A demo seed for the
+# Atlas project registry (see docs/atlas-projects.md); edit it in the Atlas
+# editor, or change this file and import into an empty map version.
+#
+# Containment: 2 spaces per level. Arrows: "->" progress, "=>" dependency,
+# "~>" communication (broker or protocol between sites).
+
+ManagerSkylark | block | active | the composed web server process
+  Platform | block | settled | shared libraries
+    WebFramework | place | settled | themes, PageBuilder, navigation
+    WebAuth | place | settled | password hashing, sessions, login views
+    WebStorage | place | settled | JSON record stores with revisions
+    WebAccounts | place | settled | per-site accounts and CSRF tokens
+    WebEngine | place | settled | fenced sites in one process
+    WebBroker | place | active | transport-independent site-to-site calls
+    WebDocs | place | settled | documentation resolver for the /docs portal
+  Sites | block | active | the composed websites
+    Atlas | place | hot | topology map of the project
+    Company | place | active | proposals, work items, ledger, contracts
+    TaskFoundry | place | active | candidate tasks with evidence and submission
+    Science | place | active | paper corpus and article sidecars
+    PrivateHub | place | active | local repository issues and comments
+    MetaAccount | place | active | ecosystem sign-in and consent grants
+    Channels | place | settled | read-only AgentIPC channels
+    Financials | place | active | read-only ledger summary
+    YouTubePlanner | place | planned | planning overview stub
+    WebChat | place | active | streaming chat to SweAgent
+  Tooling | block | active | command line and tests
+    SiteCli | place | settled | skylarkctl: manifest-driven CLI and REPL
+    SelfTests | place | active | ManagerSkylark --test sections
+    GitHubForge | place | active | GitHub backend and webapp
+
+TaskFoundry ~> Company: submission through WebBroker
+Financials ~> Company: scope-checked broker reads
+TaskFoundry => Science: evidence references
+TaskFoundry => PrivateHub: evidence references

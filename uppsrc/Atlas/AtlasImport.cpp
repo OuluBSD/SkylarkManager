@@ -195,35 +195,37 @@ AtlasImportResult AtlasImportProject(const String& data_root, const AtlasProject
 	if(AtlasLoadFamily(data_root, p.name, existing, frev, err))
 		return Fail(409, "the family " + p.name + " already exists");
 
+	// The seed is parsed and validated before anything is written, so a bad seed leaves no map behind.
 	String path = AppendFileName(p.repo, p.seed);
 	if(!FileExists(path))
 		return Fail(404, "seed not found: " + path);
-	String seed = LoadFile(path);
-
 	AtlasMap m;
 	m.map = p.name;
 	m.version = p.version;
 	m.title = p.title;
 	m.world.width = 2400;
 	m.world.height = 1600;
-	AtlasImportResult created = AtlasCreateMap(data_root, m, p.level);
-	if(!created.Ok())
-		return created;
-	AtlasImportResult seeded = AtlasSeedMap(data_root, created.key, seed);
-	if(!seeded.Ok())
-		return seeded;
+	AtlasCheck check;
+	if(!AtlasParseSeed(LoadFile(path), m, check))
+		return Fail(400, Join(check.errors, "\n"));
+
+	AtlasImportResult out = AtlasCreateMap(data_root, m, p.level);
+	if(!out.Ok())
+		return out;
+	out.elements = m.elements.GetCount();
+	out.roads = m.roads.GetCount();
 
 	AtlasVersion first;
 	first.vid = "v1";
 	first.code = AtlasVersionCode(p.version);
 	AtlasFamily f;
-	f.head_key = created.key;
+	f.head_key = out.key;
 	f.versions.Add(pick(first));
 	String rev;
 	if(!AtlasCreateFamily(data_root, p.name, f, rev, err))
 		return Fail(500, err);
-	seeded.revision = rev;
-	return seeded;
+	out.revision = rev;
+	return out;
 }
 
 END_UPP_NAMESPACE
