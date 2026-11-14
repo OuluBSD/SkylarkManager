@@ -24,6 +24,29 @@ static bool PolicyAdmin(WebRequest& r)
 	return false;
 }
 
+// A policy parameter comes from the query or the form, or else from a JSON body (skylarkctl sends JSON).
+static String PolicyParam(WebRequest& r, const char *name)
+{
+	String v = r.Param(name);
+	if(v.GetCount() || r.Body().IsEmpty())
+		return v;
+	Value parsed;
+	try {
+		parsed = ParseJSON(r.Body());
+	}
+	catch(Exc&) {
+		return String();
+	}
+	if(!parsed.Is<ValueMap>())
+		return String();
+	Value x = ValueMap(parsed)[name];
+	if(x.Is<String>())
+		return (String)x;
+	if(x.Is<int>() || x.Is<int64>() || x.Is<double>())
+		return AsString(x);
+	return String();
+}
+
 static void PolicyDenied(WebRequest& r)
 {
 	ValueMap m;
@@ -125,11 +148,11 @@ static void PolicySet(WebRequest& r)
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
 	if(!PolicyStoreReady(r, store)) return;
-	String scope = r.Param("scope");
-	String id = r.Param("id");
+	String scope = PolicyParam(r, "scope");
+	String id = PolicyParam(r, "id");
 	ContentLevel level;
 	ContentPolicy p;
-	if(!ScopeGet(store, scope, id, p) || !ContentLevelParse(r.Param("level"), level)) {
+	if(!ScopeGet(store, scope, id, p) || !ContentLevelParse(PolicyParam(r, "level"), level)) {
 		ValueMap m;
 		m.Add("ok", false);
 		m.Add("error", "scope must be site, module or record, with an id for module and record, and level must be public, protected, private or public-only");
@@ -149,10 +172,10 @@ static void PolicyGrant(WebRequest& r)
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
 	if(!PolicyStoreReady(r, store)) return;
-	String scope = r.Param("scope");
-	String id = r.Param("id");
-	String kind = r.Param("kind");
-	String value = r.Param("value");
+	String scope = PolicyParam(r, "scope");
+	String id = PolicyParam(r, "id");
+	String kind = PolicyParam(r, "kind");
+	String value = PolicyParam(r, "value");
 	ContentPolicy p;
 	if(!ScopeGet(store, scope, id, p) || (kind != "user" && kind != "group") || value.IsEmpty()) {
 		ValueMap m;
@@ -177,9 +200,9 @@ static void PolicyRevoke(WebRequest& r)
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
 	if(!PolicyStoreReady(r, store)) return;
-	String scope = r.Param("scope");
-	String id = r.Param("id");
-	int index = ScanInt(r.Param("index"));
+	String scope = PolicyParam(r, "scope");
+	String id = PolicyParam(r, "id");
+	int index = ScanInt(PolicyParam(r, "index"));
 	ContentPolicy p;
 	if(!ScopeGet(store, scope, id, p) || index < 0 || index >= p.grants.GetCount()) {
 		ValueMap m;
@@ -210,9 +233,9 @@ static void PolicyLink(WebRequest& r)
 	}
 	ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
 	if(!PolicyStoreReady(r, store)) return;
-	String scope = r.Param("scope");
-	String id = r.Param("id");
-	String target = r.Param("target");
+	String scope = PolicyParam(r, "scope");
+	String id = PolicyParam(r, "id");
+	String target = PolicyParam(r, "target");
 	ContentPolicy p;
 	if(!ScopeGet(store, scope, id, p) || p.level != CONTENT_PROTECTED || !ValidPolicyTarget(target)) {
 		ValueMap m;
@@ -226,7 +249,7 @@ static void PolicyLink(WebRequest& r)
 	ContentGrant g;
 	g.kind = "link";
 	g.value = ContentLinkHash(token);
-	g.label = r.Param("label");
+	g.label = PolicyParam(r, "label");
 	p.grants.Add(pick(g));
 	ScopeSet(store, scope, id, p);
 	String err;
@@ -402,11 +425,11 @@ static void PolicyPage(WebRequest& r)
 	           : String("<p>The site policy applies to everything without a module or record policy. Public content is visible to everyone; protected/private content needs a named user or group grant; public-only content is hidden from signed-in users. Secret links are disabled on this site.</p>"))
 	     << ScopeForm(r, "site", "", store.Site(), "");
 	body << "<h3>Module</h3><form method=\"get\" action=\"" << Esc(r.Site().Url("policy")) << "\"><input name=\"module\" placeholder=\"module name\"><button>Show</button></form>";
-	String module = r.Param("module");
+	String module = PolicyParam(r, "module");
 	if(module.GetCount())
 		body << ScopeForm(r, "module", "", store.Module(module), module);
 	body << "<h3>Record</h3><form method=\"get\" action=\"" << Esc(r.Site().Url("policy")) << "\"><input name=\"record\" placeholder=\"record id\"><button>Show</button></form>";
-	String record = r.Param("record");
+	String record = PolicyParam(r, "record");
 	if(record.GetCount())
 		body << ScopeForm(r, "record", "", store.Record(record), record);
 	if(allow_secret_links)
