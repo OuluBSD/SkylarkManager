@@ -13,14 +13,25 @@ NAMESPACE_UPP
 // never through shared store objects.
 // ---------------------------------------------------------------------------
 
+// expected_revision value meaning "the record must not exist yet". Revisions
+// are positive integers, so this sentinel can never collide with one.
+inline const char* RecordAbsent() { return "absent"; }
+
 struct StoreResult {
 	bool   ok;
+	bool   conflict = false; // true when expected_revision did not match
 	String error;
 
 	StoreResult(bool ok_ = true) : ok(ok_) {}
 	StoreResult(const char* err) : ok(false), error(err) {}
 	StoreResult(const String& err) : ok(false), error(err) {}
 	explicit operator bool() const { return ok; }
+
+	static StoreResult Conflict(const String& err) {
+		StoreResult r(err);
+		r.conflict = true;
+		return r;
+	}
 };
 
 // Envelope stored beside record data. Mirrors the Science corpus envelopes
@@ -112,10 +123,39 @@ public:
 	static bool WriteAtomic(const String& final_path, const String& data, String& error);
 	static bool ValidId(const String& id);
 
+	// Multi-record transaction. Holds the in-process mutex and the inter-process
+	// lock from construction until destruction, so several reads and writes
+	// (possibly across records) commit or fail as one unit. Ok() is false when
+	// the lock could not be taken; no other call then has effect.
+	class Txn {
+	public:
+		explicit Txn(JsonFileStore& store);
+		~Txn();
+
+		bool          Ok() const { return error.IsEmpty(); }
+		const String& Error() const { return error; }
+
+		StoreResult Get(const String& id, String& json, String& revision);
+		StoreResult Put(const String& id, const String& json,
+		                const String& expected_revision, String& new_revision);
+		StoreResult Delete(const String& id, const String& expected_revision);
+
+	private:
+		JsonFileStore& store;
+		FileLock       lock;
+		String         error;
+	};
+
 private:
 	StoreResult Locked(const String& id, const String& expected_revision, const String& op,
 	                   const Function<StoreResult(const ValueMap& current, String& new_revision)>& step,
-	                   String& new_revision);
+	                   String& new_revision, bool take_lock = true);
+	StoreResult LockedHeld(const String& id, const String& expected_revision, const String& op,
+	                       const Function<StoreResult(const ValueMap& current, String& new_revision)>& step,
+	                       String& new_revision);
+	StoreResult PutRecord(const String& id, const ValueMap& data,
+	                      const String& expected_revision, String& new_revision, bool take_lock);
+	StoreResult DeleteRecord(const String& id, const String& expected_revision, bool take_lock);
 	StoreResult ReadRecord(const String& id, ValueMap& envelope, ValueMap& data, String& error);
 	String      RecordPath(const String& id);
 	void        Quarantine(const String& id, const String& reason);

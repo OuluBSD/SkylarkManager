@@ -1,0 +1,32 @@
+description "Company store: proposals, work items, reviews, ledger, audit, contracts and projects on WebStorage records\377";
+
+uses
+	Core,
+	Skylark,
+	WebStorage,
+	WebAuth,
+	WebAccounts,
+	WebEngine;
+
+file
+	AGENTS.md,
+	CompanyModel.h,
+	CompanyStore.h,
+	CompanyStore.cpp,
+	CompanyStoreFixture.cpp,
+	CompanyWorkflow.h,
+	CompanyWorkflow.cpp,
+	CompanyClients.cpp,
+	PlatformWorkflow.h,
+	PlatformWorkflow.cpp,
+	CompanyBroker.h,
+	CompanyBroker.cpp,
+	CompanyComposed.h,
+	CompanyComposed.cpp,
+	CompanySite.h,
+	CompanySite.cpp,
+	CompanyViews.h,
+	CompanyPages.cpp;
+
+mainconfig
+	"" = "MT";

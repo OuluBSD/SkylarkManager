@@ -235,10 +235,12 @@ StoreResult JsonFileStore::ReadRecord(const String& id, ValueMap& envelope, Valu
 
 StoreResult JsonFileStore::Locked(const String& id, const String& expected_revision, const String& op,
                                   const Function<StoreResult(const ValueMap& current, String& new_revision)>& step,
-                                  String& new_revision)
+                                  String& new_revision, bool take_lock)
 {
 	if(!ValidId(id))
 		return StoreResult("invalid record id: " + id);
+	if(!take_lock)
+		return LockedHeld(id, expected_revision, op, step, new_revision);
 	mutex.Enter();
 	String lock_error;
 	FileLock lock;
@@ -246,27 +248,41 @@ StoreResult JsonFileStore::Locked(const String& id, const String& expected_revis
 		mutex.Leave();
 		return StoreResult("storage lock failed for '" + id + "' (" + op + "): " + lock_error);
 	}
-	ValueMap current_env, current_data;
-	String read_error;
-	bool exists = ReadRecord(id, current_env, current_data, read_error).ok;
-	if(!exists && read_error != "record not found") {
-		lock.Release();
-		mutex.Leave();
-		return StoreResult(read_error);
-	}
-	if(!expected_revision.IsEmpty()) {
-		String cur = exists ? AsString(current_env.Get("revision")) : String();
-		if(cur != expected_revision) {
-			lock.Release();
-			mutex.Leave();
-			return StoreResult(Format("revision conflict on '%s' (%s): expected %s, current %s",
-			              ~id, ~op, ~expected_revision, exists ? ~cur : "~none~"));
-		}
-	}
-	StoreResult r = step(exists ? current_env : ValueMap(), new_revision);
+	StoreResult r = LockedHeld(id, expected_revision, op, step, new_revision);
 	lock.Release();
 	mutex.Leave();
 	return r;
+}
+
+// Runs one conditional write. The caller holds the store lock (Locked or Txn).
+StoreResult JsonFileStore::LockedHeld(const String& id, const String& expected_revision, const String& op,
+                                      const Function<StoreResult(const ValueMap& current, String& new_revision)>& step,
+                                      String& new_revision)
+{
+	ValueMap current_env, current_data;
+	String read_error;
+	bool exists = ReadRecord(id, current_env, current_data, read_error).ok;
+	if(!exists && read_error != "record not found")
+		return StoreResult(read_error);
+	bool conflict = false;
+	String conflict_error;
+	if(expected_revision == RecordAbsent()) {
+		if(exists) {
+			conflict = true;
+			conflict_error = Format("record '%s' already exists (%s)", ~id, ~op);
+		}
+	}
+	else if(!expected_revision.IsEmpty()) {
+		String cur = exists ? AsString(current_env.Get("revision")) : String();
+		if(cur != expected_revision) {
+			conflict = true;
+			conflict_error = Format("revision conflict on '%s' (%s): expected %s, current %s",
+			                        ~id, ~op, ~expected_revision, exists ? ~cur : "~none~");
+		}
+	}
+	if(conflict)
+		return StoreResult::Conflict(conflict_error);
+	return step(exists ? current_env : ValueMap(), new_revision);
 }
 
 StoreResult JsonFileStore::Get(const String& id, String& json, String& revision)
@@ -294,8 +310,12 @@ StoreResult JsonFileStore::Put(const String& id, const String& json,
 	}
 	if(!parsed.Is<ValueMap>())
 		return "record data must be a JSON object";
-	ValueMap data = (ValueMap)parsed;
+	return PutRecord(id, (ValueMap)parsed, expected_revision, new_revision, true);
+}
 
+StoreResult JsonFileStore::PutRecord(const String& id, const ValueMap& data,
+                                     const String& expected_revision, String& new_revision, bool take_lock)
+{
 	String new_rev;
 	StoreResult r = Locked(id, expected_revision, "put",
 	                       [&](const ValueMap& current, String& out_rev) -> StoreResult {
@@ -330,12 +350,17 @@ StoreResult JsonFileStore::Put(const String& id, const String& json,
 			return StoreResult("atomic write failed for '" + id + "': " + error);
 		out_rev = env.revision;
 		return StoreResult(true);
-	}, new_rev);
+	}, new_rev, take_lock);
 	new_revision = new_rev;
 	return r;
 }
 
 StoreResult JsonFileStore::Delete(const String& id, const String& expected_revision)
+{
+	return DeleteRecord(id, expected_revision, true);
+}
+
+StoreResult JsonFileStore::DeleteRecord(const String& id, const String& expected_revision, bool take_lock)
 {
 	String ignore_rev;
 	return Locked(id, expected_revision, "delete", [&](const ValueMap& current, String&) -> StoreResult {
@@ -343,7 +368,64 @@ StoreResult JsonFileStore::Delete(const String& id, const String& expected_revis
 		if(FileExists(path) && !FileDelete(path))
 			return StoreResult("cannot delete record file " + path);
 		return StoreResult(true);
-	}, ignore_rev);
+	}, ignore_rev, take_lock);
+}
+
+JsonFileStore::Txn::Txn(JsonFileStore& s) : store(s)
+{
+	store.mutex.Enter();
+	String lock_error;
+	if(!lock.Acquire(AppendFileName(store.dir, ".lock"), lock_error)) {
+		error = "storage lock failed: " + lock_error;
+		store.mutex.Leave();
+	}
+}
+
+JsonFileStore::Txn::~Txn()
+{
+	if(Ok()) {
+		lock.Release();
+		store.mutex.Leave();
+	}
+}
+
+StoreResult JsonFileStore::Txn::Get(const String& id, String& json, String& revision)
+{
+	if(!Ok())
+		return StoreResult(error);
+	if(!ValidId(id))
+		return StoreResult("invalid record id: " + id);
+	ValueMap env, data;
+	String read_error;
+	if(!store.ReadRecord(id, env, data, read_error))
+		return StoreResult(read_error);
+	json = AsJSON(Value(data), true);
+	revision = AsString(env.Get("revision"));
+	return StoreResult(true);
+}
+
+StoreResult JsonFileStore::Txn::Put(const String& id, const String& json,
+                                    const String& expected_revision, String& new_revision)
+{
+	if(!Ok())
+		return StoreResult(error);
+	Value parsed;
+	try {
+		parsed = ParseJSON(json);
+	}
+	catch(Exc& e) {
+		return "record data is not valid JSON: " + e;
+	}
+	if(!parsed.Is<ValueMap>())
+		return "record data must be a JSON object";
+	return store.PutRecord(id, (ValueMap)parsed, expected_revision, new_revision, false);
+}
+
+StoreResult JsonFileStore::Txn::Delete(const String& id, const String& expected_revision)
+{
+	if(!Ok())
+		return StoreResult(error);
+	return store.DeleteRecord(id, expected_revision, false);
 }
 
 StoreResult JsonFileStore::List(Vector<String>& ids)
@@ -425,12 +507,16 @@ StoreResult MemoryStore::Put(const String& id, const String& data,
 	mutex.Enter();
 	int q = json.Find(id);
 	int next = q < 0 ? 1 : rev[q] + 1;
-	if(!expected_revision.IsEmpty()) {
+	if(expected_revision == RecordAbsent() && q >= 0) {
+		mutex.Leave();
+		return StoreResult::Conflict(Format("record '%s' already exists", ~id));
+	}
+	if(!expected_revision.IsEmpty() && expected_revision != RecordAbsent()) {
 		int cur = q < 0 ? 0 : rev[q];
 		if(expected_revision != AsString(cur)) {
 			mutex.Leave();
-			return Format("revision conflict on '%s': expected %s, current %d",
-			              ~id, ~expected_revision, cur);
+			return StoreResult::Conflict(Format("revision conflict on '%s': expected %s, current %d",
+			                                    ~id, ~expected_revision, cur));
 		}
 	}
 	if(q < 0) {

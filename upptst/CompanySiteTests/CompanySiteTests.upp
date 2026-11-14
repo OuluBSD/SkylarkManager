@@ -1,0 +1,9 @@
+description "Company site self-test: SetCompanyUser provisioning, broker, workflow, platform v2 and HTTP routes on an isolated engine site\377";
+
+uses
+	Core,
+	Company,
+	WebEngine;
+
+file
+	CompanySiteTests.cpp;

@@ -1,0 +1,9 @@
+description "Company store self-test: records, indexes, dedup, append-only ledger and audit, fixture seeding\377";
+
+uses
+	Core,
+	Company;
+
+file
+	AGENTS.md,
+	CompanyStoreTests.cpp;

@@ -203,7 +203,7 @@ static EmuStore MakeSeedStore()
 	return st;
 }
 
-static String TwoDigits(int v)
+static String EmuTwoDigits(int v)
 {
 	return v < 10 ? "0" + AsString(v) : AsString(v);
 }
@@ -211,8 +211,8 @@ static String TwoDigits(int v)
 static String IsoNow()
 {
 	Time t = GetUtcTime();
-	return AsString(t.year) + "-" + TwoDigits(t.month) + "-" + TwoDigits(t.day) + "T" +
-	       TwoDigits(t.hour) + ":" + TwoDigits(t.minute) + ":" + TwoDigits(t.second) + "Z";
+	return AsString(t.year) + "-" + EmuTwoDigits(t.month) + "-" + EmuTwoDigits(t.day) + "T" +
+	       EmuTwoDigits(t.hour) + ":" + EmuTwoDigits(t.minute) + ":" + EmuTwoDigits(t.second) + "Z";
 }
 
 static String Slug(const EmuStoreRepo& r)
