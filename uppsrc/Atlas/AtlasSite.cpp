@@ -319,10 +319,10 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	s.crumbs.Add(pick(crumb_maps));
 
 	if(family.GetCount()) {
-		const char *ids[] = { "versions", "timeline", "rules", "tasks", "checks" };
-		const char *labels[] = { "Versions", "Timeline", "Rules", "Tasks", "Checks" };
-		const char *icons[] = { "list", "clock", "sliders", "check", "alert" };
-		for(int i = 0; i < 5; i++) {
+		const char *ids[] = { "versions", "timeline", "rules", "tasks", "checks", "next" };
+		const char *labels[] = { "Versions", "Timeline", "Rules", "Tasks", "Checks", "What's next" };
+		const char *icons[] = { "list", "clock", "sliders", "check", "alert", "flag" };
+		for(int i = 0; i < 6; i++) {
 			WebsiteShellLink l;
 			l.label = labels[i];
 			l.href = r.Site().Url("atlas/roadmap/" + family + (i == 0 ? String() : String("/") + ids[i]));
@@ -343,7 +343,7 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	// Editing is for the admin role. Say why the forms are missing, and how an operator grants it.
 	String hint;
 	bool editable = section == "map" || section == "versions" || section == "timeline" || section == "rules"
-	             || section == "tasks" || section == "checks";
+	             || section == "tasks" || section == "checks" || section == "next";
 	if(editable && !CanEdit(r)) {
 		if(r.HasUser())
 			hint = "<div class=\"ad-hint\" role=\"note\">You are signed in as <strong>" + Esc(r.User().username)
@@ -615,7 +615,8 @@ static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << events.GetCount() << "</div><div class=\"ad-card-label\">events</div></div>"
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << errors << "</div><div class=\"ad-card-label\">errors</div></div>"
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << warnings << "</div><div class=\"ad-card-label\">warnings</div></div>"
-	  << "</div><p class=\"ad-note\">Show the map at version: <a href=\"" << Esc(r.Site().Url("atlas/" + key)) << "\">head</a>";
+	  << "</div><p class=\"ad-note\">Show the map at version: <a href=\"" << Esc(r.Site().Url("atlas/" + key)) << "\">head</a>"
+	  << " &middot; <a href=\"" << Esc(r.Site().Url("atlas/roadmap/" + m.map + "/next")) << "\">what is next</a>";
 	for(const AtlasVersion& v : f.versions)
 		b << " &middot; <a href=\"" << Esc(r.Site().Url("atlas/" + key + "?vid=" + v.vid)) << "\">"
 		  << Esc(AtlasVersionLabel(v.code)) << "</a>";

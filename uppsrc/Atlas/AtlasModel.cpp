@@ -1329,4 +1329,210 @@ String AtlasMarkdown(const String& text)
 	return String(out);
 }
 
+// ---------------------------------------------------------------------------
+// What is next: the entry conditions of the versions after one, against the world that version leaves.
+// ---------------------------------------------------------------------------
+
+// The world a version leaves: its replayed atoms and each element's stage there. The start (k < 0) is the
+// initial atoms, with no stages.
+static AtlasWorldState WorldLeftBy(int k, const AtlasRules& rules, const Vector<Vector<String>>& worlds,
+                                   const Vector<AtlasSubjectState>& states)
+{
+	AtlasWorldState w;
+	if(k < 0) {
+		for(const String& lit : rules.initial)
+			if(!lit.StartsWith("!"))
+				w.atoms.Add(lit);
+		return w;
+	}
+	if(k < worlds.GetCount())
+		for(const String& name : worlds[k])
+			w.atoms.Add(name);
+	for(const AtlasSubjectState& st : states)
+		if(st.kind == "element" && st.present)
+			w.stages.GetAdd(st.id) = st.stage;
+	return w;
+}
+
+static bool StatesLeftBy(int k, const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
+                         Vector<AtlasSubjectState>& states, String& err)
+{
+	states.Clear();
+	if(k < 0)
+		return true;
+	return AtlasStateAt(head, f, events, f.versions[k].vid, states, err);
+}
+
+bool AtlasWhatsNext(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                    const Vector<AtlasEvent>& events, const String& from_vid, AtlasNext& out, String& err)
+{
+	out = AtlasNext();
+	int n = f.versions.GetCount();
+	Vector<AtlasRoadmapMessage> messages;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+
+	int k = -1;
+	if(from_vid.IsEmpty()) {
+		int first_blocked = -1;
+		for(int j = 0; j < n && first_blocked < 0; j++) {
+			Vector<AtlasSubjectState> states;
+			if(!StatesLeftBy(j - 1, head, f, events, states, err))
+				return false;
+			AtlasWorldState w = WorldLeftBy(j - 1, rules, worlds, states);
+			for(const String& lit : f.versions[j].requires)
+				if(!w.Holds(lit))
+					first_blocked = j;
+		}
+		k = first_blocked < 0 ? n - 1 : first_blocked - 1;
+	}
+	else {
+		k = f.Find(from_vid);
+		if(k < 0) {
+			err = "unknown version: " + from_vid;
+			return false;
+		}
+	}
+	out.from = k < 0 ? String() : f.versions[k].vid;
+
+	Vector<AtlasSubjectState> states;
+	if(!StatesLeftBy(k, head, f, events, states, err))
+		return false;
+	AtlasWorldState w = WorldLeftBy(k, rules, worlds, states);
+
+	// Tasks as they stand at from: only the events of versions up to it count.
+	Vector<AtlasNextTask> tasks;
+	for(const AtlasEvent& e : events) {
+		if(e.subject_kind != "task")
+			continue;
+		int v = f.Find(e.vid);
+		if(v < 0 || v > k)
+			continue;
+		int i = -1;
+		for(int j = 0; j < tasks.GetCount(); j++)
+			if(tasks[j].id == e.subject_id)
+				i = j;
+		if(i < 0) {
+			AtlasNextTask t;
+			t.id = e.subject_id;
+			tasks.Add(pick(t));
+			i = tasks.GetCount() - 1;
+		}
+		AtlasNextTask& t = tasks[i];
+		if(e.type == "proposed") {
+			t.title = e.name;
+			t.target = e.target;
+			t.state = "proposed";
+			t.assignee = e.assignee;
+		}
+		else if(e.type == "assigned")
+			t.assignee = e.assignee;
+		else if(e.type == "accepted" || e.type == "reopened")
+			t.state = "accepted";
+		else if(e.type == "done" || e.type == "dropped")
+			t.state = e.type;
+	}
+
+	for(int j = k + 1; j < n; j++) {
+		const AtlasVersion& v = f.versions[j];
+		AtlasNextVersion nv;
+		nv.vid = v.vid;
+		nv.label = AtlasVersionLabel(v.code);
+		bool ready = true;
+
+		for(const String& lit : v.requires) {
+			AtlasNextCondition c;
+			c.literal = lit;
+			c.met = w.Holds(lit);
+			ready = ready && c.met;
+			bool neg = lit.StartsWith("!");
+			String name = neg ? lit.Mid(1) : lit;
+			if(name.StartsWith("stage:")) {
+				Vector<String> p = Split(name, ':');
+				c.kind = "stage";
+				c.text = (p.GetCount() == 3 ? p[1] + " at " + p[2] + " or later" : name);
+				if(!c.met && p.GetCount() == 3) {
+					bool present = false;
+					for(const AtlasSubjectState& st : states)
+						present = present || (st.kind == "element" && st.id == p[1] && st.present);
+					c.how.Add(present ? "record stage " + p[2] + " for " + p[1] + " (Set stage on its row)"
+					                  : "add element " + p[1] + " at a version before " + v.vid);
+				}
+			}
+			else {
+				int ai = rules.FindAtom(name);
+				bool gate = ai >= 0 && rules.atoms[ai].gate;
+				c.kind = gate ? "gate" : "atom";
+				c.text = ai >= 0 && rules.atoms[ai].text.GetCount() ? rules.atoms[ai].text : name;
+				if(!c.met && !neg) {
+					for(const AtlasAction& a : rules.actions) {
+						if(IndexOf(a.effects, name) < 0)
+							continue;
+						Vector<String> missing;
+						for(const String& need : a.requires)
+							if(!w.Holds(need))
+								missing.Add(need);
+						c.how.Add(missing.IsEmpty() ? "run " + a.name + " (its requirements hold)"
+						                            : "run " + a.name + " after " + Join(missing, ", "));
+					}
+					if(c.how.IsEmpty())
+						c.how.Add("no action in the rules sets " + name);
+				}
+			}
+			nv.conditions.Add(pick(c));
+		}
+
+		for(const AtlasNextTask& t : tasks) {
+			if(t.target != v.vid || t.state == "proposed" || t.state == "dropped")
+				continue;
+			AtlasNextCondition c;
+			c.kind = "task";
+			c.literal = t.id;
+			c.text = t.id + (t.title.GetCount() ? " " + t.title : String());
+			c.met = t.state == "done";
+			ready = ready && c.met;
+			if(!c.met)
+				c.how.Add("finish " + t.id + (t.assignee.GetCount() ? " (" + t.assignee + ")" : " (nobody is assigned yet)"));
+			nv.conditions.Add(pick(c));
+		}
+
+		for(const AtlasConstraint& cn : rules.constraints) {
+			if(cn.from_vid.GetCount() && f.Find(cn.from_vid) > j)
+				continue;
+			if(cn.to_vid.GetCount() && f.Find(cn.to_vid) < j)
+				continue;
+			bool when = true;
+			for(const String& lit : cn.when)
+				when = when && w.Holds(lit);
+			if(!when)
+				continue;
+			Vector<String> unmet;
+			for(const String& lit : cn.must)
+				if(!w.Holds(lit))
+					unmet.Add(lit);
+			if(!unmet.GetCount())
+				continue;
+			AtlasNextCondition c;
+			c.kind = "constraint";
+			c.literal = cn.id;
+			c.text = cn.text.GetCount() ? cn.text : cn.id;
+			c.how.Add("satisfy " + Join(unmet, ", "));
+			ready = false;
+			nv.conditions.Add(pick(c));
+		}
+
+		nv.state = ready ? String("ready") : String("blocked");
+		out.versions.Add(pick(nv));
+	}
+
+	for(int j = k + 1; j < n; j++)
+		for(const AtlasNextTask& t : tasks) {
+			if(t.target != f.versions[j].vid || t.state == "done" || t.state == "dropped")
+				continue;
+			AtlasNextTask x = t;
+			out.todo.Add(pick(x));
+		}
+	return true;
+}
+
 END_UPP_NAMESPACE

@@ -32,6 +32,7 @@ static String ShellIcon(const String& id)
 	else if(id == "sliders")path = "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4";
 	else if(id == "check")  path = "M4 12l5 5L20 6";
 	else if(id == "alert")  path = "M12 3l10 18H2zM12 10v5M12 18h.01";
+	else if(id == "flag")   path = "M5 21V4M5 4h11l-2 4 2 4H5";
 	else return String();
 	return "<svg class=\"ad-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"" + path + "\"/></svg>";
 }
@@ -151,6 +152,13 @@ tr.is-filtered-out { display: none; }
 .ad-note-item { border-top: 1px solid var(--line); padding: 8px 0; }
 .ad-note-meta { color: var(--muted); font-size: .8rem; }
 .ad-note-input { width: min(100%, 520px); min-height: 70px; }
+.ad-checks { list-style: none; margin: 0; padding: 0; }
+.ad-checks > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.ad-checks > li.ad-how { display: block; border-top: 0; padding: 0 0 6px 26px; color: var(--muted); font-size: .9rem; }
+.ad-checks > li.ad-how ul { margin: 0; padding-left: 16px; }
+.ad-mark { display: inline-block; width: 18px; text-align: center; font-weight: 700; }
+.ad-checks > li.is-met .ad-mark { color: var(--st-active); }
+.ad-checks > li.is-open .ad-mark { color: var(--st-hot); }
 .ad-hint { border: 1px solid var(--st-hot); border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; background: color-mix(in srgb, var(--st-hot) 10%, var(--panel)); }
 .ad-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 8px 0 12px; }
 .ad-dl dt { color: var(--muted); font-size: .86rem; }

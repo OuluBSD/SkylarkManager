@@ -626,7 +626,74 @@ static const char *RoadmapTitle(const String& section)
 	if(section == "rules") return "Rules";
 	if(section == "tasks") return "Tasks";
 	if(section == "checks") return "Checks";
+	if(section == "next") return "What's next";
 	return "Versions";
+}
+
+// What's next: pick the version you are at; the versions ahead, their entry conditions and the steps that
+// would meet each one; the open tasks. Admins can accept or finish a task from here.
+static String NextBody(WebRequest& r, const RoadmapData& d, bool edit, const String& family)
+{
+	AtlasNext next;
+	String err;
+	String from = r.Param("from");
+	StringBuffer b;
+	if(!AtlasWhatsNext(d.head, d.f, d.rules, d.events, from, next, err)) {
+		b << "<p class=\"err\">" << AtlasEsc(err) << "</p>";
+		return String(b);
+	}
+	String head_vid = d.f.versions.IsEmpty() ? String() : d.f.versions[d.f.Head()].vid;
+	b << "<form method=\"get\" class=\"ad-form\"><label>I am at version <select name=\"from\">"
+	  << "<option value=\"\"" << (next.from.IsEmpty() ? " selected" : String()) << ">start</option>"
+	  << VersionOptions(d, next.from, false) << "</select></label>"
+	  << "<button class=\"ad-btn\" type=\"submit\">Show what is next</button></form>";
+	b << "<p class=\"ad-note\">"
+	  << (next.from.IsEmpty() ? String("From the start") : "From " + AtlasEsc(VidLabel(d, next.from)))
+	  << ". The default picks the version before the first blocked entry.</p>";
+	if(!next.versions.GetCount())
+		b << "<p class=\"ad-empty\">Nothing is ahead of this version.</p>";
+
+	for(const AtlasNextVersion& v : next.versions) {
+		b << "<section class=\"ad-panel\"><header><h2>" << AtlasEsc(v.label) << " <span class=\"ad-pill "
+		  << (v.state == "ready" ? "is-ok" : "is-warn") << "\">" << AtlasEsc(v.state) << "</span></h2>"
+		  << "<p>" << (v.conditions.GetCount() ? "Entry conditions" : "No entry conditions") << "</p></header><ul class=\"ad-checks\">";
+		for(const AtlasNextCondition& c : v.conditions) {
+			b << "<li class=\"" << (c.met ? "is-met" : "is-open") << "\"><span class=\"ad-mark\" aria-hidden=\"true\">"
+			  << (c.met ? "&#10003;" : "&#10007;") << "</span> <span class=\"ad-pill\">" << AtlasEsc(c.kind) << "</span> "
+			  << AtlasEsc(c.text) << (c.met ? String(" <span class=\"ad-empty\">met</span>") : String()) << "</li>";
+			if(!c.met && c.how.GetCount()) {
+				b << "<li class=\"ad-how\"><ul>";
+				for(const String& h : c.how)
+					b << "<li>" << AtlasEsc(h) << "</li>";
+				b << "</ul></li>";
+			}
+		}
+		b << "</ul></section>";
+	}
+
+	if(next.todo.GetCount()) {
+		b << "<section class=\"ad-panel\"><header><h2>Open tasks</h2><p>Work that must be done before a version ahead can be entered, by target.</p></header>"
+		  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Task</th><th>Target</th><th>State</th><th>Assignee</th>"
+		  << (edit ? "<th>Change</th>" : "") << "</tr>";
+		for(const AtlasNextTask& t : next.todo) {
+			b << "<tr><td><span class=\"ad-mono\">" << AtlasEsc(t.id) << "</span> " << AtlasEsc(t.title) << "</td><td>"
+			  << AtlasEsc(VidLabel(d, t.target)) << "</td><td><span class=\"ad-pill "
+			  << (t.state == "accepted" ? "is-warn" : "") << "\">" << AtlasEsc(t.state) << "</span></td><td>"
+			  << (t.assignee.IsEmpty() ? String("<span class=\"ad-empty\">nobody yet</span>") : AtlasEsc(t.assignee)) << "</td>";
+			if(edit) {
+				String hidden = "<input type=\"hidden\" name=\"id\" value=\"" + AtlasEsc(t.id) + "\"><input type=\"hidden\" name=\"vid\" value=\"" + AtlasEsc(head_vid) + "\">";
+				b << "<td>";
+				if(t.state == "proposed")
+					b << ApiForm(Api(r, family, "/task/accept"), "ad-inline") << hidden << "<button class=\"ad-btn\" type=\"submit\">Accept</button></form>";
+				if(t.state == "accepted")
+					b << ApiForm(Api(r, family, "/task/done"), "ad-inline") << hidden << "<button class=\"ad-btn is-primary\" type=\"submit\">Done</button></form>";
+				b << "</td>";
+			}
+			b << "</tr>";
+		}
+		b << "</table></div></section>";
+	}
+	return String(b);
 }
 
 static void RoadmapSection(WebRequest& r, const String& family, const String& section)
@@ -647,8 +714,9 @@ static void RoadmapSection(WebRequest& r, const String& family, const String& se
 	else if(section == "rules") body = RulesBody(r, d, edit, family);
 	else if(section == "tasks") body = TasksBody(r, d, edit, family);
 	else if(section == "checks") body = ChecksBody(r, d);
+	else if(section == "next") body = NextBody(r, d, edit, family);
 	else body = VersionsBody(r, d, edit, family);
-	if(!edit && section != "checks" && section != "timeline")
+	if(!edit && section != "checks" && section != "timeline" && section != "next")
 		body = "<p class=\"ad-note\">Read-only: editing needs the admin role on this site.</p>" + body;
 	String attrs = " data-csrf=\"" + AtlasEsc(r.CsrfToken()) + "\"";
 	body += "<script>" + AtlasRoadmapScript() + "</script>";

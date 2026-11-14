@@ -279,6 +279,34 @@ void AtlasSortEvents(Vector<AtlasEvent>& events, const AtlasFamily& f);
 bool AtlasStateAt(const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
                   const String& vid, Vector<AtlasSubjectState>& out, String& err);
 
+// What is needed to reach the versions after one. A condition is one literal, one accepted task, or one
+// constraint of a version's entry; how lists the steps that would meet it, when it is not met.
+struct AtlasNextCondition : Moveable<AtlasNextCondition> {
+	String         kind;      // gate | atom | stage | task | constraint
+	String         literal;   // the literal, or the task id, or the constraint id
+	String         text;      // what is needed, in words
+	bool           met = false;
+	Vector<String> how;
+};
+struct AtlasNextVersion : Moveable<AtlasNextVersion> {
+	String                       vid;
+	String                       label;
+	String                       state;   // ready | blocked
+	Vector<AtlasNextCondition>   conditions;
+};
+struct AtlasNextTask : Moveable<AtlasNextTask> {
+	String id, title, target, state, assignee;   // state: proposed | accepted | done | dropped
+};
+struct AtlasNext : Moveable<AtlasNext> {
+	String                   from;      // the version the plan starts from; "" is the start of the roadmap
+	Vector<AtlasNextVersion> versions;  // the versions after from, in order
+	Vector<AtlasNextTask>    todo;      // open tasks for those versions, by target
+};
+// The plan from a version. An empty from_vid picks the version before the first blocked entry (the head
+// when nothing is blocked). Events must be in replay order, as LoadRoadmap leaves them.
+bool AtlasWhatsNext(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                    const Vector<AtlasEvent>& events, const String& from_vid, AtlasNext& out, String& err);
+
 // Seed import. The transcription format (one element or edge per line):
 //   * '#' lines and blank lines are ignored.
 //   * Containment: 2 spaces per level, then "Name | kind | status | note".

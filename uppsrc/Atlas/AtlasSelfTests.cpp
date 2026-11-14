@@ -781,6 +781,78 @@ static void MarkdownChecks()
 	      "tasks accept assignment and note events");
 }
 
+// What is next: the demo plans from 0.1.0 with 1.0.0 blocked; a small family checks the steps it suggests.
+static void WhatsNextChecks()
+{
+	AtlasFamily f;
+	AtlasMap head;
+	AtlasRules rules;
+	Vector<AtlasEvent> events;
+	AtlasDemoModel(f, head, rules, events);
+	AtlasNext next;
+	String err;
+	Check(AtlasWhatsNext(head, f, rules, events, String(), next, err), "what is next plans the demo");
+	Check(next.from == "v5", "the demo plan starts at 0.1.0, before 1.0.0 is blocked");
+	Check(next.versions.GetCount() == 1 && next.versions[0].vid == "v6" && next.versions[0].state == "blocked",
+	      "1.0.0 is the only version ahead, and it is blocked");
+	bool gate_how = false, task_open = false;
+	if(next.versions.GetCount())
+		for(const AtlasNextCondition& c : next.versions[0].conditions) {
+			if(!c.met && c.kind == "gate" && c.how.GetCount())
+				gate_how = true;
+			if(!c.met && c.kind == "task")
+				task_open = true;
+		}
+	Check(gate_how, "the unmet gate of 1.0.0 names the action that sets it");
+	Check(task_open && next.todo.GetCount() > 0, "1.0.0 waits on an accepted task, which is in the open list");
+
+	AtlasNext at_head;
+	Check(AtlasWhatsNext(head, f, rules, events, "v6", at_head, err) && at_head.versions.IsEmpty() && at_head.todo.IsEmpty(),
+	      "from the head nothing is ahead");
+	AtlasNext unknown;
+	Check(!AtlasWhatsNext(head, f, rules, events, "v9", unknown, err), "an unknown version is refused");
+
+	AtlasFamily g;
+	g.head_key = "gen-v0.0.3";
+	AtlasVersion v1, v2, v3;
+	v1.vid = "v1"; v1.code = 1;
+	v2.vid = "v2"; v2.code = 2; v2.requires.Add("ready");
+	v3.vid = "v3"; v3.code = 3;
+	g.versions.Add(pick(v1));
+	g.versions.Add(pick(v2));
+	g.versions.Add(pick(v3));
+	AtlasMap gh;
+	gh.map = "gen";
+	gh.version = "v3";
+	AtlasRules gr;
+	AtlasAtomDef ready;
+	ready.name = "ready";
+	ready.text = "the box is ready";
+	ready.gate = true;
+	gr.atoms.Add(pick(ready));
+	AtlasAction make;
+	make.name = "make_ready";
+	make.effects.Add("ready");
+	make.requires.Add("!broken");
+	gr.actions.Add(pick(make));
+	Vector<AtlasEvent> none;
+
+	AtlasNext s;
+	Check(AtlasWhatsNext(gh, g, gr, none, String(), s, err), "what is next plans a synthetic family");
+	Check(s.from == "v1" && s.versions.GetCount() == 2, "the synthetic plan starts at v1 and sees two versions ahead");
+	if(s.versions.GetCount() == 2) {
+		Check(s.versions[0].state == "blocked" && s.versions[1].state == "ready",
+		      "v2 is blocked on ready, and v3 has no entry condition");
+		Check(s.versions[0].conditions.GetCount() == 1 && s.versions[0].conditions[0].kind == "gate"
+		      && s.versions[0].conditions[0].how.GetCount() == 1
+		      && s.versions[0].conditions[0].how[0] == "run make_ready (its requirements hold)",
+		      "the gate's step is the action that sets it, with its requirements met");
+	}
+	AtlasNext from_v2;
+	Check(AtlasWhatsNext(gh, g, gr, none, "v2", from_v2, err) && from_v2.versions.GetCount() == 1
+	      && from_v2.versions[0].state == "ready", "from v2 only v3 is ahead, and it is ready");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -794,6 +866,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	RoadmapChecks();
 	DemoChecks();
 	MarkdownChecks();
+	WhatsNextChecks();
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }
