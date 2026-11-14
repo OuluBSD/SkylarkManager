@@ -91,7 +91,8 @@ String AtlasScript()
   var NS = 'http://www.w3.org/2000/svg';
   // Overview tiles: one size for every block, so titles stay readable whatever the block sizes stored.
   var TILE_W = 220, TILE_H = 96, TILE_GAP = 24, TILE_PAD = 12;
-  var MIN_SCALE = 0.2, MAX_SCALE = 6, FIT_MAX_SCALE = 2;
+  // The floor is low enough that Fit can show a layout many times the stored world size.
+  var MIN_SCALE = 0.02, MAX_SCALE = 6, FIT_MAX_SCALE = 2;
   var data = JSON.parse(document.getElementById('atlas-data').textContent);
   var map = data.map;
   var revision = data.revision;
@@ -324,17 +325,20 @@ String AtlasScript()
     if (upButton) { upButton.disabled = !view.plane; }
 
     var contents = !!(contentsBox && contentsBox.checked);
-    var parent = view.plane ? find(view.plane) : null;
     var root = node('g', {});
     svg.appendChild(root);
     view.root = root;
     var kids = childrenOf(view.plane);
-    var size = { w: parent ? parent.w : map.world.width, h: parent ? parent.h : map.world.height };
     view.tiles = {};
+    // The fit uses the drawn content only. The stored world size can be smaller than the layout.
     if (contents) {
-      view.contentW = size.w;
-      view.contentH = size.h;
-      root.appendChild(node('rect', { x: 0, y: 0, width: size.w, height: size.h, 'class': 'plane' }));
+      view.contentW = 1;
+      view.contentH = 1;
+      kids.forEach(function (e) {
+        view.contentW = Math.max(view.contentW, e.x + e.w);
+        view.contentH = Math.max(view.contentH, e.y + e.h);
+      });
+      root.appendChild(node('rect', { x: 0, y: 0, width: view.contentW, height: view.contentH, 'class': 'plane' }));
       kids.forEach(function (e) {
         if (e.kind === 'sea') { drawTree(root, e); }
       });
@@ -343,8 +347,8 @@ String AtlasScript()
       });
     } else {
       var grid = layoutTiles(kids.filter(function (e) { return e.kind !== 'sea'; }));
-      view.contentW = Math.max(size.w, grid.w, 1);
-      view.contentH = Math.max(size.h, grid.h, 1);
+      view.contentW = Math.max(grid.w, 1);
+      view.contentH = Math.max(grid.h, 1);
       root.appendChild(node('rect', { x: 0, y: 0, width: view.contentW, height: view.contentH, 'class': 'plane' }));
       kids.forEach(function (e) {
         var t = view.tiles[e.id];
