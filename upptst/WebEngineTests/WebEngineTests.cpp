@@ -1387,6 +1387,47 @@ CONSOLE_APP_MAIN
 	host.BindSite(ATLAS_PORT, "atlas");
 	TheWebEngine().Broker().Register("alpha", new AlphaService);
 	RegisterMetaAccountService("meta", TheWebEngine().FindSite("meta")->Accounts(), *s_meta_grants);
+
+	// --- provisioning role denial (task 042): a consent never proposes an elevated role ---
+	{
+		bool refused = true;
+		const char *denied[] = { "admin", "owner", "editor", "finance" };
+		for(const char *role : denied) {
+			BrokerCallContext ctx;
+			ctx.from_site = "atlas";
+			ctx.to_site = "meta";
+			BrokerCall call;
+			call.op = "request-provision";
+			call.payload.Add("subject_user_id", "wau_role_probe");
+			call.payload.Add("client_site", "atlas");
+			call.payload.Add("client_id", "sso");
+			call.payload.Add("proposed_username", String("probe-") + role);
+			call.payload.Add("proposed_role", role);
+			ValueArray sc;
+			sc.Add("sso");
+			call.payload.Add("scopes", sc);
+			refused = refused && !TheWebEngine().Broker().Call(ctx, call).ok;
+		}
+		Check(refused, "consent refuses elevated roles (admin, owner, editor, finance)");
+
+		BrokerCallContext ctx;
+		ctx.from_site = "atlas";
+		ctx.to_site = "meta";
+		BrokerCall call;
+		call.op = "request-provision";
+		call.payload.Add("subject_user_id", "wau_role_probe");
+		call.payload.Add("client_site", "atlas");
+		call.payload.Add("client_id", "sso");
+		call.payload.Add("proposed_username", "probe-reader");
+		call.payload.Add("proposed_role", "reader");
+		ValueArray sc;
+		sc.Add("sso");
+		call.payload.Add("scopes", sc);
+		BrokerResult probe_res = TheWebEngine().Broker().Call(ctx, call);
+		if(!probe_res.ok)
+			Cout() << "provision probe error: " << probe_res.error << " status " << probe_res.status << "\n";
+		Check(probe_res.ok, "consent proposes the least-privilege reader role");
+	}
 	TheWebEngine().Broker().Register("science", new ScienceService(*s_sci_corpus));
 	TheWebEngine().Broker().Register("company", new FakeCompanyService());
 
@@ -2656,7 +2697,8 @@ CONSOLE_APP_MAIN
 			}
 			covered = covered && found;
 		}
-		Check(posts == 3 && covered && cmds.GetCount() == 4,
+		// login, logout, sso/link and sso/provision (task 042) with the switch on.
+		Check(posts == 4 && covered && cmds.GetCount() == 5,
 		      "session POST routes each have a manifest command with the same path and method");
 		TheWebEngine().SetMetaSso(false);
 		EngineSite quiet;

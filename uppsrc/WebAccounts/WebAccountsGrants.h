@@ -18,6 +18,8 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 	String client_site;     // requesting site id
 	String client_id;       // app identity within the site
 	String client_user_id;  // client-site user the grant serves (empty = legacy/operator-made)
+	String proposed_username; // provisioning request: local account to create on client_site (task 042)
+	String proposed_role;     // role for that account; never an elevated role
 	Vector<String> scopes;
 	String state;           // "requested" | "granted" | "denied" | "revoked"
 	Time   requested_at;
@@ -28,6 +30,7 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 	WebAccountGrant(const WebAccountGrant& o)
 		: grant_id(o.grant_id), subject_user_id(o.subject_user_id)
 		, client_site(o.client_site), client_id(o.client_id), client_user_id(o.client_user_id)
+		, proposed_username(o.proposed_username), proposed_role(o.proposed_role)
 		, scopes(clone(o.scopes)), state(o.state)
 		, requested_at(o.requested_at), decided_at(o.decided_at), expires_at(o.expires_at) {}
 	WebAccountGrant& operator=(const WebAccountGrant& o) {
@@ -37,6 +40,8 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 			client_site = o.client_site;
 			client_id = o.client_id;
 			client_user_id = o.client_user_id;
+			proposed_username = o.proposed_username;
+			proposed_role = o.proposed_role;
 			scopes = clone(o.scopes);
 			state = o.state;
 			requested_at = o.requested_at;
@@ -49,6 +54,7 @@ struct WebAccountGrant : Moveable<WebAccountGrant> {
 	void Jsonize(JsonIO& io) {
 		io("grant_id", grant_id)("subject_user_id", subject_user_id)
 		  ("client_site", client_site)("client_id", client_id)("client_user_id", client_user_id)
+		  ("proposed_username", proposed_username)("proposed_role", proposed_role)
 		  ("scopes", scopes)
 		  ("state", state)("requested_at", requested_at)("decided_at", decided_at)
 		  ("expires_at", expires_at);
@@ -79,6 +85,17 @@ public:
 	StoreResult RequestGrantAs(const String& subject_user_id, const String& client_user_id,
 	                           const String& client_site, const String& client_id,
 	                           const Vector<String>& scopes, String& grant_id, bool& existed);
+	// A provisioning request (task 042): no local account yet. On approval the client site creates
+	// proposed_username with proposed_role, then ApproveProvision binds it.
+	StoreResult RequestProvision(const String& subject_user_id, const String& client_site,
+	                             const String& client_id, const String& proposed_username,
+	                             const String& proposed_role, const Vector<String>& scopes,
+	                             String& grant_id, bool& existed);
+	StoreResult ApproveProvision(const String& grant_id, const String& client_user_id);
+	StoreResult RequestGrantProposal(const String& subject_user_id, const String& client_user_id,
+	                                 const String& client_site, const String& client_id,
+	                                 const String& proposed_username, const String& proposed_role,
+	                                 const Vector<String>& scopes, String& grant_id, bool& existed);
 	bool        GetGrant(const String& grant_id, WebAccountGrant& out);
 	bool        FindActive(const String& subject_user_id, const String& client_site,
 	                       const Vector<String>& scopes, WebAccountGrant& out);

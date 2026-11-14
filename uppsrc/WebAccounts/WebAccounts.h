@@ -107,6 +107,10 @@ public:
 	StoreResult CreateUser(const String& username, const String& password,
 	                       const String& display_name, const Vector<String>& roles,
 	                       String& user_id, bool& existed);
+	// An account for a MetaAccount-provisioned visitor (task 042). It gets a random password that is
+	// never shown or stored, so only a validated central session can open it (AdoptUserSession).
+	StoreResult CreateSsoUser(const String& username, const String& display_name, const Vector<String>& roles,
+	                          String& user_id, bool& existed);
 	bool        FindUserByUsername(const String& username, WebAccountUser& out);
 	bool        GetUser(const String& user_id, WebAccountUser& out);
 	StoreResult VerifyPassword(const String& username, const String& password, WebAccountUser& out);

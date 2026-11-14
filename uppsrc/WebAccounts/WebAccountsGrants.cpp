@@ -25,6 +25,27 @@ StoreResult WebGrants::RequestGrantAs(const String& subject_user_id, const Strin
                                       const String& client_site, const String& client_id,
                                       const Vector<String>& scopes, String& grant_id, bool& existed)
 {
+	return RequestGrantProposal(subject_user_id, client_user_id, client_site, client_id, String(), String(),
+	                            scopes, grant_id, existed);
+}
+
+StoreResult WebGrants::RequestProvision(const String& subject_user_id, const String& client_site,
+                                        const String& client_id, const String& proposed_username,
+                                        const String& proposed_role, const Vector<String>& scopes,
+                                        String& grant_id, bool& existed)
+{
+	if(proposed_username.IsEmpty() || proposed_role.IsEmpty())
+		return StoreResult("provisioning needs a username and a role");
+	return RequestGrantProposal(subject_user_id, String(), client_site, client_id, proposed_username,
+	                            proposed_role, scopes, grant_id, existed);
+}
+
+// The grant request behind both entry points. A proposal makes a different request from a plain link.
+StoreResult WebGrants::RequestGrantProposal(const String& subject_user_id, const String& client_user_id,
+                                            const String& client_site, const String& client_id,
+                                            const String& proposed_username, const String& proposed_role,
+                                            const Vector<String>& scopes, String& grant_id, bool& existed)
+{
 	existed = false;
 	if(subject_user_id.IsEmpty() || client_site.IsEmpty())
 		return StoreResult("grant request needs subject and client site");
@@ -45,6 +66,7 @@ StoreResult WebGrants::RequestGrantAs(const String& subject_user_id, const Strin
 			LoadFromJsonValue(g, v);
 			if(g.subject_user_id == subject_user_id && g.client_site == client_site
 			&& g.client_id == client_id && g.client_user_id == client_user_id
+			&& g.proposed_username == proposed_username
 			&& (g.IsActive() || g.state == "requested")) {
 				existed = true;
 				grant_id = g.grant_id;
@@ -60,6 +82,8 @@ StoreResult WebGrants::RequestGrantAs(const String& subject_user_id, const Strin
 	g.client_site = client_site;
 	g.client_id = client_id;
 	g.client_user_id = client_user_id;
+	g.proposed_username = proposed_username;
+	g.proposed_role = proposed_role;
 	g.scopes <<= scopes;
 	g.state = "requested";
 	g.requested_at = GetSysTime();
@@ -183,6 +207,24 @@ StoreResult WebGrants::Decide(const String& grant_id, bool approve)
 	if(g.state != "requested")
 		return StoreResult("grant is not pending");
 	g.state = approve ? "granted" : "denied";
+	g.decided_at = GetSysTime();
+	String json, rev;
+	Store().Get(grant_id, json, rev);
+	return Store().Put(grant_id, StoreAsJson(g, true), rev, rev);
+}
+
+// Binds a provisioned local account to a pending provisioning request and grants it (task 042).
+StoreResult WebGrants::ApproveProvision(const String& grant_id, const String& client_user_id)
+{
+	WebAccountGrant g;
+	if(!GetGrant(grant_id, g))
+		return StoreResult("unknown grant");
+	if(g.state != "requested" || g.proposed_username.IsEmpty())
+		return StoreResult("grant is not a pending provisioning request");
+	if(client_user_id.IsEmpty())
+		return StoreResult("no local account to bind");
+	g.client_user_id = client_user_id;
+	g.state = "granted";
 	g.decided_at = GetSysTime();
 	String json, rev;
 	Store().Get(grant_id, json, rev);

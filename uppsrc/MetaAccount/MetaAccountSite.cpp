@@ -271,6 +271,49 @@ static void MetaTotpDisable(WebRequest& r)
 	r.Json(JsonOk(true));
 }
 
+// Roles a consent can never grant: an approval of a new local account must not hand out authority
+// (task 042). Least privilege: the site's own role for a new visitor is chosen from the rest.
+static bool SsoRoleAllowed(const String& role)
+{
+	static const char* const elevated[] = { "admin", "owner", "editor", "finance" };
+	if(role.IsEmpty())
+		return false;
+	for(const char* e : elevated)
+		if(role == e)
+			return false;
+	return true;
+}
+
+// Creates the local account a provisioning request proposed. Refuses a username already in use on
+// the client site: nothing is created or linked, and an operator must map the account (task 042).
+static bool ProvisionLocalAccount(const WebAccountGrant& g, String& user_id, String& error)
+{
+	EngineSite *site = TheWebEngine().FindSite(g.client_site);
+	if(!site) {
+		error = "the requesting site is not composed";
+		return false;
+	}
+	if(!SsoRoleAllowed(g.proposed_role)) {
+		error = "this role cannot be granted by consent";
+		return false;
+	}
+	WebAccountUser existing;
+	if(site->Accounts().FindUserByUsername(g.proposed_username, existing)) {
+		error = "the username '" + g.proposed_username + "' is already used on this site. "
+		        "Nothing was linked; an operator must map that account.";
+		return false;
+	}
+	Vector<String> roles;
+	roles.Add(g.proposed_role);
+	bool existed = false;
+	StoreResult st = site->Accounts().CreateSsoUser(g.proposed_username, g.proposed_username, roles, user_id, existed);
+	if(!st.ok) {
+		error = st.error;
+		return false;
+	}
+	return true;
+}
+
 static void MetaConsentList(WebRequest& r)
 {
 	if(!r.HasUser()) {
@@ -283,7 +326,9 @@ static void MetaConsentList(WebRequest& r)
 	body << "<table border=\"1\"><tr><th>client</th><th>client user</th><th>scopes</th><th>state</th><th></th></tr>";
 	for(const WebAccountGrant& g : all) {
 		body << "<tr><td>" + g.client_site + "/" + g.client_id + "</td><td>"
-		   << (g.client_user_id.IsEmpty() ? String("(any session of the subject)") : g.client_user_id)
+		   << (!g.proposed_username.IsEmpty()
+		       ? "new local account <b>" + EscText(g.proposed_username) + "</b>, role " + EscText(g.proposed_role)
+		       : g.client_user_id.IsEmpty() ? String("(any session of the subject)") : g.client_user_id)
 		   << "</td><td>" << Join(g.scopes, ", ") << "</td><td>" << g.state << "</td><td>";
 		if(g.state == "requested")
 			body << HtmlForm(r.Site().Url("consent/decide:POST"), r.CsrfToken(),
@@ -396,6 +441,21 @@ static void MetaConsentDecide(WebRequest& r)
 	// The decider must be the grant's subject.
 	if(g.subject_user_id != r.User().user_id) {
 		FormDone(r, "consent", JsonOk(false, "not your grant"), 403);
+		return;
+	}
+	if(approve && g.state == "requested" && !g.proposed_username.IsEmpty()) {
+		String uid, err;
+		if(!ProvisionLocalAccount(g, uid, err)) {
+			FormDone(r, "consent", JsonOk(false, err), 409);
+			return;
+		}
+		StoreResult bound = Grants().ApproveProvision(grant_id, uid);
+		if(!bound.ok) {
+			FormDone(r, "consent", JsonOk(false, bound.error), 409);
+			return;
+		}
+		ConsentEvent(g.subject_user_id, g.client_site, "meta:" + r.User().username, "consent.granted");
+		FormDone(r, "consent", JsonOk(true));
 		return;
 	}
 	// Approve/deny only pending requests; revoke only active grants. (Deny on
@@ -515,6 +575,40 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 			              String().Cat() << "Access requested for " << client_site
 			                             << (client_user.IsEmpty() ? String() : String(" by ") + client_user),
 			              "meta:/consent");
+		r.ok = true;
+		r.status = 200;
+		r.payload.Add("grant_id", grant_id);
+		r.payload.Add("existed", existed);
+		return r;
+	}
+	if(call.op == "request-provision") {
+		String subject = call.payload.Get("subject_user_id");
+		String client_site = call.payload.Get("client_site");
+		String role = call.payload.Get("proposed_role");
+		if(!SsoRoleAllowed(role)) {
+			r.status = 400;
+			r.error = "this role cannot be granted by consent";
+			return r;
+		}
+		Vector<String> scopes;
+		Value sv = call.payload.Get("scopes");
+		if(sv.Is<ValueArray>())
+			for(const Value& s : (ValueArray)sv)
+				scopes.Add((String)s);
+		String grant_id;
+		bool existed = false;
+		StoreResult st = grants.RequestProvision(subject, client_site, call.payload.Get("client_id"),
+		                                         call.payload.Get("proposed_username"), role, scopes,
+		                                         grant_id, existed);
+		if(!st.ok) {
+			r.status = 400;
+			r.error = st.error;
+			return r;
+		}
+		if(!existed && Inbox())
+			Inbox()->Push(subject, client_site, "consent.requested",
+			              client_site + ":new account",
+			              "A new local account was proposed for " + client_site, "meta:/consent");
 		r.ok = true;
 		r.status = 200;
 		r.payload.Add("grant_id", grant_id);

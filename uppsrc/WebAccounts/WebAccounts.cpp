@@ -1,4 +1,5 @@
 #include "WebAccounts.h"
+#include "WebAccountsGrants.h"
 #include "WebAccountsTotp.h"
 #include <WebAuth/WebAuthCrypto.h>
 
@@ -97,6 +98,14 @@ StoreResult SiteAccounts::CreateUser(const String& username, const String& passw
 		user_id = u.user_id;
 	mutex.Leave();
 	return r;
+}
+
+// The password is random and discarded, so no one can type it: the account opens only through a
+// validated central session (task 042).
+StoreResult SiteAccounts::CreateSsoUser(const String& username, const String& display_name,
+                                        const Vector<String>& roles, String& user_id, bool& existed)
+{
+	return CreateUser(username, WebAuthRandomBytes(32), display_name, roles, user_id, existed);
 }
 
 bool SiteAccounts::FindUserByUsername(const String& username, WebAccountUser& out)
@@ -544,6 +553,49 @@ StoreResult RunAll(const String& root, String& report)
 	all &= Check(rep, b.SetDisabled(au.user_id, true).ok && !b.AdoptUserSession(au.user_id, "127.0.0.1", adopt_sid, adopt_csrf, adopt_err).ok,
 	             "adoption refuses a disabled user");
 	all &= Check(rep, b.SetDisabled(au.user_id, false).ok, "re-enable alice after the disabled check");
+
+	// Provisioning (task 042): a MetaAccount-provisioned account has no password a visitor can type,
+	// and it opens only through adoption, with the roles it was created with.
+	WebAccountUser pu;
+	String pid;
+	bool pexisted = false;
+	all &= Check(rep, b.CreateSsoUser("carol", "Carol C", {"reader"}, pid, pexisted).ok && !pexisted,
+	             "SSO provisioning creates a local account");
+	all &= Check(rep, b.FindUserByUsername("carol", pu) && pu.roles.GetCount() == 1 && pu.roles[0] == "reader",
+	             "provisioned account gets only the requested default role");
+	String pw_sid, pw_csrf, pw_err;
+	WebAccountUser pl;
+	all &= Check(rep, !b.Login("carol", "any-guess", "127.0.0.1", pw_sid, pw_csrf, pl, pw_err).ok,
+	             "provisioned account cannot sign in with a password");
+	String pad_sid, pad_csrf, pad_err;
+	all &= Check(rep, b.AdoptUserSession(pid, "127.0.0.1", pad_sid, pad_csrf, pad_err).ok,
+	             "provisioned account opens through adoption");
+	String dup_id;
+	bool dup_existed = false;
+	all &= Check(rep, !b.CreateSsoUser("carol", "Carol again", {"reader"}, dup_id, dup_existed).ok && dup_existed && dup_id == pid,
+	             "a second provisioning for the same username is refused and links nothing new");
+
+	// Provisioning requests (task 042): one pending request per subject, client site, client id and
+	// proposed username; approval binds the created account and grants it once.
+	WebGrants pg_store("selftest_b", AppendFileName(root, "grants_b"));
+	Vector<String> psc;
+	psc.Add("sso");
+	String pg1, pg2, pg3;
+	bool pe1 = false, pe2 = false, pe3 = false;
+	all &= Check(rep, pg_store.RequestProvision("wau_subject", "science", "sso", "dave", "reader", psc, pg1, pe1).ok && !pe1,
+	             "provisioning request is pending");
+	all &= Check(rep, pg_store.RequestProvision("wau_subject", "science", "sso", "dave", "reader", psc, pg2, pe2).ok
+	                  && pe2 && pg2 == pg1,
+	             "the same provisioning request is not duplicated");
+	all &= Check(rep, pg_store.RequestProvision("wau_subject", "science", "sso", "erin", "reader", psc, pg3, pe3).ok
+	                  && !pe3 && pg3 != pg1,
+	             "a different proposed username is a separate request");
+	all &= Check(rep, pg_store.ApproveProvision(pg1, pid).ok, "approval binds the provisioned account");
+	WebAccountGrant pgr;
+	all &= Check(rep, pg_store.GetGrant(pg1, pgr) && pgr.state == "granted" && pgr.client_user_id == pid,
+	             "bound grant is granted to the created account");
+	all &= Check(rep, !pg_store.ApproveProvision(pg1, pid).ok, "a granted provisioning request cannot be approved twice");
+	all &= Check(rep, !pg_store.ApproveProvision(pg3, "").ok, "approval without an account binds nothing");
 
 	report = Join(rep, "");
 	return all ? StoreResult(true) : StoreResult("WebAccounts self test failures:\n" + report);

@@ -24,7 +24,7 @@ public:
 	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override;
 
 	static bool SupportedOp(const String& op) {
-		return op == "ping" || op == "authenticate" || op == "request-consent"
+		return op == "ping" || op == "authenticate" || op == "request-consent" || op == "request-provision"
 		    || op == "check-grant" || op == "revoke-grant" || op == "notify" || op == "resolve-session";
 	}
 

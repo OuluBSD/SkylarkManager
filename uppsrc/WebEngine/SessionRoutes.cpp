@@ -112,6 +112,23 @@ static const char* SSO_SCOPE = "sso";
 static const int   SSO_SUPPRESS_DAYS = 30;
 
 // The marker a deliberate local sign-out sets. Only session/sso clears it.
+// The lowest existing role a new visitor's account gets on each site (task 042, per S1). An empty
+// role means the site does not offer provisioning: the visitor keeps the public pages only.
+//   atlas        reader     Atlas edits need the admin role; reader is read-only.
+//   financials   viewer     ledger:read only; finance is never granted by consent.
+//   science      reader     author needs science-author; public reads only.
+//   channels     viewer     read-only; no write role exists to grant.
+//   privatehub, taskfoundry, youtubeplanner, meta: no provisioning (private or write roles,
+//   or no login role needed, or the identity provider itself).
+static String SsoDefaultRole(const String& site_id)
+{
+	if(site_id == "atlas" || site_id == "science")
+		return "reader";
+	if(site_id == "financials" || site_id == "channels")
+		return "viewer";
+	return String();
+}
+
 static String SsoSuppressName(const String& site_id)
 {
 	return SiteAccounts::CookieNameFor(site_id) + "_sso_off";
@@ -192,7 +209,7 @@ bool SsoReturnAllowed(WebRequest& r, const String& url)
 }
 
 // The central account behind this request's MetaAccount cookie, or false.
-static bool SsoCentralUser(WebRequest& r, BrokerCallContext& ctx, String& subject)
+static bool SsoCentralUser(WebRequest& r, BrokerCallContext& ctx, String& subject, String* username = nullptr)
 {
 	String central = r.RequestCookie(SiteAccounts::CookieNameFor(SSO_IDP_SITE));
 	if(central.IsEmpty())
@@ -204,6 +221,8 @@ static bool SsoCentralUser(WebRequest& r, BrokerCallContext& ctx, String& subjec
 	if(!w.ok)
 		return false;
 	subject = w.payload.Get("user_id");
+	if(username)
+		*username = w.payload.Get("username");
 	return subject.GetCount() > 0;
 }
 
@@ -283,9 +302,24 @@ static void SsoContinue(WebRequest& r)
 	String login = SsoSiteUrl(r, SSO_IDP_SITE, "/login");
 	if(login.GetCount() && back.GetCount())
 		login << "?next=" << UrlEncode(back);
+	// A central session with no link to this site can ask for a new local account (task 042).
+	String offer;
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = SSO_IDP_SITE;
+	String subject, username;
+	if(!SsoDefaultRole(r.Site().id).IsEmpty() && SsoCentralUser(r, ctx, subject, &username)) {
+		String csrf = r.CsrfToken().IsEmpty()
+			? String()
+			: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
+		offer = "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/sso/provision")) + "\">" + csrf +
+		        "<p>Ask MetaAccount to create a <b>" + EscHtml(username) + "</b> account on this site. "
+		        "Nothing is created until you approve it on MetaAccount.</p>"
+		        "<p><button type=\"submit\">Request account</button></p></form>";
+	}
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"
-	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>"
+	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>" + offer +
 	       "<p><a href=\"" + EscHtml(login) + "\">Sign in to MetaAccount</a></p>"
 	       "</body></html>");
 }
@@ -307,6 +341,49 @@ static void SsoReply(WebRequest& r, const ValueMap& m, int code)
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Link not requested</title></head><body>"
 	       "<h1>Link not requested</h1><p>" + EscHtml((String)m.Get("error")) + "</p>"
 	       "<p><a href=\"" + EscHtml(r.Site().Url("")) + "\">Back to this site</a></p></body></html>");
+}
+
+// POST session/sso/provision: a visitor with a MetaAccount session and no link asks MetaAccount to
+// create a local account here. The request is a consent the central user approves (task 042).
+static void SsoProvision(WebRequest& r)
+{
+	ValueMap m;
+	BrokerCallContext ctx;
+	ctx.from_site = r.Site().id;
+	ctx.to_site = SSO_IDP_SITE;
+	String subject, username;
+	if(SsoDefaultRole(r.Site().id).IsEmpty()) {
+		m.Add("ok", false);
+		m.Add("error", "this site does not offer a new account from MetaAccount");
+		SsoReply(r, m, 403);
+		return;
+	}
+	if(!SsoCentralUser(r, ctx, subject, &username)) {
+		m.Add("ok", false);
+		m.Add("error", "no active MetaAccount session in this browser");
+		SsoReply(r, m, 401);
+		return;
+	}
+	BrokerCall c;
+	c.op = "request-provision";
+	c.payload.Add("subject_user_id", subject);
+	c.payload.Add("client_site", r.Site().id);
+	c.payload.Add("client_id", "sso");
+	c.payload.Add("proposed_username", username);
+	c.payload.Add("proposed_role", SsoDefaultRole(r.Site().id));
+	ValueArray scopes;
+	scopes.Add(SSO_SCOPE);
+	c.payload.Add("scopes", scopes);
+	BrokerResult cr = TheWebEngine().Broker().Call(ctx, c);
+	if(!cr.ok) {
+		m.Add("ok", false);
+		m.Add("error", cr.error);
+		SsoReply(r, m, cr.status);
+		return;
+	}
+	m.Add("ok", true);
+	m.Add("status", "account requested on the MetaAccount consent page");
+	SsoReply(r, m, 200);
 }
 
 // POST session/sso/link: a signed-in local user asks the central account to link
@@ -485,6 +562,7 @@ void InstallSessionRoutes(EngineSite& site)
 		site.Router().Add("session/sso", SsoContinue);
 		site.Router().Add("session/sso/diagnostics", SsoDiagnostics);
 		site.Router().Add("session/sso/link:POST", SsoLink);
+		site.Router().Add("session/sso/provision:POST", SsoProvision);
 	}
 
 	CommandManifest& cm = TheWebEngine().Manifest();
@@ -496,8 +574,12 @@ void InstallSessionRoutes(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("session-whoami", "GET", "session/whoami", "open session",
 	                                        "json", "Show the signed-in account", {}));
 	if(TheWebEngine().MetaSso())
+	if(TheWebEngine().MetaSso()) {
 		cm.Add(site.id, site.title, HttpCommand("session-sso-link", "POST", "session/sso/link", "open session",
 		                                        "json", "Ask MetaAccount to link this account to this site", {}));
+		cm.Add(site.id, site.title, HttpCommand("session-sso-provision", "POST", "session/sso/provision", "any visitor with a MetaAccount session",
+		                                        "json", "Ask MetaAccount to create a local account for this visitor on this site", {}));
+	}
 }
 
 END_UPP_NAMESPACE
