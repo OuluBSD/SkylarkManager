@@ -103,17 +103,16 @@ String RenderShellAccountRow(const UserSession& sess, const String& return_url)
 	return h;
 }
 
-// One link per webapp. The href is the webapp's own URL and the target is the
-// frame, so a click changes only the frame; aria-current marks the selection.
-static String PortalLink(const PortalWebapp& app, bool selected, const String& css_class)
+// One rail link per webapp. The icon sits in a fixed box, and the label shows only while the rail is
+// open, so the icon never moves. The href is the webapp's own URL and the target is the frame, so a
+// click changes only the frame; aria-current marks the selection.
+static String PortalLink(const PortalWebapp& app, bool selected)
 {
 	String h;
-	h << "<a class=\"" << css_class << "\" href=\"" << EscapeHtml(app.url) << "\" target=\"portal-frame\" data-app=\""
+	h << "<a class=\"portal-rail-link\" href=\"" << EscapeHtml(app.url) << "\" target=\"portal-frame\" data-app=\""
 	  << EscapeHtml(app.id) << "\"" << (selected ? " aria-current=\"page\"" : "") << " title=\"" << EscapeHtml(app.title) << "\">"
-	  << VividIcon::Get(app.icon.IsEmpty() ? String("layers") : app.icon, 18);
-	if(css_class == "portal-link")
-		h << "<span>" << EscapeHtml(app.title) << "</span>";
-	h << "</a>\n";
+	  << VividIcon::Get(app.icon.IsEmpty() ? String("layers") : app.icon, 18)
+	  << "<span class=\"portal-rail-label\">" << EscapeHtml(app.title) << "</span></a>\n";
 	return h;
 }
 
@@ -125,33 +124,33 @@ static String PortalShellStyles()
 	return
 		"<style>\n"
 		"  [hidden] { display: none !important; }\n"
-		"  .portal-shell { position: relative; display: flex; gap: 0.75rem; height: calc(100vh - 3.5rem); min-height: 480px; padding: 0.75rem; box-sizing: border-box; }\n"
-		"  .portal-rail { width: 4rem; flex: 0 0 4rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; padding: 0.75rem 0; background: #171b33; border-radius: 16px; }\n"
-		"  .portal-rail-link { width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; border-radius: 12px; color: #aab3dc; text-decoration: none; }\n"
-		"  .portal-rail-link:hover { background: rgba(255,255,255,0.08); color: #ffffff; }\n"
-		"  .portal-rail-link[aria-current=\"page\"] { background: #4a4fb8; color: #ffffff; }\n"
-		"  .portal-rail-toggle { width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 12px; background: transparent; color: #aab3dc; font: inherit; font-size: 1.25rem; cursor: pointer; }\n"
-		"  .portal-rail-toggle:hover, .portal-rail-toggle:focus-visible { background: rgba(255,255,255,0.08); color: #ffffff; }\n"
-		"  /* The labelled list is an overlay: it never takes layout space, so the frame does not resize. */\n"
-		"  .portal-panel { position: absolute; top: 0.75rem; bottom: 0.75rem; left: 5.5rem; z-index: 20; width: 10rem; display: flex; flex-direction: column; gap: 0.2rem; padding: 0.75rem 0.5rem; background: #1d2242; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); overflow-y: auto; visibility: hidden; opacity: 0; }\n"
-		"  .portal-panel::before { content: ''; position: absolute; top: 0; bottom: 0; right: 100%; width: 1.25rem; }\n"
-		"  .portal-rail:hover ~ .portal-panel, .portal-panel:hover, .portal-shell.portal-open .portal-panel { visibility: visible; opacity: 1; }\n"
-		"  .portal-group { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8b93c4; padding: 0.5rem 0.5rem 0.25rem; }\n"
-		"  .portal-link { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem; border-radius: 10px; color: #d6dcf5; text-decoration: none; font-size: 0.875rem; }\n"
-		"  .portal-link:hover { background: rgba(255,255,255,0.07); }\n"
-		"  .portal-link[aria-current=\"page\"] { background: #3a3f95; color: #ffffff; font-weight: 600; }\n"
-		"  .portal-account { margin-top: auto; padding: 0.6rem 0.5rem 0.2rem; border-top: 1px solid rgba(255,255,255,0.08); }\n"
-		"  .portal-account-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #d6dcf5; }\n"
-		"  .portal-avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg,#00a1c5,#6d55aa); display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #ffffff; }\n"
-		"  .portal-account-link { color: #aab3dc; text-decoration: none; }\n"
-		"  .portal-account-link:hover { color: #ffffff; }\n"
-		"  .portal-login { padding: 0.3rem 0.6rem; border-radius: 8px; background: #4a4fb8; color: #ffffff; }\n"
-		"  .portal-main { position: relative; flex: 1 1 auto; min-width: 0; min-height: 420px; background: #0f1326; border-radius: 16px; overflow: hidden; }\n"
-		"  .portal-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }\n"
-		"  .portal-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1rem; background: rgba(15,19,38,0.9); color: #d6dcf5; text-align: center; }\n"
-		"  .portal-status button, .portal-status a { padding: 0.4rem 0.9rem; border-radius: 8px; border: 0; background: #4a4fb8; color: #ffffff; text-decoration: none; cursor: pointer; font-size: 0.85rem; }\n"
-		"  @media (max-width: 640px) { .portal-rail { width: 3.25rem; flex-basis: 3.25rem; } .portal-panel { left: 4.75rem; width: 9rem; } }\n"
-		"</style>\n";
+		"  .portal-shell { position: relative; display: flex; gap: 0.75rem; height: calc(100vh - 3.5rem); min-height: 480px; padding: 0.75rem; box-sizing: border-box; --rail-w: 4rem; --rail-w-open: 10rem; --rail-m: 0.625rem; }\n"
+	"  /* One rail. It keeps its column at rest and widens over the frame on hover, focus or the toggle: the icons stay put, labels appear beside them. */\n"
+	"  .portal-rail-slot { position: relative; flex: 0 0 var(--rail-w); width: var(--rail-w); }\n"
+	"  .portal-rail { position: absolute; top: 0; bottom: 0; left: 0; z-index: 20; width: var(--rail-w); box-sizing: border-box; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0; overflow-x: hidden; overflow-y: auto; background: #171b33; border-radius: 16px; transition: width 0.15s ease; }\n"
+	"  .portal-rail:hover, .portal-rail:focus-within, .portal-shell.portal-open .portal-rail { width: var(--rail-w-open); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }\n"
+	"  .portal-rail-link, .portal-rail-toggle { flex: 0 0 auto; box-sizing: border-box; width: 2.75rem; height: 2.75rem; margin: 0 var(--rail-m); display: flex; align-items: center; justify-content: flex-start; padding: 0 0 0 0.8125rem; border: 0; border-radius: 12px; background: transparent; color: #aab3dc; font: inherit; font-size: 1.25rem; text-decoration: none; cursor: pointer; white-space: nowrap; overflow: hidden; transition: width 0.15s ease; }\n"
+	"  .portal-rail:hover .portal-rail-link, .portal-rail:hover .portal-rail-toggle, .portal-rail:focus-within .portal-rail-link, .portal-shell.portal-open .portal-rail-link, .portal-shell.portal-open .portal-rail-toggle { width: calc(var(--rail-w-open) - 2 * var(--rail-m)); }\n"
+	"  .portal-rail-link:hover, .portal-rail-toggle:hover, .portal-rail-toggle:focus-visible { background: rgba(255,255,255,0.08); color: #ffffff; }\n"
+	"  .portal-rail-link[aria-current=\"page\"] { background: #4a4fb8; color: #ffffff; }\n"
+	"  .portal-rail-label { display: none; margin-left: 0.5rem; font-size: 0.875rem; }\n"
+	"  .portal-rail:hover .portal-rail-label, .portal-rail:focus-within .portal-rail-label, .portal-shell.portal-open .portal-rail-label { display: inline; }\n"
+	"  .portal-rail-link svg { flex: 0 0 auto; }\n"
+	"  .portal-rail-sep { flex: 0 0 auto; height: 1px; margin: 0.25rem 0.75rem; background: rgba(255,255,255,0.08); }\n"
+	"  .portal-account { display: none; margin-top: auto; padding: 0.6rem 0.5rem 0.2rem; border-top: 1px solid rgba(255,255,255,0.08); }\n"
+	"  .portal-rail:hover .portal-account, .portal-rail:focus-within .portal-account, .portal-shell.portal-open .portal-account { display: block; }\n"
+	"  .portal-shell.portal-open .portal-account { display: block; }\n"
+	"  .portal-account-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: #d6dcf5; }\n"
+	"  .portal-avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg,#00a1c5,#6d55aa); display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #ffffff; }\n"
+	"  .portal-account-link { color: #aab3dc; text-decoration: none; }\n"
+	"  .portal-account-link:hover { color: #ffffff; }\n"
+	"  .portal-login { padding: 0.3rem 0.6rem; border-radius: 8px; background: #4a4fb8; color: #ffffff; }\n"
+	"  .portal-main { position: relative; flex: 1 1 auto; min-width: 0; min-height: 420px; background: #0f1326; border-radius: 16px; overflow: hidden; }\n"
+	"  .portal-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }\n"
+	"  .portal-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 1rem; background: rgba(15,19,38,0.9); color: #d6dcf5; text-align: center; }\n"
+	"  .portal-status button, .portal-status a { padding: 0.4rem 0.9rem; border-radius: 8px; border: 0; background: #4a4fb8; color: #ffffff; text-decoration: none; cursor: pointer; font-size: 0.85rem; }\n"
+	"  @media (max-width: 640px) { .portal-shell { --rail-w: 3.25rem; --rail-w-open: 9rem; --rail-m: 0.25rem; } }\n"
+	"</style>\n";
 }
 
 static String PortalShellScript(const String& first_src)
@@ -186,7 +185,7 @@ static String PortalShellScript(const String& first_src)
 		"    toggle.setAttribute('aria-label', open ? 'Hide webapp names' : 'Show webapp names');\n"
 		"  }\n"
 		"  toggle.addEventListener('click', function () { setOpen(!shell.classList.contains('portal-open')); });\n"
-		"  function inOverlay(node) { return !!(node && node.closest && (node.closest('.portal-rail') || node.closest('.portal-panel'))); }\n"
+		"  function inOverlay(node) { return !!(node && node.closest && node.closest('.portal-rail')); }\n"
 		"  document.addEventListener('focusin', function (e) { setOpen(inOverlay(e.target)); });\n"
 		"  frame.addEventListener('focus', function () { setOpen(false); });\n"
 		"  window.addEventListener('blur', function () { setOpen(false); });\n"
@@ -222,26 +221,21 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 		if(apps[i].id == selected)
 			sel = i;
 
-	String rail, panel;
-	rail << "<nav class=\"portal-rail\" aria-label=\"Webapps\">\n"
+	// One rail, one list of links. The rail keeps its column at rest and widens over the frame; no
+	// second copy of the links exists, so no icon is drawn twice.
+	String rail;
+	rail << "<div class=\"portal-rail-slot\"><nav class=\"portal-rail\" aria-label=\"Webapps\">\n"
 	     << "<button type=\"button\" id=\"portal-rail-toggle\" class=\"portal-rail-toggle\" aria-expanded=\"false\""
-	     << " aria-controls=\"portal-webapp-list\" aria-label=\"Show webapp names\" title=\"Show webapp names\">&#9776;</button>\n";
-	panel << "<nav id=\"portal-webapp-list\" class=\"portal-panel\" aria-label=\"Webapp list\">\n"
-	      << "<div class=\"portal-group\">Webapps</div>\n";
+	     << " aria-label=\"Show webapp names\" title=\"Show webapp names\">&#9776;</button>\n";
 	for(int i = 0; i < apps.GetCount(); i++)
-		if(apps[i].group == "webapp") {
-			rail << PortalLink(apps[i], i == sel, "portal-rail-link");
-			panel << PortalLink(apps[i], i == sel, "portal-link");
-		}
-	panel << "<div class=\"portal-group\">Settings</div>\n";
+		if(apps[i].group == "webapp")
+			rail << PortalLink(apps[i], i == sel);
+	rail << "<span class=\"portal-rail-sep\"></span>\n";
 	for(int i = 0; i < apps.GetCount(); i++)
-		if(apps[i].group == "settings") {
-			rail << PortalLink(apps[i], i == sel, "portal-rail-link");
-			panel << PortalLink(apps[i], i == sel, "portal-link");
-		}
-	rail << "</nav>";
-	panel << "<div class=\"portal-account\">" << RenderShellAccountRow(sess, apps[sel].url.StartsWith("/") ? apps[sel].url : String())
-	      << "</div>\n</nav>";
+		if(apps[i].group == "settings")
+			rail << PortalLink(apps[i], i == sel);
+	rail << "<div class=\"portal-account\">" << RenderShellAccountRow(sess, apps[sel].url.StartsWith("/") ? apps[sel].url : String())
+	     << "</div>\n</nav></div>";
 
 	String main;
 	main << "<div class=\"portal-main\">\n"
@@ -260,7 +254,7 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 	     << "</div>";
 
 	String content;
-	content << "<div class=\"portal-shell\">\n" << rail << "\n" << panel << "\n" << main << "\n</div>";
+	content << "<div class=\"portal-shell\">\n" << rail << "\n" << main << "\n</div>";
 
 	PageBuilder pb;
 	pb.Title("Portal - Manager Skylark")

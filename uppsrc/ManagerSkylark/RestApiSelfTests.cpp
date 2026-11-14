@@ -160,7 +160,7 @@ static bool PortalShellSelfTests()
 	UserSession guest;
 	String atlas_page = RenderPortalShell("192.168.1.169:8081", "atlas", guest, sites);
 	if(atlas_page.Find("src=\"http://192.168.1.169:18217/\"") < 0 || atlas_page.Find("name=\"portal-frame\"") < 0
-	   || atlas_page.Find("class=\"portal-rail\"") < 0 || atlas_page.Find("class=\"portal-panel\"") < 0
+	   || atlas_page.Find("class=\"portal-rail\"") < 0 || atlas_page.Find("class=\"portal-rail-slot\"") < 0
 	   || atlas_page.Find("data-app=\"atlas\" aria-current=\"page\"") < 0 || atlas_page.Find("class=\"wf-tree") >= 0
 	   || atlas_page.Find("class=\"wf-dock") >= 0 || atlas_page.Find("class=\"wf-template-sidebar\"") >= 0
 	   || atlas_page.Find("target=\"portal-frame\"") < 0 || atlas_page.Find("href=\"/?app=") >= 0
@@ -175,14 +175,15 @@ static bool PortalShellSelfTests()
 		Cerr() << "FAILED: the frame has no loading indicator or timeout fallback\n";
 		return false;
 	}
-	// The labelled list is an overlay at rest: a toggle for touch and keyboard, out of layout flow,
-	// hidden until hover, focus or the toggle opens it (task 038).
+	// One rail, widening in place: the toggle and the links are the only rail controls, the labels show
+	// only while it is open, and no second list of links exists (task 051).
 	if(atlas_page.Find("id=\"portal-rail-toggle\" class=\"portal-rail-toggle\" aria-expanded=\"false\"") < 0
-	   || atlas_page.Find("aria-controls=\"portal-webapp-list\"") < 0 || atlas_page.Find("id=\"portal-webapp-list\" class=\"portal-panel\"") < 0
-	   || atlas_page.Find(".portal-panel { position: absolute;") < 0 || atlas_page.Find("visibility: hidden; opacity: 0;") < 0
-	   || atlas_page.Find(".portal-shell.portal-open .portal-panel") < 0 || atlas_page.Find("'Escape'") < 0
-	   || atlas_page.Find("setOpen(false);") < 0 || atlas_page.Find("'focusin'") < 0) {
-		Cerr() << "FAILED: the labelled webapp list is not a compact-rail overlay with a toggle\n";
+	   || atlas_page.Find(".portal-rail-slot { position: relative;") < 0 || atlas_page.Find(".portal-rail { position: absolute;") < 0
+	   || atlas_page.Find(".portal-rail-label { display: none;") < 0 || atlas_page.Find(".portal-shell.portal-open .portal-rail {") < 0
+	   || atlas_page.Find("class=\"portal-rail-link\"") < 0 || atlas_page.Find("'Escape'") < 0
+	   || atlas_page.Find("setOpen(false);") < 0 || atlas_page.Find("'focusin'") < 0 || atlas_page.Find("portal-panel") >= 0
+	   || atlas_page.Find("portal-webapp-list") >= 0) {
+		Cerr() << "FAILED: the webapp rail is not one widening rail with a toggle and no second list\n";
 		return false;
 	}
 	String guest_row = RenderPortalShell("192.168.1.169:8081", "github", guest, sites);
