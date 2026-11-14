@@ -79,6 +79,7 @@ MANAGERSKYLARK_META_PASSWORD=pw-meta "$BIN" --site-dir "$T" --set-meta-user tfme
 MANAGERSKYLARK_META_PASSWORD=pw-rd "$BIN" --site-dir "$T" --set-meta-user tfreader >/dev/null 2>&1
 MANAGERSKYLARK_META_PASSWORD=pw-fc "$BIN" --site-dir "$T" --set-meta-user tffin >/dev/null 2>&1
 MANAGERSKYLARK_META_PASSWORD=pw-tv "$BIN" --site-dir "$T" --set-meta-user tfview >/dev/null 2>&1
+MANAGERSKYLARK_META_PASSWORD=pw-totp "$BIN" --site-dir "$T" --set-meta-user tftotp >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision MetaAccount account"; else fail "provision MetaAccount account"; fi
 MANAGERSKYLARK_CHANNELS_PASSWORD=pw-chan "$BIN" --site-dir "$T" --set-channels-user cviewer >/dev/null 2>&1
 if [ $? -eq 0 ]; then pass "provision Channels account"; else fail "provision Channels account"; fi
@@ -211,7 +212,7 @@ check "privatehub / anonymous redirects" 302 "$PH_URL/"
 check "privatehub project issues anonymous redirects" 302 "$PH_URL/privatehub/acme/widget/issues"
 
 # Login is per site: the PrivateHub session is established on its own cookie.
-curl -s -c "$T/ph.jar" -o /dev/null -H "Origin: $PH_URL" -H "Accept: text/html" \
+curl -s -c "$T/ph.jar" -o /dev/null -H "Origin: $PH_URL" -H "Accept: application/json" \
 	--data "username=dev&password=pw-ph" "$PH_URL/session/login"
 check "privatehub / after login" 200 "$PH_URL/" -b "$T/ph.jar"
 check "privatehub overview lists the workspace repo" 200 "$PH_URL/privatehub/acme/widget" -b "$T/ph.jar"
@@ -266,7 +267,7 @@ if grep -q "Smoke edited" "$T/body"; then pass "privatehub wiki page shows the e
 
 # A logged-in PrivateHub account without the member role is refused every authoring endpoint,
 # and its refused create leaves nothing behind.
-curl -s -c "$T/viewer.jar" -o /dev/null -H "Origin: $PH_URL" -H "Accept: text/html" \
+curl -s -c "$T/viewer.jar" -o /dev/null -H "Origin: $PH_URL" -H "Accept: application/json" \
 	--data "username=viewer&password=pw-view" "$PH_URL/session/login"
 check "privatehub viewer reads the issues list (with a csrf form)" 200 "$PH_URL/privatehub/acme/widget/issues" -b "$T/viewer.jar"
 view_csrf=$(sed -n 's/.*__wf_csrf__" value="\([^"]*\)".*/\1/p' "$T/body")
@@ -401,12 +402,13 @@ got=$(curl -s -o "$T/meta_revoke" -w '%{http_code}' -b "$T/meta.jar" -H "Origin:
 	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=0" "$META_URL/consent/decide")
 if [ "$got" = "200" ]; then pass "the meta user revokes the grant on the meta site"; else fail "the meta user revokes the grant on the meta site (got $got)"; fi
 
-# A browser form decision answers with a redirect back to the consent page, not a JSON page:
-# the browser stays on a normal page, so the next navigation keeps the session cookie (task 039).
-got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$T/meta.jar" -H "Origin: $META_URL" \
+# A refused browser decision (the grant is already revoked) answers 409 with a readable HTML
+# refusal page, not a JSON page and not a silent redirect (task 042). The browser stays on a
+# normal page, so the next navigation keeps the session cookie (task 039).
+got=$(curl -s -o "$T/meta_refused" -w '%{http_code}' -b "$T/meta.jar" -H "Origin: $META_URL" \
 	-H "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
 	-H "X-WF-CSRF: $meta_csrf" --data "grant_id=$gid&approve=0" "$META_URL/consent/decide")
-case "$got" in "302 "*/consent) pass "a browser decision redirects back to the consent page" ;; *) fail "a browser decision redirects back to the consent page (got $got)" ;; esac
+if [ "$got" = "409" ] && grep -q "<html" "$T/meta_refused"; then pass "a refused browser decision shows the refusal page"; else fail "a refused browser decision shows the refusal page (got $got)"; fi
 if curl -s -b "$T/meta.jar" "$META_URL/consent" | grep -q "Signed in as"; then pass "the session survives a browser decision"; else fail "the session survives a browser decision"; fi
 r=$(post_form "candidates/create" "title=After+revoke&summary=x&paper_id=2612.00002")
 if [ "${r%% *}" = "403" ]; then pass "taskfoundry write after revoke is refused (403)"; else fail "taskfoundry write after revoke is refused (got $r)"; fi
@@ -563,19 +565,19 @@ if [ "$got" = "200" ] && grep -q 'name="next"' "$T/sso_handoff_form"; then pass 
 
 rm -f "$T/sso_cont.jar"
 curl -s -c "$T/sso_cont.jar" -b "$T/sso_cont.jar" -o "$T/sso_cont" "$ATL_URL/session/sso?next=/"
-if grep -q "127.0.0.1:$META_PORT/session/login?next=" "$T/sso_cont"; then pass "unlinked continue links to MetaAccount with a return to this app"; else fail "unlinked continue links to MetaAccount with a return to this app"; fi
+if grep -q "127.0.0.1:$META_PORT/login?next=" "$T/sso_cont"; then pass "unlinked continue links to MetaAccount with a return to this app"; else fail "unlinked continue links to MetaAccount with a return to this app"; fi
 
-got=$(curl -s -o /dev/null -w '%{redirect_url}' -c "$HO_JAR" -b "$HO_JAR" \
+got=$(curl -s -o /dev/null -w '%{redirect_url}' -H "Accept: text/html" -c "$HO_JAR" -b "$HO_JAR" \
 	--data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
-	--data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/session/login")
+	--data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/login")
 if [ "$got" = "$ATL_URL/session/sso?next=/" ]; then pass "MetaAccount sign-in returns to the atlas session route"; else fail "MetaAccount sign-in returns to the atlas session route (got $got)"; fi
 got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$HO_JAR" -c "$HO_JAR" "$ATL_URL/session/sso?next=/")
 if [ "$got" = "302 $ATL_URL/" ]; then pass "the return adopts the linked atlas account"; else fail "the return adopts the linked atlas account (got $got)"; fi
 check "after the handoff atlas opens for the linked account" 200 "$ATL_URL/" -b "$HO_JAR"
 
 for target in "http://127.0.0.1:$ATL_PORT@evil.example.invalid/" "http://evil.example.invalid:$ATL_PORT/session/sso?next=/" "http://127.0.0.1:9/x"; do
-	got=$(curl -s -o /dev/null -w '%{redirect_url}' --data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
-		--data-urlencode "next=$target" "$META_URL/session/login")
+	got=$(curl -s -o /dev/null -w '%{redirect_url}' -H "Accept: text/html" --data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
+		--data-urlencode "next=$target" "$META_URL/login")
 	if [ "$got" = "$META_URL/" ]; then pass "MetaAccount refuses the return target $target"; else fail "MetaAccount refuses the return target $target (got $got)"; fi
 done
 
@@ -691,6 +693,42 @@ done
 if printf '%s' "$diag_json" | grep -Eq 'pw-|tfmeta|tfreader|tffin|tfview|atlasadmin|atlasdev|cviewer|ffin|fview'; then fail "the SSO diagnostics hold no account names or secrets"; else pass "the SSO diagnostics hold no account names or secrets"; fi
 check "the SSO diagnostics refuse a guest" 401 "$ATL_URL/session/sso/diagnostics"
 
+# Task 047: MetaAccount has one credential path, and it enforces an enrolled TOTP. A
+# password-only sign-in is refused once the account is enrolled, a live code is accepted, and a
+# non-enrolled account still signs in without one. The browser form gets the readable refusal.
+cat > "$T/totp.py" <<'PYEOF'
+import base64, hashlib, hmac, struct, sys, time
+key = base64.b32decode(sys.argv[1] + "=" * (-len(sys.argv[1]) % 8))
+mac = hmac.new(key, struct.pack(">Q", int(time.time()) // 30), hashlib.sha256).digest()
+off = mac[-1] & 0x0F
+print("%06d" % ((struct.unpack(">I", mac[off:off + 4])[0] & 0x7FFFFFFF) % 1000000))
+PYEOF
+TJ="$T/totp.jar"
+tlogin=$(curl -s -c "$TJ" -b "$TJ" -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tftotp&password=pw-totp" "$META_URL/session/login")
+tcsrf=$(printf '%s' "$tlogin" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
+tbegin=$(curl -s -b "$TJ" -c "$TJ" -H "Origin: $META_URL" -H "X-WF-CSRF: $tcsrf" --data "password=pw-totp" "$META_URL/totp/begin")
+tsecret=$(printf '%s' "$tbegin" | sed -n 's/.*"secret": *"\([^"]*\)".*/\1/p')
+if [ -n "$tsecret" ]; then pass "MetaAccount TOTP enrollment begins and returns a secret"; else fail "MetaAccount TOTP enrollment begins and returns a secret"; fi
+tconf=$(curl -s -o "$T/tconf" -w '%{http_code}' -b "$TJ" -c "$TJ" -H "Origin: $META_URL" -H "X-WF-CSRF: $tcsrf" \
+	--data "code=$(python3 "$T/totp.py" "$tsecret")" "$META_URL/totp/confirm")
+if [ "$tconf" = "200" ]; then pass "MetaAccount TOTP enrollment is confirmed with a live code"; else fail "MetaAccount TOTP enrollment is confirmed with a live code (got $tconf: $(cat "$T/tconf"))"; fi
+pw_only=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tftotp&password=pw-totp" "$META_URL/session/login")
+if [ "$pw_only" = "401" ]; then pass "password-only MetaAccount sign-in is refused for an enrolled account"; else fail "password-only MetaAccount sign-in is refused for an enrolled account (got $pw_only)"; fi
+pw_form=$(curl -s -o "$T/meta_pw_form" -w '%{http_code}' -H "Origin: $META_URL" -H "Accept: text/html" \
+	--data "username=tftotp&password=pw-totp" "$META_URL/session/login")
+if [ "$pw_form" = "401" ] && grep -q "second-factor" "$T/meta_pw_form" && grep -q "<html" "$T/meta_pw_form"; then pass "a browser password-only sign-in shows the second-factor page"; else fail "a browser password-only sign-in shows the second-factor page (got $pw_form)"; fi
+totp_code=$(python3 "$T/totp.py" "$tsecret")
+with_code=$(curl -s -o "$T/meta_with_code" -w '%{http_code}' -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tftotp&password=pw-totp&code=$totp_code" "$META_URL/session/login")
+if [ "$with_code" = "200" ] && grep -q '"csrf"' "$T/meta_with_code"; then pass "MetaAccount sign-in with a live code succeeds"; else fail "MetaAccount sign-in with a live code succeeds (got $with_code)"; fi
+nonenrolled=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $META_URL" -H "Accept: application/json" \
+	--data "username=tfmeta&password=pw-meta" "$META_URL/session/login")
+if [ "$nonenrolled" = "200" ]; then pass "a non-enrolled MetaAccount still signs in without a code"; else fail "a non-enrolled MetaAccount still signs in without a code (got $nonenrolled)"; fi
+meta_form=$(curl -s "$META_URL/login")
+if printf '%s' "$meta_form" | grep -q 'name="code"'; then pass "the MetaAccount sign-in form asks for the second factor"; else fail "the MetaAccount sign-in form asks for the second factor"; fi
+
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null
 
@@ -740,6 +778,15 @@ if start_off --enable-meta-sso; then
 		-H "X-WF-CSRF: $off_meta_csrf" --data "grant_id=$off_gid&approve=1" "$OFF_META_URL/consent/decide")
 	if [ "$got" = "200" ]; then pass "SSO on: the central user approves the Atlas link"; else fail "SSO on: the central user approves the Atlas link (got $got)"; fi
 	check "SSO on: the linked central session opens Atlas (the link is real)" 200 "$OFF_ATL_URL/" -b "$OFF/central.jar"
+	# Task 048: with SSO on, a composed site takes no local password from a browser form.
+	# The JSON API keeps its password path (the documented operator exception).
+	refused=$(curl -s -o "$OFF/atl_refused" -w '%{http_code}' -H "Origin: $OFF_ATL_URL" -H "Accept: text/html" \
+		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login")
+	if [ "$refused" = "403" ] && grep -q "signs in through MetaAccount" "$OFF/atl_refused" && ! grep -q 'name="password"' "$OFF/atl_refused"; then
+		pass "SSO on: a browser password sign-in on Atlas is refused with the MetaAccount message"; else fail "SSO on: a browser password sign-in on Atlas is refused with the MetaAccount message (got $refused)"; fi
+	api=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $OFF_ATL_URL" -H "Accept: application/json" \
+		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login")
+	if [ "$api" = "200" ]; then pass "SSO on: the JSON API keeps its password path (documented exception)"; else fail "SSO on: the JSON API keeps its password path (got $api)"; fi
 	kill $off_pid 2>/dev/null
 	wait $off_pid 2>/dev/null
 else
@@ -760,6 +807,9 @@ if start_off; then
 	curl -s -c "$OFF/atl2.jar" -o /dev/null -H "Origin: $OFF_ATL_URL" -H "Accept: application/json" \
 		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login"
 	check "SSO off: per-site sign-in still works" 200 "$OFF_ATL_URL/session/whoami" -b "$OFF/atl2.jar"
+	browser=$(curl -s -o /dev/null -w '%{http_code}' -c "$OFF/atl3.jar" -H "Origin: $OFF_ATL_URL" -H "Accept: text/html" \
+		--data "username=atlasadmin&password=pw-atl" "$OFF_ATL_URL/session/login")
+	if [ "$browser" = "302" ]; then pass "SSO off: a browser password sign-in still works"; else fail "SSO off: a browser password sign-in still works (got $browser)"; fi
 	curl -s -b "$OFF/atl2.jar" "$OFF_ATL_URL/" -o "$OFF/atl_signed.html"
 	if grep -q 'id="wf-sign-out"' "$OFF/atl_signed.html" && ! grep -q 'id="wf-link-meta"' "$OFF/atl_signed.html"; then
 		pass "SSO off: the signed-in page has sign-out and no MetaAccount link"; else fail "SSO off: the signed-in page has sign-out and no MetaAccount link"; fi

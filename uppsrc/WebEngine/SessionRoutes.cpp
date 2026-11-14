@@ -41,12 +41,17 @@ h1 { font-size: 1.5rem; margin: 8px 0 16px; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 input { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 button { font: inherit; color: #ffffff; background: var(--link); border: 0; border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+.login-error { color: #c92a2a; border: 1px solid #c92a2a; border-radius: 6px; padding: 6px 8px; }
 </style>)LOGIN";
 }
 
-static bool SsoReturnAllowed(WebRequest& r, const String& url);
+bool SsoReturnAllowed(WebRequest& r, const String& url);
 
-static void LoginForm(WebRequest& r)
+static const char* SSO_IDP_SITE = "meta";
+
+// The sign-in page. A browser that failed to sign in gets the same page with a short
+// message above the form (task 042); the message never echoes the typed username.
+static void RenderLoginPage(WebRequest& r, const String& error, int code)
 {
 	// A validated return target travels with the form, so a sign-in started from a webapp
 	// comes back to that webapp (task 039). An unlisted target is simply not carried.
@@ -59,13 +64,38 @@ static void LoginForm(WebRequest& r)
 	String csrf = r.CsrfToken().IsEmpty()
 		? String()
 		: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
+	String alert = error.IsEmpty() ? String()
+		: "<p role=\"alert\" class=\"login-error\">" + EscHtml(error) + "</p>";
+	if(code != 200)
+		r.Status(code, "Sign in");
+	// With MetaAccount SSO on, a composed site has no password form of its own: the browser signs
+	// in through MetaAccount (task 042). MetaAccount itself keeps its own login form.
+	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE) {
+		r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
+		       "<h1>Sign in</h1>" + alert +
+		       "<p>Sign in with your MetaAccount to open this site.</p>"
+		       "<p><a href=\"" + EscHtml(r.Site().Url("session/sso")) + "?next=%2F\">Continue with MetaAccount</a></p>"
+		       "</body></html>");
+		return;
+	}
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
-	       "<h1>Sign in</h1><form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden + csrf +
+	       "<h1>Sign in</h1>" + alert + "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden + csrf +
 	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
 	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
 	       "<p><button type=\"submit\">Sign in</button></p></form>"
 	       "<p><a href=\"" + EscHtml(r.Site().Url("session/sso")) + "?next=%2F\">Continue with MetaAccount</a></p>"
 	       "</body></html>");
+}
+
+// The sign-in page of this site: MetaAccount has one, at login; composed sites use session/login (task 048).
+static String SignInPath(WebRequest& r)
+{
+	return r.Site().id == SSO_IDP_SITE ? String("login") : String("session/login");
+}
+
+static void LoginForm(WebRequest& r)
+{
+	RenderLoginPage(r, String(), 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +108,6 @@ static void LoginForm(WebRequest& r)
 // placed in a URL, a diagnostic entry or a reply.
 // ---------------------------------------------------------------------------
 
-static const char* SSO_IDP_SITE = "meta";
 static const char* SSO_SCOPE = "sso";
 static const int   SSO_SUPPRESS_DAYS = 30;
 
@@ -138,7 +167,7 @@ static String SsoSiteUrl(WebRequest& r, const String& site_id, const String& pat
 // A MetaAccount return target is accepted only when it is an http URL on this request's host, on the
 // port of a composed site, with a same-site path. Anything else (another host, an unlisted port, a
 // scheme, or a path that fails SsoSafeNext) is refused, so the caller falls back to "/".
-static bool SsoReturnAllowed(WebRequest& r, const String& url)
+bool SsoReturnAllowed(WebRequest& r, const String& url)
 {
 	String host = SsoRequestHost(r);
 	if(host.IsEmpty() || !url.StartsWith("http://" + host + ":"))
@@ -251,14 +280,13 @@ static void SsoContinue(WebRequest& r)
 	// MetaAccount signs in once and returns here: its login carries this site's own
 	// session/sso URL as the return target, which MetaAccount accepts only on this host (task 039).
 	String back = SsoSiteUrl(r, r.Site().id, "/session/sso?next=" + UrlEncode(next));
-	String login = SsoSiteUrl(r, SSO_IDP_SITE, "/session/login");
+	String login = SsoSiteUrl(r, SSO_IDP_SITE, "/login");
 	if(login.GetCount() && back.GetCount())
 		login << "?next=" << UrlEncode(back);
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"
 	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>"
 	       "<p><a href=\"" + EscHtml(login) + "\">Sign in to MetaAccount</a></p>"
-	       "<p><a href=\"" + EscHtml(r.Site().Url("session/login")) + "\">Use this site's own sign-in</a></p>"
 	       "</body></html>");
 }
 
@@ -326,12 +354,24 @@ static void SsoLink(WebRequest& r)
 
 static void Login(WebRequest& r)
 {
+	// With MetaAccount sign-in on, a composed site takes no local password from a browser form
+	// (task 048). The JSON API keeps the password path for operators and automation (AGENTS.md).
+	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE && !WantsJson(r)) {
+		RenderLoginPage(r, "This site signs in through MetaAccount. Use Continue with MetaAccount on the sign-in page.", 403);
+		return;
+	}
 	String username = r.Param("username");
 	String password = r.Param("password");
 	r.DropSession();
 	String sid, csrf, err;
 	WebAccountUser u;
 	if(!r.Site().Accounts().Login(username, password, r.ClientIp(), sid, csrf, u, err).ok) {
+		// A browser form gets the sign-in page again with a plain message, not a JSON document
+		// (task 042). An API caller keeps the JSON reply.
+		if(!WantsJson(r)) {
+			RenderLoginPage(r, "The username or password was not recognized. Check both and try again.", 401);
+			return;
+		}
 		ValueMap m;
 		m.Add("ok", false);
 		m.Add("error", err);
@@ -379,7 +419,7 @@ static void Logout(WebRequest& r)
 	if(TheWebEngine().MetaSso())
 		r.SetCookieValue(SsoSuppressName(r.Site().id), "1", GetSysTime() + SSO_SUPPRESS_DAYS * 24 * 3600);
 	if(!WantsJson(r)) {
-		r.Redirect(r.Site().Url("session/login"));
+		r.Redirect(r.Site().Url(SignInPath(r)));
 		return;
 	}
 	ValueMap m;
@@ -420,7 +460,7 @@ static void SsoDiagnostics(WebRequest& r)
 String SessionChromeHtml(WebRequest& r)
 {
 	if(!r.HasUser())
-		return "<span class=\"wf-session\"><a href=\"" + EscHtml(r.Site().Url("session/login")) + "\">Sign in</a></span>";
+		return "<span class=\"wf-session\"><a href=\"" + EscHtml(r.Site().Url(SignInPath(r))) + "\">Sign in</a></span>";
 	String csrf = "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
 	String out = "<span class=\"wf-session\">Signed in as " + EscHtml(r.User().username) + " "
 	             "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/logout")) + "\" class=\"wf-session-form\">" + csrf +
@@ -433,8 +473,12 @@ String SessionChromeHtml(WebRequest& r)
 
 void InstallSessionRoutes(EngineSite& site)
 {
-	site.Router().Add("session/login", LoginForm);
-	site.Router().Add("session/login:POST", Login);
+	// The MetaAccount site signs in only through its own TOTP-enforcing login (task 047); its
+	// session/login routes are registered by InstallMetaAccountSite, never the password-only ones here.
+	if(site.id != SSO_IDP_SITE) {
+		site.Router().Add("session/login", LoginForm);
+		site.Router().Add("session/login:POST", Login);
+	}
 	site.Router().Add("session/logout:POST", Logout);
 	site.Router().Add("session/whoami", Whoami);
 	if(TheWebEngine().MetaSso()) {

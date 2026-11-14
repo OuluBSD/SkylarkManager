@@ -12,6 +12,9 @@ void InstallSessionRoutes(EngineSite& site);
 
 class WebRequest;
 
+// True when a MetaAccount return target is an allowlisted URL on this request's host (task 039).
+bool SsoReturnAllowed(WebRequest& r, const String& url);
+
 // Shared MetaAccount sign-in (task 039): signs a guest in from a live central session
 // when the account is linked to this site. Called by the engine dispatch for every
 // composed request before its handler; GET and HEAD only.

@@ -1,5 +1,6 @@
 #include "MetaAccountSite.h"
 #include "MetaInbox.h"
+#include <WebEngine/SessionRoutes.h>
 
 NAMESPACE_UPP
 
@@ -69,6 +70,16 @@ static String EscText(const String& s)
 	return String(out);
 }
 
+// A browser sign-in that failed gets a readable page with the reason (task 042). An API caller keeps JSON.
+static void BrowserError(WebRequest& r, const String& back, const String& message, int code)
+{
+	r.Status(code, "Error");
+	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Not done</title></head><body>"
+	       "<h1>Not done</h1><p role=\"alert\">" + EscText(message) + "</p>"
+	       "<p><a href=\"" + r.Site().Url(back) + "\">Back</a></p></body></html>");
+}
+
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -96,7 +107,8 @@ static void MetaLoginForm(WebRequest& r)
 	String body = HtmlForm(r.Site().Url("login:POST"), r.CsrfToken(),
 		"<input name=\"username\" placeholder=\"username\"><br>"
 		"<input name=\"password\" type=\"password\"><br>"
-		"<input name=\"code\" placeholder=\"2FA code (if enrolled)\"><br>");
+		"<input name=\"code\" placeholder=\"2FA code (if enrolled)\"><br>"
+		"<input type=\"hidden\" name=\"next\" value=\"" + EscText(r.Param("next")) + "\">");
 	HtmlPage(r, "Sign in", body);
 }
 
@@ -105,23 +117,39 @@ static void MetaLoginSubmit(WebRequest& r)
 	String username = r.Param("username");
 	String password = r.Param("password");
 	String code = r.Param("code");
+	String next = r.Param("next");
+	String back = next.IsEmpty() ? String("login") : "login?next=" + UrlEncode(next);
+	bool browser = r.Header("accept").Find("text/html") >= 0;
 	r.DropSession();
 	WebAccountUser u;
 	if(!r.Site().Accounts().VerifyPassword(username, password, u).ok) {
-		r.Json(JsonOk(false, "bad credentials"), 401);
+		if(browser)
+			BrowserError(r, back, "The username or password was not recognized.", 401);
+		else
+			r.Json(JsonOk(false, "bad credentials"), 401);
 		return;
 	}
 	// Enrolled accounts must present a live TOTP code or a recovery code.
 	if(u.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(u.user_id, code)) {
-		r.Json(JsonOk(false, "second factor required"), 401);
+		if(browser)
+			BrowserError(r, back, "A second-factor code is needed. Enter a current code and try again.", 401);
+		else
+			r.Json(JsonOk(false, "second factor required"), 401);
 		return;
 	}
 	String sid, csrf, err;
 	if(!r.Site().Accounts().Login(username, password, r.ClientIp(), sid, csrf, u, err).ok) {
-		r.Json(JsonOk(false, err), 401);
+		if(browser)
+			BrowserError(r, back, "Sign-in did not work. Try again.", 401);
+		else
+			r.Json(JsonOk(false, err), 401);
 		return;
 	}
 	r.AdoptSession(sid);
+	if(browser) {
+		r.Redirect(!next.IsEmpty() && SsoReturnAllowed(r, next) ? next : r.Site().Url(""));
+		return;
+	}
 	ValueMap m;
 	m.Add("ok", true);
 	m.Add("user", u.username);
@@ -265,10 +293,15 @@ static void MetaInboxPage(WebRequest& r)
 // normal same-site request that carries the SameSite=Strict session cookie. A JSON reply left
 // the browser on a JSON document, and Firefox then withheld the cookie from the next page
 // (task 039). API callers keep the JSON reply.
+// A browser decision that is refused shows its reason; success goes back to the page (task 042).
 static void FormDone(WebRequest& r, const char *back, const Value& json, int code = 200)
 {
-	if(r.Header("accept").Find("text/html") >= 0)
-		r.Redirect(r.Site().Url(back));
+	if(r.Header("accept").Find("text/html") >= 0) {
+		if(code >= 400)
+			BrowserError(r, back, (String)((ValueMap)json).Get("error"), code);
+		else
+			r.Redirect(r.Site().Url(back));
+	}
 	else
 		r.Json(json, code);
 }
@@ -341,6 +374,10 @@ void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 	rt.Add("", MetaHome);
 	rt.Add("login", MetaLoginForm);
 	rt.Add("login:POST", MetaLoginSubmit);
+	// The composed-site sign-in and the API caller (session-login) reach the same handler, so the
+	// site has one credential path, always TOTP-enforced (task 047).
+	rt.Add("session/login", MetaLoginForm);
+	rt.Add("session/login:POST", MetaLoginSubmit);
 	rt.Add("logout:POST", MetaLogout);
 	rt.Add("totp/begin:POST", MetaTotpBegin);
 	rt.Add("totp/confirm:POST", MetaTotpConfirm);
