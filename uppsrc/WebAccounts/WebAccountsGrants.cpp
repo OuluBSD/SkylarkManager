@@ -141,6 +141,38 @@ bool WebGrants::FindActive(const String& subject_user_id, const String& client_s
 	return false;
 }
 
+bool WebGrants::HasSsoBinding(const String& subject_user_id, const String& client_site, const String& client_user_id)
+{
+	if(subject_user_id.IsEmpty() || client_site.IsEmpty() || client_user_id.IsEmpty())
+		return false;
+	Vector<String> need;
+	need.Add("sso");
+	mutex.Enter();
+	Vector<String> ids;
+	Store().List(ids);
+	bool found = false;
+	for(const String& id : ids) {
+		String json, rev;
+		if(!Store().Get(id, json, rev))
+			continue;
+		try {
+			Value v = ParseJSON(json);
+			if(!v.Is<ValueMap>())
+				continue;
+			WebAccountGrant g;
+			LoadFromJsonValue(g, v);
+			if(g.subject_user_id == subject_user_id && g.client_site == client_site
+			&& g.client_user_id == client_user_id && g.HasScopes(need)) {
+				found = true;
+				break;
+			}
+		}
+		catch(...) {}
+	}
+	mutex.Leave();
+	return found;
+}
+
 StoreResult WebGrants::ListForSubject(const String& subject_user_id, const String& state_filter,
                                       Vector<WebAccountGrant>& out)
 {

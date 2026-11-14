@@ -711,6 +711,22 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 		r.status = 200;
 		return r;
 	}
+	// Whether this subject was ever bound to one local account of this site (any grant state). Only the
+	// site itself may ask: it answers for its own accounts. The answer is a boolean, never an id.
+	if(call.op == "find-binding") {
+		String subject = call.payload.Get("subject_user_id");
+		String client_site = call.payload.Get("client_site");
+		String client_user = call.payload.Get("client_user_id");
+		if(ctx.from_site != client_site || subject.IsEmpty() || client_user.IsEmpty()) {
+			r.status = 403;
+			r.error = "invalid binding caller";
+			return r;
+		}
+		r.ok = true;
+		r.status = 200;
+		r.payload.Add("bound", grants.HasSsoBinding(subject, client_site, client_user));
+		return r;
+	}
 	if(call.op == "check-grant") {
 		String subject = call.payload.Get("subject_user_id");
 		String client_site = call.payload.Get("client_site");
@@ -799,7 +815,7 @@ String MetaAccountService::AuditOperation(const String& op) const
 {
 	if(op == "ping" || op == "authenticate" || op == "request-consent" || op == "grant-consent" || op == "clear-provision-requests" ||
 	   op == "provision-status" || op == "request-provision" || op == "notify" ||
-	   op == "check-grant" || op == "resolve-session" || op == "revoke-grant")
+	   op == "check-grant" || op == "find-binding" || op == "resolve-session" || op == "revoke-grant")
 		return op;
 	return "unclassified";
 }

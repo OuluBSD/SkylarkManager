@@ -890,6 +890,26 @@ static void RunWebAuditStorageChecks(const String& root)
 // AgentIpcClient unit section (task 024 item 3): the argv-only reader driven
 // directly over a canned shim. No HTTP; the shim's run count shows whether a
 // refused channel ever reached the child process.
+// A relink to an account a subject was bound to needs that binding: a revoked sso grant still names the local
+// account, and only that subject, that site and that local account match.
+static void RunSsoBindingChecks(const String& root)
+{
+	WebGrants grants("binding-check", AppendFileName(root, "sso-bindings"));
+	Vector<String> scopes;
+	scopes.Add("sso");
+	String gid;
+	StoreResult granted = grants.GrantAs("wau_binding_subject", "wau_binding_local", "atlas", "sso", scopes, gid);
+	Check(granted.ok && grants.HasSsoBinding("wau_binding_subject", "atlas", "wau_binding_local"),
+	      "a granted sso link is a binding for its subject, site and local account");
+	Check(grants.Revoke(gid).ok && grants.HasSsoBinding("wau_binding_subject", "atlas", "wau_binding_local"),
+	      "a revoked sso link is still a binding (the relink path needs no password)");
+	Check(!grants.HasSsoBinding("wau_binding_other", "atlas", "wau_binding_local") &&
+	      !grants.HasSsoBinding("wau_binding_subject", "atlas", "wau_binding_other") &&
+	      !grants.HasSsoBinding("wau_binding_subject", "science", "wau_binding_local") &&
+	      !grants.HasSsoBinding("", "atlas", "wau_binding_local"),
+	      "another subject, another local account, another site, or an empty subject has no binding");
+}
+
 static void RunAgentIpcClientUnitChecks(const String& root)
 {
 	String count_path = AppendFileName(root, "channels-unit-count.txt");
@@ -1585,6 +1605,7 @@ CONSOLE_APP_MAIN
 	RunWebsiteTemplateChecks();
 	RunWebAuditSchemaChecks();
 	RunWebAuditStorageChecks(s_root);
+	RunSsoBindingChecks(s_root);
 	RunAgentIpcClientUnitChecks(s_root);
 
 	EngineTestHost host;

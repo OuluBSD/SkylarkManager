@@ -240,6 +240,19 @@ static bool SsoAdoptLinked(WebRequest& r)
 	return r.HasUser();
 }
 
+// Whether MetaAccount has this subject bound to that local account on this site, a revoked binding included.
+// The binding was proven when it was made, so a relink to it needs no password again.
+static bool SsoBound(WebRequest& r, BrokerCallContext& ctx, const String& subject, const String& local_id)
+{
+	BrokerCall b;
+	b.op = "find-binding";
+	b.payload.Add("subject_user_id", subject);
+	b.payload.Add("client_site", r.Site().id);
+	b.payload.Add("client_user_id", local_id);
+	BrokerResult br = TheWebEngine().Broker().Call(ctx, b);
+	return br.ok && (bool)br.payload.Get("bound");
+}
+
 // Adopts the linked account and records one outcome code for the site. The record names the site
 // and the code only: no account id, username, session value or grant id (task 039).
 static bool SsoAdopt(WebRequest& r)
@@ -291,6 +304,7 @@ static void SsoContinue(WebRequest& r)
 	if(!SsoDefaultRole(r.Site().id).IsEmpty() && SsoCentralUser(r, ctx, subject, &username)) {
 		WebAccountUser collision;
 		bool exists = r.Site().Accounts().FindUserByUsername(username, collision);
+		bool bound = exists && SsoBound(r, ctx, subject, collision.user_id);
 		r.EnsureSession();
 		String csrf = "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
 		offer << "<p>Allow MetaAccount to create or link a least-privilege account on "
@@ -298,10 +312,12 @@ static void SsoContinue(WebRequest& r)
 		      << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/consent")) << "\">"
 		      << csrf << "<input type=\"hidden\" name=\"next\" value=\"" << EscHtml(next) << "\">"
 		      << "<input type=\"hidden\" name=\"decision\" value=\"yes\">";
-		if(exists)
+		if(bound)
+			offer << "<p>Your earlier link to <b>" << EscHtml(username) << "</b> is restored; no password is needed.</p>";
+		else if(exists)
 			offer << "<p>An account named <b>" << EscHtml(username) << "</b> already exists. Prove ownership to link it.</p>"
 			      << "<label>Existing account password <input type=\"password\" name=\"local_password\" required autocomplete=\"current-password\"></label>";
-		if(exists && collision.totp_enrolled)
+		if(exists && !bound && collision.totp_enrolled)
 			offer << "<label>Authenticator or recovery code <input type=\"text\" name=\"local_code\" required inputmode=\"numeric\" autocomplete=\"one-time-code\"></label>";
 		offer << "<p><button type=\"submit\">Yes, continue</button></p></form>"
 		      << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/consent")) << "\">"
@@ -361,16 +377,20 @@ static void SsoConsent(WebRequest& r)
 	String local_id;
 	WebAccountUser existing;
 	if(r.Site().Accounts().FindUserByUsername(username, existing)) {
-		WebAccountUser verified;
-		if(!r.Site().Accounts().VerifyPassword(username, r.Param("local_password"), verified).ok || verified.user_id != existing.user_id) {
-			r.Status(403, "Ownership proof failed");
-			r.Html("<p>That account was not linked. Sign in to the existing account first, then retry MetaAccount consent.</p>");
-			return;
-		}
-		if(existing.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(existing.user_id, r.Param("local_code"))) {
-			r.Status(403, "Ownership proof failed");
-			r.Html("<p>That account was not linked. Use a valid authenticator or recovery code.</p>");
-			return;
+		// The binding is the proof for an account this subject linked before, a revoked link included.
+		// Any other existing account still needs its own password (and authenticator code).
+		if(!SsoBound(r, ctx, subject, existing.user_id)) {
+			WebAccountUser verified;
+			if(!r.Site().Accounts().VerifyPassword(username, r.Param("local_password"), verified).ok || verified.user_id != existing.user_id) {
+				r.Status(403, "Ownership proof failed");
+				r.Html("<p>That account was not linked. Sign in to the existing account first, then retry MetaAccount consent.</p>");
+				return;
+			}
+			if(existing.totp_enrolled && !r.Site().Accounts().VerifyTotpOrRecovery(existing.user_id, r.Param("local_code"))) {
+				r.Status(403, "Ownership proof failed");
+				r.Html("<p>That account was not linked. Use a valid authenticator or recovery code.</p>");
+				return;
+			}
 		}
 		local_id = existing.user_id;
 	}

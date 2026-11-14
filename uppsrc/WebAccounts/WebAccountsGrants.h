@@ -105,6 +105,10 @@ public:
 	                       const Vector<String>& scopes, WebAccountGrant& out);
 	StoreResult ListForSubject(const String& subject_user_id, const String& state_filter,
 	                           Vector<WebAccountGrant>& out);
+	// True when an sso grant in any state, revoked ones included, once bound this subject to this local account
+	// on this site. That binding is what lets a consent relink the account without its password.
+	bool        HasSsoBinding(const String& subject_user_id, const String& client_site,
+	                          const String& client_user_id);
 	// All grants of one client site (the site filters by its own caller).
 	StoreResult ListForSite(const String& client_site, const String& state_filter,
 	                        Vector<WebAccountGrant>& out);

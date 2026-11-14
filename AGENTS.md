@@ -68,6 +68,7 @@ dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and t
 - The JSON API keeps the password path on composed sites (a request with `Accept` or `Content-Type` containing `json`). This is the documented operator exception for automation and `skylarkctl session-login`. A browser form cannot reach it.
 - MetaAccount has one sign-in surface, `login`, which enforces TOTP. A browser `GET session/login` on MetaAccount redirects to `login`; `session/login:POST` is the JSON API.
 - With SSO off, browser password sign-in on composed sites is unchanged.
+- Consent to link an existing local account asks for its password, unless MetaAccount already has that subject bound to that same local account on that site (a `sso` grant in any state, revoked included). Such a relink is restored without a password (`find-binding` broker op, `SsoBound` in `SessionRoutes.cpp`). Without this, revoking a link left an account whose random provisioned password nobody knew, and re-consent was impossible.
 
 ---
 
