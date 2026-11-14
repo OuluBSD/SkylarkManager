@@ -60,6 +60,18 @@ children, else `place`; status defaults to `planned`. Full rules are in
 | `POST /atlas/{map}/road/add|delete` | Road mutations (admin) |
 | `POST /atlas/{map}/seed` | Seed import into an empty map (admin) |
 
+JSON API for import tools (admin, `skylarkctl atlas <command>`; BrownBear's `scripts/atlas-import.sh`):
+
+- `POST api/atlas/create` (`atlas-map-create`: `map`, `version`, `title`, `width`, `height`, `level`): an empty map
+  document at a version. `level` (public, protected, private) is stored before the map, so a private map is never
+  readable as public. 409 when the document exists.
+- `POST api/atlas/seed` (`atlas-map-seed`: `map`, `version`, `seed` as `@file`): fills an empty map from a seed
+  (`AtlasParseSeed`); the answer gives the element and road counts.
+- `POST api/atlas/*/init` (`atlas-init`): starts a family's version list from the head document.
+
+Reads of the API (versions, state, events, rules, check) need no sign-in; each answers 404 when the map is not readable
+by the caller, as the pages do. Writes need the admin role.
+
 Manifest commands: `atlas-maps`, `atlas-map`, `atlas-element` (read-only).
 
 ## Map page view (task 054)

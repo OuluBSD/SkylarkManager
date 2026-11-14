@@ -1118,11 +1118,106 @@ static void RoadModify(WebRequest& r)
 // Routes and SiteCli commands. Every command takes the family first ("map").
 // ---------------------------------------------------------------------------
 
+// Map documents for the import tools (BrownBear's scripts/atlas-import.sh): an empty map at a version, and a
+// seed that fills it. Same rules as the form routes: admin only, the seed fills an empty map only.
+static void MapCreate(WebRequest& r)
+{
+	if(!ApiAuth(r, true))
+		return;
+	AtlasMap m;
+	m.map = P(r, "map");
+	m.version = P(r, "version");
+	m.title = P(r, "title");
+	int width = IntP(r, "width"), height = IntP(r, "height");
+	m.world.width = width > 0 ? width : 2400;
+	m.world.height = height > 0 ? height : 1600;
+	AtlasCheck check;
+	AtlasValidate(m, check);
+	String key = AtlasDocKey(m.map, m.version);
+	if(!JsonFileStore::ValidId(key))
+		check.errors.Add("map version has characters the store does not allow: " + m.version);
+	if(!check.Ok()) {
+		ApiFail(r, 400, ApiJoin(check.errors));
+		return;
+	}
+	AtlasMap existing;
+	String rev, err;
+	if(AtlasLoadMap(r.Site().data_root, key, existing, rev, err)) {
+		ApiFail(r, 409, "a map with that id and version already exists");
+		return;
+	}
+	// The level is stored before the map, so a private map is never readable as public, not even empty.
+	String level_name = P(r, "level");
+	if(level_name.GetCount()) {
+		ContentLevel level;
+		if(!ContentLevelParse(level_name, level)) {
+			ApiFail(r, 400, "level must be public, protected or private");
+			return;
+		}
+		ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
+		if(store.LoadError().GetCount()) {
+			ApiFail(r, 500, store.LoadError());
+			return;
+		}
+		ContentPolicy p = store.Record(key);
+		p.level = level;
+		store.SetRecord(key, p);
+		String policy_err;
+		if(!store.Save(policy_err)) {
+			ApiFail(r, 500, policy_err);
+			return;
+		}
+	}
+	String new_rev;
+	if(!AtlasSaveMap(r.Site().data_root, key, m, String(), new_rev, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("key", key);
+	out.Add("revision", new_rev);
+	out.Add("level", level_name.GetCount() ? level_name : String("public"));
+	r.Json(out);
+}
+
+static void MapSeed(WebRequest& r)
+{
+	if(!ApiAuth(r, true))
+		return;
+	String key = AtlasDocKey(P(r, "map"), P(r, "version"));
+	AtlasMap m;
+	String rev, err;
+	if(!AtlasLoadMap(r.Site().data_root, key, m, rev, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	AtlasCheck check;
+	if(!AtlasParseSeed(P(r, "seed"), m, check)) {
+		ApiFail(r, 400, ApiJoin(check.errors));
+		return;
+	}
+	String new_rev;
+	if(!AtlasSaveMap(r.Site().data_root, key, m, rev, new_rev, err)) {
+		ApiFail(r, err.Find("revision") >= 0 ? 409 : 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("key", key);
+	out.Add("revision", new_rev);
+	out.Add("elements", m.elements.GetCount());
+	out.Add("roads", m.roads.GetCount());
+	r.Json(out);
+}
+
 void InstallAtlasApi(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
 	rt.Add("api/atlas/*/versions", VersionsGet);
 	rt.Add("POST", "api/atlas/*/init", VersionsInit);
+	rt.Add("POST", "api/atlas/create", MapCreate);
+	rt.Add("POST", "api/atlas/seed", MapSeed);
 	rt.Add("POST", "api/atlas/*/versions/insert", VersionsInsert);
 	rt.Add("POST", "api/atlas/*/versions/rename", VersionsRename);
 	rt.Add("POST", "api/atlas/*/versions/delete", VersionsDelete);
@@ -1159,6 +1254,12 @@ void InstallAtlasApi(EngineSite& site)
 	        "json", "The version list of a map family and its head", { "map:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-init", "POST", "api/atlas/*/init", write,
 	        "json", "Start a family's version list from one document", { "map:string:required", "head:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-map-create", "POST", "api/atlas/create", write,
+	        "json", "Create an empty map document at a version (admin); level sets its visibility before any content",
+	        { "map:string:required", "version:string:required", "title:string", "width:int", "height:int", "level:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-map-seed", "POST", "api/atlas/seed", write,
+	        "json", "Fill an empty map document with a seed (admin)",
+	        { "map:string:required", "version:string:required", "seed:text:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-version-insert", "POST", "api/atlas/*/versions/insert", write,
 	        "json", "Insert a version label, bumping the versions at or above it", { "map:string:required", "label:string:required", "vid:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-version-rename", "POST", "api/atlas/*/versions/rename", write,
