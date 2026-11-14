@@ -309,13 +309,30 @@ static void SsoContinue(WebRequest& r)
 	ctx.to_site = SSO_IDP_SITE;
 	String subject, username;
 	if(!SsoDefaultRole(r.Site().id).IsEmpty() && SsoCentralUser(r, ctx, subject, &username)) {
-		String csrf = r.CsrfToken().IsEmpty()
-			? String()
-			: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
-		offer = "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/sso/provision")) + "\">" + csrf +
-		        "<p>Ask MetaAccount to create a <b>" + EscHtml(username) + "</b> account on this site. "
-		        "Nothing is created until you approve it on MetaAccount.</p>"
-		        "<p><button type=\"submit\">Request account</button></p></form>";
+		// The last request decides the message: a pending one waits, a declined one says so. Only the
+		// visitor's own click asks again (task 042).
+		BrokerCall status;
+		status.op = "provision-status";
+		status.payload.Add("subject_user_id", subject);
+		status.payload.Add("client_site", r.Site().id);
+		status.payload.Add("proposed_username", username);
+		BrokerResult sr = TheWebEngine().Broker().Call(ctx, status);
+		String state = sr.ok ? String(sr.payload.Get("state")) : String("none");
+		if(state == "requested") {
+			offer = "<p>Your request for a <b>" + EscHtml(username) + "</b> account is waiting for approval on MetaAccount.</p>";
+		}
+		else {
+			String csrf = r.CsrfToken().IsEmpty()
+				? String()
+				: "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscHtml(r.CsrfToken()) + "\">";
+			if(state == "denied")
+				offer << "<p>MetaAccount declined the last request for <b>" << EscHtml(username)
+				      << "</b>. Nothing was created. You can ask once more.</p>";
+			offer << "<form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/provision")) << "\">" << csrf
+			      << "<p>Ask MetaAccount to create a <b>" << EscHtml(username) << "</b> account on this site. "
+			      << "Nothing is created until you approve it on MetaAccount.</p>"
+			      << "<p><button type=\"submit\">Request account</button></p></form>";
+		}
 	}
 	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"

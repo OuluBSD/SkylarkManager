@@ -581,6 +581,27 @@ BrokerResult MetaAccountService::Handle(const BrokerCallContext& ctx, const Brok
 		r.payload.Add("existed", existed);
 		return r;
 	}
+	// The state of this site's account request for one username: "requested", "denied" or "none". The
+	// client site explains a decline from it and never retries on its own (task 042).
+	if(call.op == "provision-status") {
+		String subject = call.payload.Get("subject_user_id");
+		String client_site = call.payload.Get("client_site");
+		String username = call.payload.Get("proposed_username");
+		Vector<WebAccountGrant> asked, denied;
+		grants.ListForSubject(subject, "requested", asked);
+		grants.ListForSubject(subject, "denied", denied);
+		String state = "none";
+		for(const WebAccountGrant& g : denied)
+			if(g.client_site == client_site && g.proposed_username == username && g.client_user_id.IsEmpty())
+				state = "denied";
+		for(const WebAccountGrant& g : asked)
+			if(g.client_site == client_site && g.proposed_username == username && g.client_user_id.IsEmpty())
+				state = "requested";
+		r.ok = true;
+		r.status = 200;
+		r.payload.Add("state", state);
+		return r;
+	}
 	if(call.op == "request-provision") {
 		String subject = call.payload.Get("subject_user_id");
 		String client_site = call.payload.Get("client_site");
