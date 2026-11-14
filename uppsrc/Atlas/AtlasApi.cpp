@@ -883,16 +883,23 @@ static void EventAdd(WebRequest& r)
 	if(!LoadHead(r, f, head, hrev))
 		return;
 	String type = P(r, "type");
-	if(type != "note" && type != "stage" && type != "status") {
-		ApiFail(r, 400, "event/add takes note, stage or status; created, removed, connected, disconnected and modified come from the element and road routes");
+	String kind = P(r, "subject_kind");
+	String subject = P(r, "subject_id");
+	// created and removed for an element already in the head record when it is present at a version (for
+	// example, a seed element that first appears in 0.0.1). New elements come from element/create.
+	bool presence = kind == "element" && (type == "created" || type == "removed");
+	if(type != "note" && type != "stage" && type != "status" && !presence) {
+		ApiFail(r, 400, "event/add takes note, stage or status, and created or removed for an element of the head; connected, disconnected and modified come from the road routes, and new elements from element/create");
+		return;
+	}
+	if(presence && head.FindElement(subject) < 0) {
+		ApiFail(r, 400, "element " + subject + " is not in the head map; new elements come from element/create");
 		return;
 	}
 	AtlasRules rules;
 	String rrev;
 	if(!LoadRules(r, rules, rrev))
 		return;
-	String kind = P(r, "subject_kind");
-	String subject = P(r, "subject_id");
 	String vid = VersionParam(r, f);
 	AtlasEvent e = NewEvent(r, vid, kind, subject, type);
 	e.stage = P(r, "stage");
@@ -1273,7 +1280,7 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-events", "GET", "api/atlas/*/events", read,
 	        "json", "Events, filtered by subject or version", { "map:string:required", "subject_kind:string", "subject_id:string", "vid:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-event-add", "POST", "api/atlas/*/event/add", write,
-	        "json", "Add a note, a stage or a status event to an element or road; action runs a named rule action",
+	        "json", "Add a note, stage or status event to an element or road, or created/removed for a head element (its presence at a version); action runs a named rule action",
 	        { "map:string:required", "subject_kind:string:required", "subject_id:string:required", "type:string:required",
 	          "vid:string", "stage:string", "status:string", "text:text", "requires:string", "effects:string",
 	          "action:string", "expected_revision:string" }));
