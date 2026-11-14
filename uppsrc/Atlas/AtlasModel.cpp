@@ -684,7 +684,7 @@ bool AtlasEventTypeValid(const String& subject_kind, const String& type)
 		return type == "connected" || type == "disconnected" || type == "modified" || type == "note";
 	if(subject_kind == "task")
 		return type == "proposed" || type == "accepted" || type == "done" || type == "dropped"
-		    || type == "reopened" || type == "note";
+		    || type == "reopened" || type == "assigned" || type == "note";
 	return false;
 }
 
@@ -1182,6 +1182,151 @@ void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasR
 			Report(out, "warning", head_vid, "element", e.id, "unscheduled",
 			       "element " + e.id + " has no event; it exists at the head only");
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Markdown: a safe subset. Escaping comes first, so the syntax below is applied to text that cannot
+// contain markup of its own.
+// ---------------------------------------------------------------------------
+
+static String MdEscape(const String& s)
+{
+	StringBuffer o;
+	for(int i = 0; i < s.GetCount(); i++) {
+		switch(s[i]) {
+		case '&': o << "&amp;"; break;
+		case '<': o << "&lt;"; break;
+		case '>': o << "&gt;"; break;
+		case '"': o << "&quot;"; break;
+		case '\'': o << "&#39;"; break;
+		default: o.Cat(s[i]);
+		}
+	}
+	return String(o);
+}
+
+// Inline syntax on already escaped text: `code`, **strong**, *emphasis*, [label](http or https url).
+static String MdInline(const String& e)
+{
+	StringBuffer o;
+	int n = e.GetCount();
+	int i = 0;
+	while(i < n) {
+		char c = e[i];
+		if(c == '`') {
+			int j = e.Find('`', i + 1);
+			if(j > i + 1) {
+				o << "<code>" << e.Mid(i + 1, j - i - 1) << "</code>";
+				i = j + 1;
+				continue;
+			}
+		}
+		if(c == '*' && i + 1 < n && e[i + 1] == '*') {
+			int j = e.Find("**", i + 2);
+			if(j > i + 2) {
+				o << "<strong>" << MdInline(e.Mid(i + 2, j - i - 2)) << "</strong>";
+				i = j + 2;
+				continue;
+			}
+		}
+		if(c == '*') {
+			int j = e.Find('*', i + 1);
+			if(j > i + 1) {
+				o << "<em>" << MdInline(e.Mid(i + 1, j - i - 1)) << "</em>";
+				i = j + 1;
+				continue;
+			}
+		}
+		if(c == '[') {
+			int close = e.Find(']', i + 1);
+			if(close > i && close + 1 < n && e[close + 1] == '(') {
+				int end = e.Find(')', close + 2);
+				if(end > close + 2) {
+					String url = e.Mid(close + 2, end - close - 2);
+					if(url.StartsWith("http://") || url.StartsWith("https://")) {
+						o << "<a href=\"" << url << "\" rel=\"noopener nofollow\" target=\"_blank\">"
+						  << MdInline(e.Mid(i + 1, close - i - 1)) << "</a>";
+						i = end + 1;
+						continue;
+					}
+				}
+			}
+		}
+		o.Cat(c);
+		i++;
+	}
+	return String(o);
+}
+
+String AtlasMarkdown(const String& text)
+{
+	StringBuffer out;
+	StringBuffer para;
+	bool in_para = false, in_list = false, in_code = false;
+	auto close_para = [&]() {
+		if(in_para)
+			out << "<p>" << String(para) << "</p>";
+		para.Clear();
+		in_para = false;
+	};
+	auto close_list = [&]() {
+		if(in_list)
+			out << "</ul>";
+		in_list = false;
+	};
+	Vector<String> lines = Split(text, '\n');
+	for(String line : lines) {
+		if(line.EndsWith("\r"))
+			line = line.Left(line.GetCount() - 1);
+		if(line.StartsWith("```")) {
+			close_para();
+			close_list();
+			if(in_code)
+				out << "</code></pre>";
+			else
+				out << "<pre><code>";
+			in_code = !in_code;
+			continue;
+		}
+		if(in_code) {
+			out << MdEscape(line) << "\n";
+			continue;
+		}
+		String trimmed = TrimBoth(line);
+		if(trimmed.IsEmpty()) {
+			close_para();
+			close_list();
+			continue;
+		}
+		if(trimmed[0] == '#') {
+			close_para();
+			close_list();
+			int level = 0;
+			while(level < trimmed.GetCount() && trimmed[level] == '#')
+				level++;
+			int tag = level < 1 ? 3 : level > 2 ? 5 : level + 2;  // h3 for # and ##, h5 for deeper
+			out << "<h" << tag << ">" << MdInline(MdEscape(TrimBoth(trimmed.Mid(level)))) << "</h" << tag << ">";
+			continue;
+		}
+		if(trimmed.StartsWith("- ") || trimmed.StartsWith("* ")) {
+			close_para();
+			if(!in_list)
+				out << "<ul>";
+			in_list = true;
+			out << "<li>" << MdInline(MdEscape(TrimBoth(trimmed.Mid(2)))) << "</li>";
+			continue;
+		}
+		close_list();
+		if(in_para)
+			para << "<br>";
+		para << MdInline(MdEscape(trimmed));
+		in_para = true;
+	}
+	close_para();
+	close_list();
+	if(in_code)
+		out << "</code></pre>";
+	return String(out);
 }
 
 END_UPP_NAMESPACE

@@ -545,6 +545,8 @@ static void TaskEvent(WebRequest& r, const char *type)
 		e.target = P(r, "target");
 		e.link = P(r, "link");
 	}
+	if(String(type) == "proposed" || String(type) == "assigned")
+		e.assignee = P(r, "assignee");
 	Vector<AtlasEvent> events;
 	events.Add(pick(e));
 	Commit(r, f, r.PathArg(0), head, hrev, events, false);
@@ -555,6 +557,8 @@ static void TaskAccept(WebRequest& r)  { TaskEvent(r, "accepted"); }
 static void TaskDone(WebRequest& r)    { TaskEvent(r, "done"); }
 static void TaskDrop(WebRequest& r)    { TaskEvent(r, "dropped"); }
 static void TaskReopen(WebRequest& r)  { TaskEvent(r, "reopened"); }
+static void TaskAssign(WebRequest& r)  { TaskEvent(r, "assigned"); }
+static void TaskNote(WebRequest& r)    { TaskEvent(r, "note"); }
 
 // The replay's messages. ?vid= keeps the ones at one version. Never refuses anything: findings only.
 static void CheckGet(WebRequest& r)
@@ -1146,6 +1150,8 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/task/done", TaskDone);
 	rt.Add("POST", "api/atlas/*/task/drop", TaskDrop);
 	rt.Add("POST", "api/atlas/*/task/reopen", TaskReopen);
+	rt.Add("POST", "api/atlas/*/task/assign", TaskAssign);
+	rt.Add("POST", "api/atlas/*/task/note", TaskNote);
 	rt.Add("api/atlas/*/check", CheckGet);
 
 	CommandManifest& cm = TheWebEngine().Manifest();
@@ -1215,7 +1221,7 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-task-propose", "POST", "api/atlas/*/task/propose", write,
 	        "json", "Propose a task that must be done for a target version",
 	        { "map:string:required", "id:string:required", "title:string:required", "target:string:required",
-	          "link:string", "vid:string", "text:text" }));
+	          "link:string", "assignee:string", "vid:string", "text:text" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-task-accept", "POST", "api/atlas/*/task/accept", write,
 	        "json", "Accept a proposed task (it then counts toward its target)",
 	        { "map:string:required", "id:string:required", "vid:string", "text:text" }));
@@ -1225,6 +1231,12 @@ void InstallAtlasApi(EngineSite& site)
 	        "json", "Drop a task: it no longer counts toward its target", { "map:string:required", "id:string:required", "vid:string", "text:text" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-task-reopen", "POST", "api/atlas/*/task/reopen", write,
 	        "json", "Reopen a done task", { "map:string:required", "id:string:required", "vid:string", "text:text" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-task-assign", "POST", "api/atlas/*/task/assign", write,
+	        "json", "Make someone responsible for a task (a username or a bot session; empty clears it)",
+	        { "map:string:required", "id:string:required", "assignee:string", "vid:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-task-note", "POST", "api/atlas/*/task/note", write,
+	        "json", "Add a note to a task's thread (markdown)",
+	        { "map:string:required", "id:string:required", "text:text", "vid:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-check", "GET", "api/atlas/*/check", read,
 	        "json", "The roadmap findings: contract, requires, constraint, stage and dependency messages (never refuses)",
 	        { "map:string:required", "vid:string" }));

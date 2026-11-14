@@ -755,6 +755,32 @@ static void DemoChecks()
 	      "the demo's gates hold where its contracts need them");
 }
 
+// Markdown for notes: the text is escaped before any syntax applies, so hostile input stays text.
+static void MarkdownChecks()
+{
+	String script = AtlasMarkdown("<script>alert(1)</script>");
+	Check(script.Find("<script") < 0 && script.Find("&lt;script&gt;") >= 0, "markdown escapes script tags");
+	String js = AtlasMarkdown("[click](javascript:alert(1))");
+	Check(js.Find("<a ") < 0 && js.Find("javascript:") >= 0 && js.Find("href") < 0,
+	      "markdown leaves a javascript: link as plain text");
+	String link = AtlasMarkdown("[ok](https://example.com/a?b=1&c=2)");
+	Check(link.Find("href=\"https://example.com/a?b=1&amp;c=2\"") >= 0 && link.Find("rel=\"noopener nofollow\"") >= 0,
+	      "markdown turns an https link into a safe anchor");
+	String quote = AtlasMarkdown("[x](https://a.example/\"onmouseover=alert(1))");
+	Check(quote.Find("\"onmouseover") < 0, "markdown does not let a quote break out of a link attribute");
+	String emph = AtlasMarkdown("**bold** and *em* and `c<d`");
+	Check(emph.Find("<strong>bold</strong>") >= 0 && emph.Find("<em>em</em>") >= 0 && emph.Find("<code>c&lt;d</code>") >= 0,
+	      "markdown renders strong, emphasis and code");
+	Check(AtlasMarkdown("- one\n- two") == "<ul><li>one</li><li>two</li></ul>", "markdown renders a list");
+	Check(AtlasMarkdown("# Title") == "<h3>Title</h3>", "markdown renders a heading");
+	Check(AtlasMarkdown("```\n<b>x</b>\n```") == "<pre><code>&lt;b&gt;x&lt;/b&gt;\n</code></pre>",
+	      "markdown keeps fenced code literal");
+	Check(AtlasMarkdown("a\nb") == "<p>a<br>b</p>", "markdown joins lines of a paragraph");
+	Check(AtlasMarkdown("2 * 3 = 6") == "<p>2 * 3 = 6</p>", "markdown leaves an unpaired asterisk alone");
+	Check(AtlasEventTypeValid("task", "assigned") && AtlasEventTypeValid("task", "note"),
+	      "tasks accept assignment and note events");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -767,6 +793,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	RoadmapStoreChecks(scratch_dir);
 	RoadmapChecks();
 	DemoChecks();
+	MarkdownChecks();
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }

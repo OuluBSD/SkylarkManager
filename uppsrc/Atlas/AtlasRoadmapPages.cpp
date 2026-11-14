@@ -305,22 +305,25 @@ static String RulesBody(WebRequest& r, const RoadmapData& d, bool edit, const St
 // ---------------------------------------------------------------------------
 
 struct TaskRow : Moveable<TaskRow> {
-	String id, title, target, link, state;
+	String        id, title, target, link, state, assignee;
+	Vector<int>   notes;   // indices into the events: the task's note thread, oldest first
 };
 
+// The tasks, with their state, assignee and note thread, read from the events in replay order.
 static void CollectTasks(const RoadmapData& d, Vector<TaskRow>& out)
 {
-	for(const AtlasEvent& e : d.events) {
+	for(int k = 0; k < d.events.GetCount(); k++) {
+		const AtlasEvent& e = d.events[k];
 		if(e.subject_kind != "task")
 			continue;
 		int i = -1;
-		for(int k = 0; k < out.GetCount(); k++)
-			if(out[k].id == e.subject_id)
-				i = k;
+		for(int j = 0; j < out.GetCount(); j++)
+			if(out[j].id == e.subject_id)
+				i = j;
 		if(i < 0) {
 			TaskRow t;
 			t.id = e.subject_id;
-			out.Add(t);
+			out.Add(pick(t));
 			i = out.GetCount() - 1;
 		}
 		TaskRow& t = out[i];
@@ -329,14 +332,62 @@ static void CollectTasks(const RoadmapData& d, Vector<TaskRow>& out)
 			t.target = e.target;
 			t.link = e.link;
 			t.state = "proposed";
+			t.assignee = e.assignee;
 		}
+		else if(e.type == "assigned")
+			t.assignee = e.assignee;
 		else if(e.type == "accepted" || e.type == "reopened")
 			t.state = "accepted";
 		else if(e.type == "done")
 			t.state = "done";
 		else if(e.type == "dropped")
 			t.state = "dropped";
+		else if(e.type == "note")
+			t.notes.Add(k);
 	}
+}
+
+// One task's detail: its state, who it is for, the note thread (markdown) and the forms to change it.
+static String TaskTemplate(WebRequest& r, const RoadmapData& d, const TaskRow& t, bool edit, const String& family)
+{
+	String hidden = "<input type=\"hidden\" name=\"id\" value=\"" + AtlasEsc(t.id) + "\">";
+	StringBuffer b;
+	b << "<template id=\"" << AtlasEsc(t.id) << "\"><h2>" << AtlasEsc(t.title.IsEmpty() ? t.id : t.title) << "</h2>"
+	  << "<p><span class=\"ad-mono\">" << AtlasEsc(t.id) << "</span> <span class=\"ad-pill "
+	  << (t.state == "done" ? "is-ok" : t.state == "dropped" ? "is-muted" : "is-warn") << "\">" << AtlasEsc(t.state)
+	  << "</span> must be done for <strong>" << AtlasEsc(VidLabel(d, t.target)) << "</strong></p>"
+	  << "<dl class=\"ad-dl\"><dt>Assignee</dt><dd>" << (t.assignee.IsEmpty() ? String("<span class=\"ad-empty\">nobody yet</span>") : AtlasEsc(t.assignee))
+	  << "</dd><dt>About</dt><dd class=\"ad-mono\">" << (t.link.IsEmpty() ? String("&mdash;") : AtlasEsc(t.link)) << "</dd></dl>";
+	if(edit) {
+		b << ApiForm(Api(r, family, "/task/assign"), "ad-form") << hidden
+		  << Field("Responsible (name or bot session)", "assignee", t.assignee, "ad-wide")
+		  << "<button class=\"ad-btn\" type=\"submit\">Save assignee</button></form>";
+	}
+	b << "<h3>Notes</h3>";
+	if(!t.notes.GetCount())
+		b << "<p class=\"ad-empty\">No notes yet.</p>";
+	for(int k : t.notes) {
+		const AtlasEvent& e = d.events[k];
+		b << "<div class=\"ad-note-item\"><div class=\"ad-note-meta ad-mono\">" << AtlasEsc(e.at) << " &middot; "
+		  << AtlasEsc(e.actor) << "</div><div class=\"ad-md\">" << AtlasMarkdown(e.text) << "</div></div>";
+	}
+	if(edit) {
+		b << ApiForm(Api(r, family, "/task/note"), "ad-form") << hidden
+		  << "<label>Add a note (markdown) <textarea name=\"text\" class=\"ad-note-input\"></textarea></label>"
+		  << "<button class=\"ad-btn\" type=\"submit\">Add note</button></form>";
+		b << "<div class=\"ad-form\">";
+		if(t.state == "proposed")
+			b << ApiForm(Api(r, family, "/task/accept"), "ad-inline") << hidden << "<button class=\"ad-btn\" type=\"submit\">Accept</button></form>";
+		if(t.state == "accepted")
+			b << ApiForm(Api(r, family, "/task/done"), "ad-inline") << hidden << "<button class=\"ad-btn is-primary\" type=\"submit\">Done</button></form>";
+		if(t.state == "proposed" || t.state == "accepted")
+			b << ApiForm(Api(r, family, "/task/drop"), "ad-inline") << hidden << "<button class=\"ad-btn is-danger\" type=\"submit\">Drop</button></form>";
+		if(t.state == "done" || t.state == "dropped")
+			b << ApiForm(Api(r, family, "/task/reopen"), "ad-inline") << hidden << "<button class=\"ad-btn\" type=\"submit\">Reopen</button></form>";
+		b << "</div>";
+	}
+	b << "</template>";
+	return String(b);
 }
 
 static String TasksBody(WebRequest& r, const RoadmapData& d, bool edit, const String& family)
@@ -345,25 +396,23 @@ static String TasksBody(WebRequest& r, const RoadmapData& d, bool edit, const St
 	CollectTasks(d, tasks);
 	String head_vid = d.f.versions.IsEmpty() ? String() : d.f.versions[d.f.Head()].vid;
 	StringBuffer b;
-	b << "<section class=\"ad-panel\"><header><h2>Tasks</h2><p>Work that has to be done before its target version can be entered. Done at a later version than its target is too late.</p></header>"
-	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Task</th><th>Target</th><th>About</th><th>State</th><th></th></tr>";
+	b << "<p class=\"ad-note\">Work that has to be done before its target version can be entered. Done at a later version than its target is too late.</p>"
+	  << "<div class=\"ad-split-tools\"><input type=\"search\" placeholder=\"Filter tasks (state, assignee, target)\" data-filter-for=\"tasks-table\" aria-label=\"Filter tasks\">"
+	  << "<button class=\"ad-btn\" type=\"button\" data-split-toggle=\"tasks\">Layout</button></div>"
+	  << "<div class=\"ad-split\" data-split=\"tasks\" data-orient=\"horizontal\">"
+	  << "<div class=\"ad-pane-list\"><div class=\"ad-table-wrap\"><table class=\"ad-table\" id=\"tasks-table\" data-sortable>"
+	  << "<tr><th data-sort=\"text\">Task</th><th data-sort=\"num\">Target</th><th data-sort=\"text\">State</th>"
+	  << "<th data-sort=\"text\">Assignee</th><th>About</th></tr>";
+	StringBuffer templates;
 	for(const TaskRow& t : tasks) {
-		b << "<tr><td><span class=\"ad-mono\">" << AtlasEsc(t.id) << "</span> " << AtlasEsc(t.title) << "</td><td>"
-		  << AtlasEsc(VidLabel(d, t.target)) << "</td><td class=\"ad-mono\">" << AtlasEsc(t.link) << "</td><td>";
+		int code = d.f.Find(t.target) >= 0 ? d.f.versions[d.f.Find(t.target)].code : 0;
 		String cls = t.state == "done" ? String("is-ok") : t.state == "dropped" ? String("is-muted") : String("is-warn");
-		b << "<span class=\"ad-pill " << cls << "\">" << AtlasEsc(t.state) << "</span></td><td>";
-		if(edit) {
-			String hidden = "<input type=\"hidden\" name=\"id\" value=\"" + AtlasEsc(t.id) + "\">";
-			if(t.state == "proposed")
-				b << ApiForm(Api(r, family, "/task/accept"), "ad-inline") << hidden << "<button class=\"ad-btn\" type=\"submit\">Accept</button></form>";
-			if(t.state == "accepted")
-				b << ApiForm(Api(r, family, "/task/done"), "ad-inline") << hidden << "<button class=\"ad-btn is-primary\" type=\"submit\">Done</button></form>";
-			if(t.state == "proposed" || t.state == "accepted")
-				b << ApiForm(Api(r, family, "/task/drop"), "ad-inline") << hidden << "<button class=\"ad-btn is-danger\" type=\"submit\">Drop</button></form>";
-			if(t.state == "done" || t.state == "dropped")
-				b << ApiForm(Api(r, family, "/task/reopen"), "ad-inline") << hidden << "<button class=\"ad-btn\" type=\"submit\">Reopen</button></form>";
-		}
-		b << "</td></tr>";
+		b << "<tr data-detail=\"" << AtlasEsc(t.id) << "\" tabindex=\"0\"><td><span class=\"ad-mono\">" << AtlasEsc(t.id)
+		  << "</span> " << AtlasEsc(t.title) << "</td><td data-v=\"" << code << "\">" << AtlasEsc(VidLabel(d, t.target))
+		  << "</td><td><span class=\"ad-pill " << cls << "\">" << AtlasEsc(t.state) << "</span></td><td data-v=\""
+		  << AtlasEsc(t.assignee) << "\">" << (t.assignee.IsEmpty() ? String("<span class=\"ad-empty\">&mdash;</span>") : AtlasEsc(t.assignee))
+		  << "</td><td class=\"ad-mono\">" << AtlasEsc(t.link) << "</td></tr>";
+		templates << TaskTemplate(r, d, t, edit, family);
 	}
 	if(!tasks.GetCount())
 		b << "<tr><td colspan=\"5\" class=\"ad-empty\">No tasks yet.</td></tr>";
@@ -373,9 +422,13 @@ static String TasksBody(WebRequest& r, const RoadmapData& d, bool edit, const St
 		  << Field("Id", "id", "", "") << Field("Title", "title", "", "ad-wide")
 		  << "<label>Must be done for <select name=\"target\">" << VersionOptions(d, head_vid, false) << "</select></label>"
 		  << Field("About (element:id or road:id)", "link", "", "")
+		  << Field("Responsible", "assignee", "", "")
 		  << "<label>Details <textarea name=\"text\"></textarea></label>"
 		  << "<button class=\"ad-btn is-primary\" type=\"submit\">Propose task</button></form>";
-	b << "</section>";
+	b << "</div>"
+	  << "<div class=\"ad-gutter\" tabindex=\"0\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize the panes\"></div>"
+	  << "<div class=\"ad-pane-detail\"><p class=\"ad-empty\">Select a task to see its notes and change it.</p></div></div>"
+	  << String(templates);
 	return String(b);
 }
 

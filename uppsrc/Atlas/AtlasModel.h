@@ -162,12 +162,14 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 	String action;            // a named action from the rules; its requires/effects apply too
 	String target;            // task: the version the task must be done for
 	String link;              // task: "element:<id>" or "road:<id>"
+	String assignee;          // task: who is responsible (a username or a bot session); free text
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("at", at)("actor", actor)("vid", vid)("subject_kind", subject_kind)
 		  ("subject_id", subject_id)("type", type)("stage", stage)("status", status)("text", text)
 		  ("name", name)("from", from)("to", to)("road_kind", road_kind)("label", label)
-		  ("requires", requires)("effects", effects)("action", action)("target", target)("link", link);
+		  ("requires", requires)("effects", effects)("action", action)("target", target)("link", link)
+		  ("assignee", assignee);
 	}
 };
 
@@ -175,6 +177,10 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 bool AtlasStageValid(const String& stage);
 int  AtlasStageRank(const String& stage);     // position in the order, -1 when not a stage
 bool AtlasEventTypeValid(const String& subject_kind, const String& type);
+
+// Markdown for notes and task threads, rendered to HTML. The text is escaped first, so no markup from
+// it survives; the subset is headings, paragraphs, lists, emphasis, code and http(s) links only.
+String AtlasMarkdown(const String& text);
 
 // Planning rules. Atoms are named booleans; a literal is "name" (must hold) or "!name" (must not).
 // Derived: "stage:<element>:<stage>" holds when the element is at that stage or later; task atoms
