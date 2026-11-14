@@ -11,7 +11,8 @@ NAMESPACE_UPP
 //   {"projects": [{"name": "pkr", "repo": "/home/me/BrownBear", "seed": "atlas/pkr/goal-map.seed",
 //                  "version": "v1.0.0", "title": "PKR goal map", "level": "private", "editors": ["alice"]}]}
 //
-// level is the visibility of the imported map (public, protected or private); editors may edit the project's
+// roadmap, when given, is a JSON file naming each element's first version: the family's versions and its
+// history are written from it, as events on the head map. level is the visibility of the imported map (public, protected or private); editors may edit the project's
 // maps without the admin role. The file is read on each use, so edits take effect without a restart.
 struct AtlasProject : Moveable<AtlasProject> {
 	String         name;
@@ -20,6 +21,7 @@ struct AtlasProject : Moveable<AtlasProject> {
 	String         version;
 	String         title;
 	String         level;
+	String         roadmap;   // optional: the roadmap file, relative to the repo (see AtlasImport.cpp)
 	Vector<String> editors;
 };
 
@@ -38,6 +40,7 @@ struct AtlasImportResult {
 	String revision;
 	int    elements = 0;
 	int    roads = 0;
+	int    events = 0;
 
 	bool   Ok() const { return status == 200; }
 };

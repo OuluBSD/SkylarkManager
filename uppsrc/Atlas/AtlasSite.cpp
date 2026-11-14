@@ -446,6 +446,38 @@ static String ElementOptions(const AtlasMap& m, const String& selected)
 
 static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map);
 
+// The registered projects this viewer may edit, each with its import state. An editor imports a project from
+// here (POST atlas/import); a project nobody has imported yet has an Import button.
+static void ProjectsSection(WebRequest& r, StringBuffer& b)
+{
+	Vector<AtlasProject> all;
+	String err;
+	if(!AtlasLoadProjects(r.Site().data_root, all, err)) {
+		b << "<p>The project registry could not be read: " << Esc(err) << "</p>";
+		return;
+	}
+	StringBuffer rows;
+	int listed = 0;
+	for(const AtlasProject& p : all) {
+		if(!AtlasCanEditFamily(r, p.name))
+			continue;
+		AtlasFamily f;
+		String frev, ferr;
+		rows << "<tr><td>" << Esc(p.title.GetCount() ? p.title : p.name) << "</td><td>" << Esc(p.name) << "</td><td>";
+		if(AtlasLoadFamily(r.Site().data_root, p.name, f, frev, ferr))
+			rows << "<a href=\"" << Esc(r.Site().Url("atlas/" + f.head_key)) << "\">" << Esc(f.head_key) << "</a>";
+		else
+			rows << "<form method=\"post\" action=\"" << Esc(r.Site().Url("atlas/import")) << "\">" << CsrfField(r)
+			     << "<input type=\"hidden\" name=\"project\" value=\"" << Esc(p.name) << "\">"
+			     << "<button type=\"submit\">Import</button></form>";
+		rows << "</td></tr>";
+		listed++;
+	}
+	if(!listed)
+		return;
+	b << "<h2>Projects</h2><table><tr><th>Project</th><th>Family</th><th>Map</th></tr>" << String(rows) << "</table>";
+}
+
 static void MapList(WebRequest& r)
 {
 	if(AtlasPolicyStatus(r, "maps", String()) == 503) {
@@ -487,6 +519,7 @@ static void MapList(WebRequest& r)
 		  << "<label>World width <input name=\"width\" value=\"2400\"></label>"
 		  << "<label>World height <input name=\"height\" value=\"1600\"></label>"
 		  << "<button type=\"submit\">Create</button></form></details>";
+	ProjectsSection(r, b);
 	Page(r, "Maps", String(b));
 }
 
@@ -1224,6 +1257,36 @@ static void CreateMap(WebRequest& r)
 	r.Redirect(r.Site().Url("atlas/" + key));
 }
 
+// POST atlas/import: the project's editors and admins import its seed once, then land on its map. The permission
+// is checked before the project is looked up, so a viewer who may not edit learns nothing about other names.
+static void ImportProject(WebRequest& r)
+{
+	if(!RequireLogin(r))
+		return;
+	String name = r.Param("project");
+	if(!AtlasCanEditFamily(r, name)) {
+		Refuse(r, 403, "importing needs the admin role, or to be an editor of this project");
+		return;
+	}
+	Vector<AtlasProject> all;
+	String err;
+	if(!AtlasLoadProjects(r.Site().data_root, all, err)) {
+		Refuse(r, 500, err);
+		return;
+	}
+	int i = AtlasFindProject(all, name);
+	if(i < 0) {
+		Refuse(r, 404, "no project named " + name);
+		return;
+	}
+	AtlasImportResult res = AtlasImportProject(r.Site().data_root, all[i]);
+	if(!res.Ok()) {
+		Refuse(r, res.status, res.error);
+		return;
+	}
+	r.Redirect(r.Site().Url("atlas/" + res.key));
+}
+
 // The canvas's drag-to-move: a JSON answer, because the page does not reload.
 static void MoveElement(WebRequest& r)
 {
@@ -1276,6 +1339,7 @@ void InstallAtlasSite(EngineSite& site)
 	rt.Add("", MapList); // the root is the public map list (Atlas reads are public; edits remain gated)
 	rt.Add("atlas", MapList);
 	rt.Add("POST", "atlas/create", CreateMap);
+	rt.Add("POST", "atlas/import", ImportProject);
 	rt.Add("atlas/*", MapView);
 	rt.Add("atlas/*/element/*", ElementView);
 	rt.Add("POST", "atlas/*/element/move", MoveElement);

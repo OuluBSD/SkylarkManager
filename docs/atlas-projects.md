@@ -23,8 +23,9 @@ the file is missing, there are no projects.
 ## Format
 
     {"projects": [
-      {"name": "pkr", "repo": "/srv/BrownBear", "seed": "atlas/pkr/goal-map.seed",
-       "version": "v1.0.0", "title": "PKR goal map", "level": "private",
+      {"name": "brownbear", "repo": "/srv/BrownBear", "seed": "atlas/pkr/goal-map.seed",
+       "roadmap": "atlas/brownbear/roadmap.json",
+       "version": "v1.0.0", "title": "BrownBear", "level": "private",
        "editors": ["alice"]},
       {"name": "managerskylark", "repo": "/home/me/OuluBSD/SkylarkManager",
        "seed": "atlas/managerskylark/map.seed", "version": "v1.0.0",
@@ -39,10 +40,11 @@ the file is missing, there are no projects.
 | `version` | yes | The version of the imported map, `v<a.b.c>`. Later versions are added in Atlas. |
 | `title` | no | The map's title. Defaults to `name`. |
 | `level` | no | `public`, `protected` or `private`. Default `private`. Applied when the import creates the map. |
+| `roadmap` | no | A JSON file, relative to `repo`, that gives the family's versions and each element's first version. Without it the import makes one version, the head. `..` and absolute paths are refused. See below. |
 | `editors` | no | Account names that may edit this project's maps without the admin role. Matched without case. |
 
 A bad entry fails the whole file, and the project routes answer with the
-reason (for example `project pkr: seed must be a relative path inside the
+reason (for example `project brownbear: seed must be a relative path inside the
 repository`).
 
 ## Who can do what
@@ -75,7 +77,20 @@ repository`).
    - The seed in `atlas/managerskylark/map.seed` is a working example.
 2. **Register the project.** Add an entry to `projects.json` as above. Set
    `level` and `editors`. Leave the `repo` path absolute.
-3. **Import it.** A signed-in admin or editor runs, with the account's session
+   With a `roadmap`, the seed is the head topology and the roadmap is the history:
+
+       {"versions": ["0.0.1", "0.0.2", "1.0.0"],
+        "elements": {"MainComputer": {"from": "0.0.1", "note": "desktop app root"},
+                     "Leaf": {"from": "0.0.2"}}}
+
+   Every element of the seed must be named, with `from`, the version it first
+   appears in. `versions` ascend, and the last one must be the project's
+   `version`. A block may not start after an element it contains. `note` is
+   optional and is kept as a note event. The import checks all of this before it
+   writes anything, so a bad roadmap leaves no family and no map behind.
+3. **Import it.** A signed-in admin or editor runs, either from the Projects table
+   on `/atlas` (an Import button, shown only to the people who may import the
+   project) or with the account's session
    (`skylarkctl` login is shown in `skylarkctl --help`):
 
        skylarkctl --server http://<host>:<main-port> --site atlas=http://<host>:<atlas-port> \
@@ -101,11 +116,15 @@ family and its maps must be removed first, which only an operator can do.
 | `editing needs the admin role, or to be an editor of this map's project` (403) | The account is neither an admin nor listed under `editors`. |
 | `seed import needs an empty map` | The map already has elements; import starts from a new version. |
 | `projects file: ...` | The JSON is malformed or an entry is invalid; the message names the field. |
+| `roadmap <path>: versions must ascend ...` | The roadmap's versions are out of order or repeat. |
+| `roadmap <path>: element <name> is not in the goal map` | The roadmap names an element the seed does not have. |
+| `roadmap <path>: element <name> has no entry` | An element of the seed is missing from the roadmap. |
+| `roadmap <path>: block <name> starts after its element <name>` | A block's `from` is later than one of its elements. |
 
 ## Demo setup
 
 For a demo, register two projects: `managerskylark` (public, so anonymous
-visitors see the map) and one private project such as `pkr` (its editors see
+visitors see the map) and one private project such as `brownbear` (its editors see
 it, others do not). The `managerskylark` seed in this repository is the demo
 map. Import each once, then show the Atlas site signed out (public map only),
 signed in as an editor (both maps), and signed in as an admin.
