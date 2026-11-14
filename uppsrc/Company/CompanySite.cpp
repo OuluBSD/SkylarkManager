@@ -771,7 +771,7 @@ static void ApiHealth(WebRequest& http)
 	CompanyStore* store = s_store;
 	ValueMap m;
 	m.Set("status", "ok");
-	m.Set("service", "CompanySkylark");
+	m.Set("service", "Company");
 	m.Set("time", CompanyTimeIso(GetSysTime()));
 	if(store) {
 		m.Set("data_root", store->GetRoot());

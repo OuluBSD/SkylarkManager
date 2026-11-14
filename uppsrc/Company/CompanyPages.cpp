@@ -53,12 +53,12 @@ String CompanyViews::RenderPage(WebRequest& http, const String& title, const Str
 	b << "<!doctype html><html lang=\"en\"" << ThemeHtmlAttrs(http) << "><head><meta charset=\"utf-8\">"
 	  << ThemeHeadScript()
 	  << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-	  << "<title>" << CompanyHtmlEsc(title) << " - CompanySkylark</title>"
+	  << "<title>" << CompanyHtmlEsc(title) << " - Company Portal</title>"
 	  << "<style>\n" << CompanyCss() << "\n</style></head><body>"
-	  << "<header class=\"cs-nav\"><a href=\"/\" class=\"cs-brand\">CompanySkylark</a>"
+	  << "<header class=\"cs-nav\"><a href=\"/\" class=\"cs-brand\">Company Portal</a>"
 	  << "<nav>" << String(nav) << "</nav>" << SessionChromeHtml(http) << "</header>"
 	  << "<main class=\"cs-main\">" << body_content << "</main>"
-	  << "<footer class=\"cs-footer\">CompanySkylark &bull; proposals, review, and compensation for human and AI contributors</footer>"
+	  << "<footer class=\"cs-footer\">Company Portal &bull; proposals, review, and compensation for human and AI contributors</footer>"
 	  << "</body></html>";
 	return String(b);
 }
@@ -283,7 +283,7 @@ String CompanyViews::RenderDataTable(const Vector<String>& columns, const Vector
 ValueMap CompanyViews::BuildFrameworkSpec()
 {
 	ValueMap spec;
-	spec.Set("framework", "CompanySkylark");
+	spec.Set("framework", "Company Portal");
 	spec.Set("theme", "vivid-dark");
 	spec.Set("template", "sidebar");
 
@@ -334,7 +334,7 @@ String CompanyViews::RenderWelcome(WebRequest& http, const WebAuthIdentity& iden
 	if(!identity.authenticated) {
 		body << "<div class=\"cs-card\" style=\"text-align:center; padding:3rem 2rem;\">\n"
 		     << "<div class=\"cs-login-logo\">" << VividIcon::Get("shield", 40) << "</div>\n"
-		     << "<h1 style=\"margin:0.75rem 0 0.5rem;\">Welcome to CompanySkylark</h1>\n"
+		     << "<h1 style=\"margin:0.75rem 0 0.5rem;\">Welcome to Company Portal</h1>\n"
 		     << "<p class=\"cs-muted\" style=\"max-width:560px; margin:0 auto 1.25rem;\">"
 		     << "A private collaboration platform where human contributors and AI agents propose work, "
 		     << "implement it against GitHub pull requests, pass mechanical and Operator Review, and earn "
