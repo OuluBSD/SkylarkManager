@@ -38,10 +38,15 @@ static String Api(WebRequest& r, const String& family, const String& path)
 	return r.Site().Url("api/atlas/" + family + path);
 }
 
+static String VidLabel(const AtlasFamily& f, const String& vid)
+{
+	int i = f.Find(vid);
+	return i >= 0 ? AtlasVersionLabel(f.versions[i].code) : vid;
+}
+
 static String VidLabel(const RoadmapData& d, const String& vid)
 {
-	int i = d.f.Find(vid);
-	return i >= 0 ? AtlasVersionLabel(d.f.versions[i].code) : vid;
+	return VidLabel(d.f, vid);
 }
 
 // A form that posts to an API route. The page script sends it and reloads on success.
@@ -117,7 +122,8 @@ static String VersionsBody(WebRequest& r, const RoadmapData& d, bool edit, const
 	  << "</div>";
 
 	b << "<section class=\"ad-panel\"><header><h2>Versions</h2><p>Each version is one step. The contract is what must hold when the version is entered.</p></header>"
-	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Version</th><th>Code</th><th>Contract on entry</th><th>Map</th></tr>";
+	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Version</th><th>Code</th><th>Contract on entry</th><th>Map</th>"
+	  << (edit ? "<th>Change</th>" : "") << "</tr>";
 	for(const AtlasVersion& v : d.f.versions) {
 		b << "<tr><td>" << AtlasEsc(AtlasVersionLabel(v.code)) << (v.vid == d.f.versions[d.f.Head()].vid ? String(" <span class=\"ad-pill is-info\">head</span>") : String())
 		  << "</td><td class=\"ad-mono\">" << v.code << "</td><td>";
@@ -127,7 +133,20 @@ static String VersionsBody(WebRequest& r, const RoadmapData& d, bool edit, const
 			  << "<input type=\"hidden\" name=\"vid\" value=\"" << AtlasEsc(v.vid) << "\">"
 			  << "<label>requires <input name=\"requires\" class=\"ad-wide\" value=\"" << AtlasEsc(JoinComma(v.requires)) << "\"></label>"
 			  << "<button class=\"ad-btn\" type=\"submit\">Save contract</button></form>";
-		b << "</td><td><a href=\"" << AtlasEsc(r.Site().Url("atlas/" + d.f.head_key + "?vid=" + v.vid)) << "\">open at this version</a></td></tr>";
+		b << "</td><td><a href=\"" << AtlasEsc(r.Site().Url("atlas/" + d.f.head_key + "?vid=" + v.vid)) << "\">open at this version</a></td>";
+		if(edit) {
+			b << "<td>" << ApiForm(Api(r, family, "/versions/rename"), "ad-inline")
+			  << "<input type=\"hidden\" name=\"vid\" value=\"" << AtlasEsc(v.vid) << "\">"
+			  << "<input name=\"label\" value=\"" << AtlasEsc(AtlasVersionLabel(v.code)) << "\" aria-label=\"New label\">"
+			  << "<button class=\"ad-btn\" type=\"submit\">Rename</button></form>";
+			if(v.vid != d.f.versions[d.f.Head()].vid)
+				b << ApiForm(Api(r, family, "/versions/delete"), "ad-inline")
+				  << "<input type=\"hidden\" name=\"vid\" value=\"" << AtlasEsc(v.vid) << "\">"
+				  << "<button class=\"ad-btn is-danger\" type=\"submit\" data-confirm=\"Delete version " << AtlasEsc(AtlasVersionLabel(v.code))
+				  << "? Only possible when no event uses it.\">Delete</button></form>";
+			b << "</td>";
+		}
+		b << "</tr>";
 	}
 	b << "</table></div>";
 	if(edit)
@@ -463,6 +482,141 @@ static String ChecksBody(WebRequest& r, const RoadmapData& d)
 }
 
 // ---------------------------------------------------------------------------
+// Subjects at one version: the map's elements and roads as they stood then, with the checker's findings
+// and, for admins, the forms that change them. Used by the map page when it shows a version.
+// ---------------------------------------------------------------------------
+
+static const char *StatusNames[] = { "hot", "active", "planned", "not-ready", "future", "settled", "trouble" };
+static const char *StageNames[] = { "planned", "implementation_research", "implementation", "trials", "merge_to_master" };
+static const char *KindNames[] = { "continent", "block", "place", "sea" };
+static const char *RoadKindNames[] = { "progress", "communication", "dependency" };
+
+static String Options(const char *const *names, int n, const String& selected)
+{
+	StringBuffer b;
+	for(int i = 0; i < n; i++)
+		b << "<option value=\"" << names[i] << "\"" << (selected == names[i] ? " selected" : String()) << ">"
+		  << names[i] << "</option>";
+	return String(b);
+}
+
+static String StatusPill(const String& status)
+{
+	return "<span class=\"ad-pill st-" + AtlasEsc(status) + "\">" + AtlasEsc(status) + "</span>";
+}
+
+static String StagePill(const String& stage)
+{
+	if(stage.IsEmpty())
+		return String("<span class=\"ad-empty\">&mdash;</span>");
+	return "<span class=\"ad-pill stg-" + AtlasEsc(stage) + "\" data-rank=\"" + AsString(AtlasStageRank(stage)) + "\">" + AtlasEsc(stage) + "</span>";
+}
+
+String AtlasSubjectsView(WebRequest& r, const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
+                         const Vector<AtlasSubjectState>& states, const Vector<AtlasRoadmapMessage>& messages,
+                         const String& vid, bool edit)
+{
+	String family = head.map;
+	String hidden_vid = "<input type=\"hidden\" name=\"vid\" value=\"" + AtlasEsc(vid) + "\">";
+	int at = f.Find(vid);
+	StringBuffer b;
+	if(edit) {
+		b << "<details class=\"ad-panel\"><summary>Add an element at " << AtlasEsc(VidLabel(f, vid)) << "</summary>"
+		  << ApiForm(Api(r, family, "/element/create"))
+		  << hidden_vid << Field("Name", "name", "", "") << Field("Parent (optional id)", "parent", "", "")
+		  << "<label>Kind <select name=\"kind\">" << Options(KindNames, 4, "block") << "</select></label>"
+		  << "<label>Status <select name=\"status\">" << Options(StatusNames, 7, "planned") << "</select></label>"
+		  << Field("x", "x", "0", "") << Field("y", "y", "0", "") << Field("w", "w", "180", "") << Field("h", "h", "100", "")
+		  << "<button class=\"ad-btn is-primary\" type=\"submit\">Add element</button></form></details>";
+		b << "<details class=\"ad-panel\"><summary>Connect two elements at " << AtlasEsc(VidLabel(f, vid)) << "</summary>"
+		  << ApiForm(Api(r, family, "/road/create"))
+		  << hidden_vid << Field("From (element id)", "from", "", "") << Field("To (element id)", "to", "", "")
+		  << "<label>Kind <select name=\"kind\">" << Options(RoadKindNames, 3, "communication") << "</select></label>"
+		  << Field("Label", "label", "", "")
+		  << "<button class=\"ad-btn is-primary\" type=\"submit\">Connect</button></form></details>";
+	}
+	b << "<div class=\"ad-split-tools\"><input type=\"search\" placeholder=\"Filter subjects\" data-filter-for=\"subjects-table\" aria-label=\"Filter subjects\">"
+	  << "<button class=\"ad-btn\" type=\"button\" data-split-toggle=\"subjects\">Layout</button></div>"
+	  << "<div class=\"ad-split\" data-split=\"subjects\" data-orient=\"horizontal\">"
+	  << "<div class=\"ad-pane-list\"><div class=\"ad-table-wrap\"><table class=\"ad-table\" id=\"subjects-table\" data-sortable>"
+	  << "<tr><th data-sort=\"text\">Subject</th><th data-sort=\"text\">Kind</th><th data-sort=\"num\">Stage</th>"
+	  << "<th data-sort=\"text\">Status</th><th data-sort=\"num\">Checks</th></tr>";
+	StringBuffer templates;
+	for(const AtlasSubjectState& st : states) {
+		if(!st.present)
+			continue;
+		int errors = 0, warnings = 0;
+		for(const AtlasRoadmapMessage& m : messages)
+			if(m.vid == vid && m.subject_kind == st.kind && m.subject_id == st.id) {
+				if(m.severity == "error") errors++; else warnings++;
+			}
+		String id = st.kind + "-" + st.id;
+		String label = st.kind == "road" ? st.from + " → " + st.to : (st.name.IsEmpty() ? st.id : st.name);
+		b << "<tr data-detail=\"" << AtlasEsc(id) << "\" tabindex=\"0\"><td>" << AtlasEsc(label) << "</td><td>"
+		  << AtlasEsc(st.kind) << "</td><td data-v=\"" << AtlasStageRank(st.stage) << "\">" << StagePill(st.stage)
+		  << "</td><td>" << (st.status.IsEmpty() ? String() : StatusPill(st.status)) << "</td><td data-v=\""
+		  << errors * 1000 + warnings << "\">"
+		  << (errors ? "<span class=\"ad-pill is-err\">" + AtlasEsc(AsString(errors)) + " error</span>" : String())
+		  << (warnings ? "<span class=\"ad-pill is-warn\">" + AtlasEsc(AsString(warnings)) + " warning</span>" : String())
+		  << "</td></tr>";
+
+		// The subject's own history up to this version, then the forms that change it.
+		StringBuffer t;
+		t << "<template id=\"" << AtlasEsc(id) << "\"><h2>" << AtlasEsc(label) << "</h2><p>" << StagePill(st.stage) << " "
+		  << (st.status.IsEmpty() ? String() : StatusPill(st.status)) << "</p>";
+		for(const AtlasRoadmapMessage& m : messages)
+			if(m.vid == vid && m.subject_kind == st.kind && m.subject_id == st.id)
+				t << "<p class=\"" << (m.severity == "error" ? "err" : "ad-note") << "\">" << AtlasEsc(m.severity) << ": "
+				  << AtlasEsc(m.text) << "</p>";
+		t << "<h3>History</h3>";
+		int shown = 0;
+		for(const AtlasEvent& e : events) {
+			if(e.subject_kind != st.kind || e.subject_id != st.id || at < 0 || f.Find(e.vid) > at)
+				continue;
+			shown++;
+			t << "<div class=\"ad-note-item\"><div class=\"ad-note-meta ad-mono\">" << AtlasEsc(VidLabel(f, e.vid))
+			  << " &middot; " << AtlasEsc(e.at) << " &middot; " << AtlasEsc(e.actor) << " &middot; " << AtlasEsc(e.type);
+			if(e.stage.GetCount()) t << " " << AtlasEsc(e.stage);
+			if(e.status.GetCount()) t << " " << AtlasEsc(e.status);
+			t << "</div>";
+			if(e.text.GetCount()) t << "<div class=\"ad-md\">" << AtlasMarkdown(e.text) << "</div>";
+			t << "</div>";
+		}
+		if(!shown)
+			t << "<p class=\"ad-empty\">No events for this subject up to this version.</p>";
+		if(edit) {
+			String subj = "<input type=\"hidden\" name=\"subject_kind\" value=\"" + AtlasEsc(st.kind) + "\"><input type=\"hidden\" name=\"subject_id\" value=\"" + AtlasEsc(st.id) + "\">";
+			t << ApiForm(Api(r, family, "/event/add")) << subj << hidden_vid << "<input type=\"hidden\" name=\"type\" value=\"note\">"
+			  << "<label>Add a note <textarea name=\"text\" class=\"ad-note-input\"></textarea></label>"
+			  << "<button class=\"ad-btn\" type=\"submit\">Add note</button></form>";
+			t << "<div class=\"ad-form\">" << ApiForm(Api(r, family, "/event/add"), "ad-inline") << subj << hidden_vid
+			  << "<input type=\"hidden\" name=\"type\" value=\"stage\"><label>Stage <select name=\"stage\">" << Options(StageNames, 5, st.stage)
+			  << "</select></label><button class=\"ad-btn\" type=\"submit\">Set stage</button></form>";
+			t << ApiForm(Api(r, family, "/event/add"), "ad-inline") << subj << hidden_vid
+			  << "<input type=\"hidden\" name=\"type\" value=\"status\"><label>Status <select name=\"status\">" << Options(StatusNames, 7, st.status)
+			  << "</select></label><button class=\"ad-btn\" type=\"submit\">Set status</button></form></div>";
+			if(st.kind == "element")
+				t << ApiForm(Api(r, family, "/element/remove"), "ad-inline") << hidden_vid
+				  << "<input type=\"hidden\" name=\"id\" value=\"" << AtlasEsc(st.id) << "\">"
+				  << "<button class=\"ad-btn is-danger\" type=\"submit\" data-confirm=\"Remove " << AtlasEsc(st.id) << " from this version on?\">Remove element</button></form>";
+			else
+				t << ApiForm(Api(r, family, "/road/disconnect"), "ad-inline") << hidden_vid
+				  << "<input type=\"hidden\" name=\"id\" value=\"" << AtlasEsc(st.id) << "\">"
+				  << "<button class=\"ad-btn is-danger\" type=\"submit\" data-confirm=\"Disconnect " << AtlasEsc(st.id) << " from this version on?\">Disconnect road</button></form>";
+		}
+		t << "</template>";
+		templates << String(t);
+	}
+	if(!templates.GetCount())
+		b << "<tr><td colspan=\"5\" class=\"ad-empty\">Nothing was on the map at this version.</td></tr>";
+	b << "</table></div></div>"
+	  << "<div class=\"ad-gutter\" tabindex=\"0\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize the panes\"></div>"
+	  << "<div class=\"ad-pane-detail\"><p class=\"ad-empty\">Select a subject to see its history and change it.</p></div></div>"
+	  << String(templates);
+	return String(b);
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -530,6 +684,8 @@ String AtlasRoadmapScript()
   document.addEventListener('submit', function (ev) {
     var form = ev.target && ev.target.closest ? ev.target.closest('form[data-api]') : null;
     if (!form) { return; }
+    var confirmText = ev.submitter ? ev.submitter.getAttribute('data-confirm') : null;
+    if (confirmText && !window.confirm(confirmText)) { ev.preventDefault(); return; }
     ev.preventDefault();
     var csrf = document.body.getAttribute('data-csrf') || '';
     {

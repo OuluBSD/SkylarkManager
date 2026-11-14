@@ -340,7 +340,20 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	current.label = title;
 	s.crumbs.Add(pick(current));
 
-	s.body = "<h1>" + Esc(title) + "</h1>" + body;
+	// Editing is for the admin role. Say why the forms are missing, and how an operator grants it.
+	String hint;
+	bool editable = section == "map" || section == "versions" || section == "timeline" || section == "rules"
+	             || section == "tasks" || section == "checks";
+	if(editable && !CanEdit(r)) {
+		if(r.HasUser())
+			hint = "<div class=\"ad-hint\" role=\"note\">You are signed in as <strong>" + Esc(r.User().username)
+			     + "</strong> without the admin role, so the forms are hidden. An operator can grant it with <code>ManagerSkylark --set-atlas-user "
+			     + Esc(r.User().username) + "</code>.</div>";
+		else
+			hint = "<div class=\"ad-hint\" role=\"note\">Read-only. <a href=\"" + Esc(r.Site().Url("session/login"))
+			     + "\">Sign in</a> with an account that has the admin role to change the roadmap.</div>";
+	}
+	s.body = "<h1>" + Esc(title) + "</h1>" + hint + body;
 	r.Html(RenderAdminShell(s));
 }
 
@@ -550,6 +563,30 @@ static String EditPanel(WebRequest& r, const AtlasMap& m, const String& key, con
 
 // The roadmap of the map's family: its version links, the checker's counts, and (with ?vid=) what
 // the map looked like at that version. Empty when the map has no version list.
+// The subjects at one version, as a split view with their history and, for admins, the operator forms.
+static String SubjectsSection(WebRequest& r, const AtlasMap& head, const String& key, const String& vid, bool edit)
+{
+	AtlasFamily f;
+	String frev, err;
+	if(!AtlasLoadFamily(r.Site().data_root, head.map, f, frev, err))
+		return String();
+	AtlasRules rules;
+	String rrev;
+	AtlasLoadRules(r.Site().data_root, head.map, rules, rrev, err);
+	Vector<AtlasEvent> events;
+	AtlasLoadEvents(r.Site().data_root, head.map, events, err);
+	Vector<AtlasRoadmapMessage> messages;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	String use = vid.IsEmpty() ? f.versions[f.Head()].vid : vid;
+	Vector<AtlasSubjectState> states;
+	if(!AtlasStateAt(head, f, events, use, states, err))
+		return String();
+	return "<section class=\"ad-panel\"><header><h2>Subjects</h2><p>Click a row to see its history"
+	       + String(edit ? ", change its stage or status, or add a note" : String()) + ".</p></header>"
+	       + AtlasSubjectsView(r, head, f, events, states, messages, use, edit) + "</section>";
+}
+
 static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
 {
 	AtlasFamily f;
@@ -725,6 +762,12 @@ static void MapView(WebRequest& r)
 	bool edit = CanEdit(r) && !viewing;
 	StringBuffer b;
 	b << RoadmapPanel(r, m, key);
+	{
+		AtlasFamily f;
+		String frev, err;
+		if(AtlasLoadFamily(r.Site().data_root, m.map, f, frev, err) && f.versions.GetCount())
+			b << SubjectsSection(r, m, key, viewing ? at : String(), edit);
+	}
 	if(!at.IsEmpty() && !viewing)
 		b << "<p class=\"err\">" << Esc(view_err) << "</p>";
 	if(viewing)
@@ -760,7 +803,8 @@ static void MapView(WebRequest& r)
 	String attrs = String(" data-editable=\"") + (edit ? "1" : "0") + "\" data-csrf=\"" + Esc(r.CsrfToken())
 	             + "\" data-base=\"" + Esc(r.Site().Url("atlas/" + key)) + "\"";
 	b << "<script type=\"application/json\" id=\"atlas-data\">" << ScriptJson(data) << "</script>"
-	  << "<script>" << AtlasScript() << "</script>";
+	  << "<script>" << AtlasScript() << "</script>"
+	  << "<script>" << AtlasRoadmapScript() << "</script>";
 	Page(r, m.title, String(b), attrs, m.map, "map");
 }
 

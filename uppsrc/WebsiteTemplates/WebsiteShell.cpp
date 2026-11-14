@@ -79,6 +79,19 @@ html[data-nav="collapsed"] .ad-link { justify-content: center; }
 .ad-table th { color: var(--muted); font-weight: 600; font-size: .82rem; }
 .ad-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: .8rem; margin: 1px 4px 1px 0; white-space: nowrap; }
 .ad-pill.is-ok { color: var(--st-active); border-color: var(--st-active); }
+.ad-pill.st-hot { color: var(--st-hot); border-color: var(--st-hot); }
+.ad-pill.st-active { color: var(--st-active); border-color: var(--st-active); }
+.ad-pill.st-planned { color: var(--st-planned); border-color: var(--st-planned); }
+.ad-pill.st-not-ready { color: var(--st-notready); border-color: var(--st-notready); border-style: dashed; }
+.ad-pill.st-future { color: var(--st-future); border-color: var(--st-future); border-style: dotted; }
+.ad-pill.st-settled { color: var(--st-settled); border-color: var(--st-settled); }
+.ad-pill.st-trouble { color: var(--st-trouble); border-color: var(--st-trouble); }
+.ad-pill[data-rank="0"] { opacity: .55; }
+.ad-pill[data-rank="1"] { opacity: .7; }
+.ad-pill[data-rank="2"] { opacity: .85; }
+.ad-pill[data-rank="3"] { opacity: 1; font-weight: 600; }
+.ad-pill[data-rank="4"] { opacity: 1; font-weight: 700; }
+.ad-pill.is-err { color: var(--st-trouble); border-color: var(--st-trouble); }
 .ad-pill.is-warn { color: var(--st-hot); border-color: var(--st-hot); }
 .ad-pill.is-err { color: var(--st-trouble); border-color: var(--st-trouble); font-weight: 600; }
 .ad-pill.is-info { color: var(--st-planned); border-color: var(--st-planned); }
@@ -138,6 +151,7 @@ tr.is-filtered-out { display: none; }
 .ad-note-item { border-top: 1px solid var(--line); padding: 8px 0; }
 .ad-note-meta { color: var(--muted); font-size: .8rem; }
 .ad-note-input { width: min(100%, 520px); min-height: 70px; }
+.ad-hint { border: 1px solid var(--st-hot); border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; background: color-mix(in srgb, var(--st-hot) 10%, var(--panel)); }
 .ad-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 8px 0 12px; }
 .ad-dl dt { color: var(--muted); font-size: .86rem; }
 .ad-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
@@ -191,6 +205,9 @@ String AdminDashboardScript()
   function swapScripts(container) {
     var scripts = container.querySelectorAll('script');
     for (var i = 0; i < scripts.length; i++) {
+      // Only classic and module scripts run; a data block (application/json) stays as it is.
+      var type = (scripts[i].getAttribute('type') || '').toLowerCase();
+      if (type && type !== 'text/javascript' && type !== 'module') { continue; }
       var fresh = document.createElement('script');
       fresh.text = scripts[i].textContent;
       scripts[i].parentNode.replaceChild(fresh, scripts[i]);
@@ -229,6 +246,8 @@ String AdminDashboardScript()
       else if (nextHead) { var bar = document.querySelector('.ad-topbar'); if (bar) { bar.insertAdjacentElement('afterend', nextHead.cloneNode(true)); } }
       content.innerHTML = nextContent.innerHTML;
       swapScripts(content);
+      restoreSplits();
+      restoreRows();
       document.title = doc.title;
       for (var i = 0; i < doc.body.attributes.length; i++) {
         var attr = doc.body.attributes[i];
@@ -327,6 +346,25 @@ String AdminDashboardScript()
     while (pane.firstChild) { pane.removeChild(pane.firstChild); }
     pane.appendChild(document.importNode(tpl.content, true));
     swapScripts(pane);
+    if (split) { rememberRow(split, tr.getAttribute('data-detail')); }
+  }
+  // The selected row of each split is kept for the session, per page (path and query), so a save that
+  // reloads the page leaves the same row open.
+  function rowKey(split) {
+    return 'ad-row:' + window.location.pathname + window.location.search + '|' + (split.getAttribute('data-split') || '');
+  }
+  function rememberRow(split, id) {
+    try { window.sessionStorage.setItem(rowKey(split), id); } catch (e) { /* not remembered */ }
+  }
+  function restoreRows() {
+    Array.prototype.forEach.call(document.querySelectorAll('.ad-split[data-split]'), function (split) {
+      var id = null;
+      try { id = window.sessionStorage.getItem(rowKey(split)); } catch (e) { return; }
+      if (!id) { return; }
+      Array.prototype.forEach.call(split.querySelectorAll('tr[data-detail]'), function (tr) {
+        if (tr.getAttribute('data-detail') === id) { select(tr); }
+      });
+    });
   }
   document.addEventListener('click', function (ev) {
     var tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-detail]') : null;
@@ -411,6 +449,7 @@ String AdminDashboardScript()
     button = document.getElementById('ad-toggle');
     bindToggle();
     restoreSplits();
+    restoreRows();
   }
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', ready); } else { ready(); }
 })();)ADS";

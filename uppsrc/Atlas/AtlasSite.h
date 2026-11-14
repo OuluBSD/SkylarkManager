@@ -56,6 +56,15 @@ void InstallAtlasApi(EngineSite& site);
 // The roadmap pages of a family: versions, timeline, rules, tasks, checks (AtlasRoadmapPages.cpp).
 void InstallAtlasRoadmapPages(EngineSite& site);
 
+// The page script for the operator forms (AtlasRoadmapPages.cpp); the map page embeds it too.
+String AtlasRoadmapScript();
+
+// The subjects at one version: a split view with sortable columns, each subject's history and, when edit is
+// set, the operator forms that post to the API (AtlasRoadmapPages.cpp).
+String AtlasSubjectsView(WebRequest& r, const AtlasMap& head, const AtlasFamily& f, const Vector<AtlasEvent>& events,
+                         const Vector<AtlasSubjectState>& states, const Vector<AtlasRoadmapMessage>& messages,
+                         const String& vid, bool edit);
+
 // The demo roadmap shipped with the server (AtlasDemo.cpp): written once, when its family is missing.
 void AtlasInstallDemo(const String& data_root);
 // The demo's model in memory: its family, head map, rules and events (for the self-tests).
