@@ -89,6 +89,8 @@ struct AtlasCheck {
 };
 
 void AtlasValidate(const AtlasMap& m, AtlasCheck& out);
+// Grows the world so every element lies inside it, with the layout margin. The stored size is a floor.
+void AtlasCoverWorld(AtlasMap& m);
 
 // Containment: depth 0 on the world plane; -1 when an ancestor is missing or
 // the parent chain cycles.

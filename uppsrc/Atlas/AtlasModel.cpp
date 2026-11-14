@@ -481,6 +481,7 @@ bool AtlasParseSeed(const String& text, AtlasMap& m, AtlasCheck& out)
 	}
 	if(roots.GetCount())
 		PlaceGroup(built, roots, GridCols(roots.GetCount()), PAD, PAD, slot_w, slot_h);
+	AtlasCoverWorld(built);
 
 	AtlasCheck check;
 	AtlasValidate(built, check);
@@ -491,9 +492,26 @@ bool AtlasParseSeed(const String& text, AtlasMap& m, AtlasCheck& out)
 	if(!out.errors.IsEmpty())
 		return false;
 
+	m.world = built.world;
 	m.elements = pick(built.elements);
 	m.roads = pick(built.roads);
 	return true;
+}
+
+void AtlasCoverWorld(AtlasMap& m)
+{
+	int w = 0, h = 0;
+	// Root elements are in world coordinates and contain their subtrees; children are relative to their parent.
+	for(const AtlasElement& e : m.elements) {
+		if(!e.parent.IsEmpty())
+			continue;
+		w = max(w, e.x + e.w);
+		h = max(h, e.y + e.h);
+	}
+	if(w > 0)
+		m.world.width = max(m.world.width, w + PAD);
+	if(h > 0)
+		m.world.height = max(m.world.height, h + PAD);
 }
 
 END_UPP_NAMESPACE

@@ -92,6 +92,8 @@ bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, Strin
 		error = "map record is unreadable: " + key;
 		return false;
 	}
+	// Maps stored before the seed import sized the world can be smaller than their layout.
+	AtlasCoverWorld(m);
 	return true;
 }
 

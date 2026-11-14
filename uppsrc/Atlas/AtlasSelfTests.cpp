@@ -166,6 +166,27 @@ static void SeedChecks()
 	bool ok = AtlasParseSeed(good, m, c);
 	Check(ok && c.Ok() && c.warnings.IsEmpty(), "a well-formed seed imports with no errors or warnings");
 	Check(m.elements.GetCount() == 5 && m.roads.GetCount() == 3, "the seed creates every element and edge");
+	{
+		bool inside = true;
+		for(const AtlasElement& e : m.elements)
+			inside = inside && e.x + e.w <= m.world.width && e.y + e.h <= m.world.height;
+		Check(inside && m.world.width > 0 && m.world.height > 0, "the seed world covers every laid-out element");
+		AtlasMap small;
+		small.map = "t";
+		small.version = "v0.0.1";
+		small.world.width = 10;
+		small.world.height = 10;
+		AtlasElement big;
+		big.id = "e_big";
+		big.x = 500;
+		big.y = 300;
+		big.w = 200;
+		big.h = 100;
+		small.elements.Add(pick(big));
+		AtlasCoverWorld(small);
+		Check(small.world.width == 740 && small.world.height == 440,
+		      "a stored world smaller than its layout grows to cover it with the margin");
+	}
 	if(m.elements.GetCount() == 5) {
 		int main = m.FindElement("e_maincomputer");
 		int prog = m.FindElement("e_mainprogram");
