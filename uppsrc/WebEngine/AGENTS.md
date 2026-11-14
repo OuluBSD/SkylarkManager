@@ -78,3 +78,40 @@ routes, whose own session, role, CSRF and origin fences stay the gate. Only
 http commands with wildcard-free paths render as runnable forms; wildcard
 paths and broker commands are documentation rows ("use skylarkctl"). Sites
 opt in by calling the installer.
+
+## Content visibility policy (task 053)
+
+`ContentPolicy.{h,cpp}` holds the model; `ContentPolicyRoutes.cpp` holds the
+admin page and routes. Each data site opts in with `InstallContentPolicyRoutes`.
+
+Levels: `public` (everyone), `protected` (named user, group or secret link),
+`private` (named user, group or admin), `public-only` (anonymous visitors only).
+A group is a role. Visibility is `ContentVisible(effective, principal)`.
+
+Attachment: record, then module, then site. The first explicit policy in that
+order wins (`ContentResolve`); with none, the fallback applies. Sites pass their
+own fallback: Science uses the paper's `visibility` field, and a paper with no
+policy and no field is private.
+
+Storage: `content_policy.json` in the site data root, versioned (`version: 1`),
+saved through a temporary file and a rename. A link token is shown once when it
+is created and stored only as `ContentLinkHash` (a keyed hash). Tokens are never
+logged or shown on the settings page.
+
+Admin surface: `/policy` (page), `api/policy*` (JSON), and manifest commands
+`policy-show`, `policy-set`, `policy-grant`, `policy-revoke`, `policy-link`.
+Anonymous callers get 401; signed-in non-admins get 403.
+
+Per-site map (anonymous view):
+- Science: list, count, paper, article API honour paper visibility; a hidden
+  paper answers as not found.
+- Atlas: map list, map view, element view are public reads; edits need admin.
+- PrivateHub, TaskFoundry, Channels, Financials: public landing with a sign-in
+  link; their data routes need sign-in (workspace, grants, channel views,
+  ledger, contracts).
+- YouTubePlanner: public.
+- MetaAccount: root redirects to its sign-in page (the landing).
+
+Generation: writing a generated article never changes a paper's visibility. The
+article is served only when the paper's own policy allows the viewer. New content
+without a stated policy is private.
