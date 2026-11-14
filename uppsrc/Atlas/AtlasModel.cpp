@@ -682,13 +682,18 @@ bool AtlasEventTypeValid(const String& subject_kind, const String& type)
 		return type == "created" || type == "removed" || type == "stage" || type == "status" || type == "note";
 	if(subject_kind == "road")
 		return type == "connected" || type == "disconnected" || type == "modified" || type == "note";
+	if(subject_kind == "task")
+		return type == "proposed" || type == "accepted" || type == "done" || type == "dropped"
+		    || type == "reopened" || type == "note";
 	return false;
 }
 
 // Whether the subject must exist in the head document. A removal, a disconnection, and the creation of
 // an element or road that later went away do not need it; a change to a live subject does.
-static bool NeedsHeadSubject(const String& type)
+static bool NeedsHeadSubject(const String& subject_kind, const String& type)
 {
+	if(subject_kind == "task")
+		return false;
 	return type == "note" || type == "stage" || type == "status" || type == "modified";
 }
 
@@ -704,7 +709,7 @@ void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMa
 	}
 	if(e.subject_id.IsEmpty())
 		out.errors.Add("event " + e.id + " names no subject");
-	else if(NeedsHeadSubject(e.type)) {
+	else if(NeedsHeadSubject(e.subject_kind, e.type)) {
 		bool found = e.subject_kind == "element" ? head.FindElement(e.subject_id) >= 0
 		                                          : head.FindRoad(e.subject_id) >= 0;
 		if(!found)
@@ -714,6 +719,8 @@ void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMa
 		out.errors.Add("event " + e.id + ": unknown stage '" + e.stage + "'");
 	if(e.type == "status" && !AtlasStatusValid(e.status))
 		out.errors.Add("event " + e.id + ": unknown status '" + e.status + "'");
+	if(e.type == "proposed" && f.Find(e.target) < 0)
+		out.errors.Add("task " + e.subject_id + " names an unknown target version: " + e.target);
 	if(e.subject_kind == "road" && (e.type == "connected" || e.type == "disconnected")
 	   && (e.from.IsEmpty() || e.to.IsEmpty()))
 		out.errors.Add("event " + e.id + ": a road event needs both endpoints in the snapshot");
@@ -847,6 +854,334 @@ bool AtlasStateAt(const AtlasMap& head, const AtlasFamily& f, const Vector<Atlas
 			s.notes++;
 	}
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Planning rules: literals, the world, and the replay that reports on them.
+// ---------------------------------------------------------------------------
+
+int AtlasRules::FindAtom(const String& name) const
+{
+	for(int i = 0; i < atoms.GetCount(); i++)
+		if(atoms[i].name == name)
+			return i;
+	return -1;
+}
+
+int AtlasRules::FindAction(const String& name) const
+{
+	for(int i = 0; i < actions.GetCount(); i++)
+		if(actions[i].name == name)
+			return i;
+	return -1;
+}
+
+int AtlasRules::FindConstraint(const String& id) const
+{
+	for(int i = 0; i < constraints.GetCount(); i++)
+		if(constraints[i].id == id)
+			return i;
+	return -1;
+}
+
+static int IndexOf(const Vector<String>& v, const String& s)
+{
+	for(int i = 0; i < v.GetCount(); i++)
+		if(v[i] == s)
+			return i;
+	return -1;
+}
+
+// The true atoms at one point of the replay, and each element's stage.
+struct AtlasWorldState {
+	Index<String>             atoms;
+	VectorMap<String, String> stages;
+
+	bool Has(const String& name) const
+	{
+		return atoms.Find(name) >= 0;
+	}
+
+	String StageOf(const String& element) const
+	{
+		int i = stages.Find(element);
+		return i >= 0 ? stages[i] : String();
+	}
+
+	bool Holds(const String& literal) const
+	{
+		bool neg = literal.StartsWith("!");
+		String name = neg ? literal.Mid(1) : literal;
+		bool value;
+		if(name.StartsWith("stage:")) {
+			Vector<String> p = Split(name, ':');
+			int have = AtlasStageRank(p.GetCount() == 3 ? StageOf(p[1]) : String());
+			value = p.GetCount() == 3 && have >= 0 && have >= AtlasStageRank(p[2]);
+		}
+		else
+			value = Has(name);
+		return neg ? !value : value;
+	}
+
+	// A plain literal sets its atom; a negated one clears it. Stage literals are not effects.
+	void Apply(const String& literal)
+	{
+		bool neg = literal.StartsWith("!");
+		String name = neg ? literal.Mid(1) : literal;
+		if(name.StartsWith("stage:"))
+			return;
+		int i = atoms.Find(name);
+		if(neg && i >= 0)
+			atoms.Remove(i);
+		else if(!neg && i < 0)
+			atoms.Add(name);
+	}
+};
+
+static bool IsDerivedAtom(const String& name)
+{
+	return name.StartsWith("stage:") || name.StartsWith("task:");
+}
+
+static void Report(Vector<AtlasRoadmapMessage>& out, const char *severity, const String& vid,
+                   const String& kind, const String& id, const char *rule, const String& text)
+{
+	AtlasRoadmapMessage m;
+	m.severity = severity;
+	m.vid = vid;
+	m.subject_kind = kind;
+	m.subject_id = id;
+	m.rule = rule;
+	m.text = text;
+	out.Add(pick(m));
+}
+
+// An atom an action sets is declared by that action, even when the registry has no entry for it.
+static bool SetByAction(const AtlasRules& rules, const String& name)
+{
+	for(const AtlasAction& a : rules.actions)
+		if(IndexOf(a.effects, name) >= 0)
+			return true;
+	return false;
+}
+
+// An undeclared atom is a warning: the rules may name a fact before anything sets it.
+static void CheckAtomDeclared(const String& literal, const AtlasRules& rules, Vector<AtlasRoadmapMessage>& out,
+                              const String& vid, const String& kind, const String& id)
+{
+	String name = literal.StartsWith("!") ? literal.Mid(1) : literal;
+	if(IsDerivedAtom(name) || rules.FindAtom(name) >= 0 || SetByAction(rules, name))
+		return;
+	Report(out, "warning", vid, kind, id, "undeclared-atom", "atom " + name + " is not declared in the rules");
+}
+
+static bool InScope(const AtlasConstraint& c, int i, const AtlasFamily& f)
+{
+	int from = c.from_vid.IsEmpty() ? 0 : f.Find(c.from_vid);
+	int to = c.to_vid.IsEmpty() ? f.versions.GetCount() - 1 : f.Find(c.to_vid);
+	if(from < 0 || to < 0)
+		return false;
+	return i >= from && i <= to;
+}
+
+// The dependency roads run from the element they must wait for to the element that waits. Returns the
+// element ids on a cycle of those roads (empty when the graph is acyclic).
+static bool DependencyCycle(const AtlasMap& head, String& on)
+{
+	Vector<String> nodes;
+	for(const AtlasRoad& r : head.roads)
+		if(r.kind == "dependency") {
+			if(IndexOf(nodes, r.from) < 0) nodes.Add(r.from);
+			if(IndexOf(nodes, r.to) < 0) nodes.Add(r.to);
+		}
+	Vector<int> indegree;
+	for(int i = 0; i < nodes.GetCount(); i++)
+		indegree.Add(0);
+	for(const AtlasRoad& r : head.roads)
+		if(r.kind == "dependency")
+			indegree[IndexOf(nodes, r.to)]++;
+	// Kahn: repeatedly remove nodes with no unresolved dependency; whatever is left is on a cycle.
+	Vector<bool> done;
+	for(int i = 0; i < nodes.GetCount(); i++)
+		done.Add(false);
+	bool progress = true;
+	while(progress) {
+		progress = false;
+		for(int i = 0; i < nodes.GetCount(); i++)
+			if(!done[i] && indegree[i] == 0) {
+				done[i] = true;
+				progress = true;
+				for(const AtlasRoad& r : head.roads)
+					if(r.kind == "dependency" && r.from == nodes[i])
+						indegree[IndexOf(nodes, r.to)]--;
+			}
+	}
+	on.Clear();
+	for(int i = 0; i < nodes.GetCount(); i++)
+		if(!done[i]) {
+			if(on.GetCount()) on << ", ";
+			on << nodes[i];
+		}
+	return on.GetCount() > 0;
+}
+
+void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                        const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                        Vector<Vector<String>>& worlds)
+{
+	out.Clear();
+	worlds.Clear();
+
+	// Declared atoms: every literal the rules, the contracts and the events name.
+	for(const String& lit : rules.initial)
+		CheckAtomDeclared(lit, rules, out, String(), "rules", String());
+	for(const AtlasConstraint& c : rules.constraints) {
+		for(const String& lit : c.when)
+			CheckAtomDeclared(lit, rules, out, c.from_vid, "constraint", c.id);
+		for(const String& lit : c.must)
+			CheckAtomDeclared(lit, rules, out, c.from_vid, "constraint", c.id);
+	}
+	for(const AtlasVersion& v : f.versions)
+		for(const String& lit : v.requires)
+			CheckAtomDeclared(lit, rules, out, v.vid, "version", v.vid);
+
+	// Indices into events, in replay order (events are not copied: they hold vectors).
+	Vector<int> order = OrderedEvents(events, f);
+
+	VectorMap<String, String> target;  // task id -> the version it must be done for
+	for(int k : order)
+		if(events[k].subject_kind == "task" && events[k].type == "proposed")
+			target.GetAdd(events[k].subject_id) = events[k].target;
+
+	AtlasWorldState w;
+	for(const String& lit : rules.initial)
+		w.Apply(lit);
+
+	for(int i = 0; i < f.versions.GetCount(); i++) {
+		const AtlasVersion& v = f.versions[i];
+		String label = AtlasVersionLabel(v.code);
+
+		// On entry: the contract, then the accepted tasks targeting this version.
+		for(const String& lit : v.requires) {
+			String name = lit.StartsWith("!") ? lit.Mid(1) : lit;
+			if(rules.FindAtom(name) >= 0 && !rules.atoms[rules.FindAtom(name)].gate)
+				Report(out, "warning", v.vid, "version", v.vid, "contract-gate",
+				       "version " + label + " requires " + name + ", which is not declared a gate");
+			if(!w.Holds(lit))
+				Report(out, "error", v.vid, "version", v.vid, "contract-gate",
+				       "version " + label + " needs " + lit + " on entry");
+		}
+		for(int k = 0; k < target.GetCount(); k++)
+			if(target[k] == v.vid) {
+				String id = target.GetKey(k);
+				if(w.Has("task:" + id + ":accepted") && !w.Has("task:" + id + ":done"))
+					Report(out, "error", v.vid, "task", id, "contract-task",
+					       "task " + id + " must be done for version " + label);
+			}
+
+		// The version's own events, in time order.
+		for(int k : order) {
+			const AtlasEvent& e = events[k];
+			if(e.vid != v.vid)
+				continue;
+			Vector<String> needs, sets;
+			for(const String& lit : e.requires) needs.Add(lit);
+			for(const String& lit : e.effects) sets.Add(lit);
+			if(e.action.GetCount()) {
+				int a = rules.FindAction(e.action);
+				if(a < 0)
+					Report(out, "warning", e.vid, e.subject_kind, e.subject_id, "requires",
+					       "event " + e.id + " names unknown action " + e.action);
+				else {
+					for(const String& lit : rules.actions[a].requires) needs.Add(lit);
+					for(const String& lit : rules.actions[a].effects) sets.Add(lit);
+				}
+			}
+			for(const String& lit : needs)
+				if(!w.Holds(lit))
+					Report(out, "error", e.vid, e.subject_kind, e.subject_id, "requires",
+					       "event " + e.id + " needs " + lit + " first");
+			for(const String& lit : sets)
+				w.Apply(lit);
+
+			if(e.type == "stage") {
+				int now = AtlasStageRank(e.stage);
+				String before = w.StageOf(e.subject_id);
+				int was = AtlasStageRank(before);
+				if(was >= 0 && now < was)
+					Report(out, "error", e.vid, e.subject_kind, e.subject_id, "stage-order",
+					       e.subject_id + " moves back from " + before + " to " + e.stage);
+				else if(now > was + 1)
+					Report(out, "warning", e.vid, e.subject_kind, e.subject_id, "stage-order",
+					       e.subject_id + " skips stages to reach " + e.stage);
+				// A dependency must be merged before its dependant reaches implementation.
+				if(now >= 2)
+					for(const AtlasRoad& r : head.roads)
+						if(r.kind == "dependency" && r.to == e.subject_id
+						   && AtlasStageRank(w.StageOf(r.from)) < 4)
+							Report(out, "warning", e.vid, e.subject_kind, e.subject_id, "dependency-order",
+							       e.subject_id + " reaches " + e.stage + " before " + r.from + " is merged");
+				w.stages.GetAdd(e.subject_id) = e.stage;
+			}
+			else if(e.type == "proposed")
+				;  // a proposal sets no atom; the contract reads it through the target
+			else if(e.subject_kind == "task") {
+				String acc = "task:" + e.subject_id + ":accepted";
+				String done = "task:" + e.subject_id + ":done";
+				if(target.Find(e.subject_id) < 0)
+					Report(out, "warning", e.vid, "task", e.subject_id, "orphan", "task " + e.subject_id + " was never proposed");
+				if(e.type == "accepted")
+					w.Apply(acc);
+				else if(e.type == "done") {
+					if(!w.Has(acc))
+						Report(out, "warning", e.vid, "task", e.subject_id, "task-state", "task " + e.subject_id + " is done before it is accepted");
+					w.Apply(done);
+				}
+				else if(e.type == "dropped") {
+					w.Apply("!" + acc);
+					w.Apply("!" + done);
+				}
+				else if(e.type == "reopened")
+					w.Apply("!" + done);
+			}
+		}
+
+		// After the version's events: the constraints whose scope covers it.
+		for(const AtlasConstraint& c : rules.constraints) {
+			if(!InScope(c, i, f))
+				continue;
+			bool when = true;
+			for(const String& lit : c.when)
+				when = when && w.Holds(lit);
+			if(!when)
+				continue;
+			for(const String& lit : c.must)
+				if(!w.Holds(lit))
+					Report(out, "error", v.vid, "constraint", c.id, "constraint",
+					       "constraint " + c.id + " needs " + lit + " at version " + label);
+		}
+
+		Vector<String> snapshot;
+		for(int k = 0; k < w.atoms.GetCount(); k++)
+			snapshot.Add(w.atoms[k]);
+		worlds.Add(pick(snapshot));
+	}
+
+	// Cycles among the dependency roads, and head subjects no event has scheduled yet.
+	String cycle;
+	if(f.versions.GetCount() && DependencyCycle(head, cycle))
+		Report(out, "error", f.versions[f.Head()].vid, "road", cycle, "dependency-cycle",
+		       "dependency roads form a cycle through " + cycle);
+	String head_vid = f.versions.GetCount() ? f.versions[f.Head()].vid : String();
+	for(const AtlasElement& e : head.elements) {
+		bool scheduled = false;
+		for(const AtlasEvent& ev : events)
+			if(ev.subject_kind == "element" && ev.subject_id == e.id)
+				scheduled = true;
+		if(!scheduled)
+			Report(out, "warning", head_vid, "element", e.id, "unscheduled",
+			       "element " + e.id + " has no event; it exists at the head only");
+	}
 }
 
 END_UPP_NAMESPACE

@@ -114,10 +114,11 @@ bool   AtlasVersionValid(int code);
 
 // One version of a map family. The vid is stable; the code can change, and events refer to vid only.
 struct AtlasVersion : Moveable<AtlasVersion> {
-	String vid;
-	int    code = ATLAS_VERSION_UNSET;
+	String         vid;
+	int            code = ATLAS_VERSION_UNSET;
+	Vector<String> requires;   // the contract: literals that must hold on entry to this version
 
-	void Jsonize(JsonIO& io) { io("vid", vid)("code", code); }
+	void Jsonize(JsonIO& io) { io("vid", vid)("code", code)("requires", requires); }
 };
 
 // The version list of one map family ("pkr"). versions are ascending by code. The last one is the
@@ -156,14 +157,17 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 	String from, to;      // snapshot: road endpoints
 	String road_kind;     // snapshot: road kind
 	String label;         // snapshot: road label
-	Vector<String> requires;  // atom names the event needs; "!name" needs it false
-	Vector<String> effects;   // atom names the event sets; "!name" clears it
+	Vector<String> requires;  // atom literals the event needs; "!name" needs it false
+	Vector<String> effects;   // atom literals the event sets; "!name" clears it
+	String action;            // a named action from the rules; its requires/effects apply too
+	String target;            // task: the version the task must be done for
+	String link;              // task: "element:<id>" or "road:<id>"
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("at", at)("actor", actor)("vid", vid)("subject_kind", subject_kind)
 		  ("subject_id", subject_id)("type", type)("stage", stage)("status", status)("text", text)
 		  ("name", name)("from", from)("to", to)("road_kind", road_kind)("label", label)
-		  ("requires", requires)("effects", effects);
+		  ("requires", requires)("effects", effects)("action", action)("target", target)("link", link);
 	}
 };
 
@@ -171,6 +175,77 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 bool AtlasStageValid(const String& stage);
 int  AtlasStageRank(const String& stage);     // position in the order, -1 when not a stage
 bool AtlasEventTypeValid(const String& subject_kind, const String& type);
+
+// Planning rules. Atoms are named booleans; a literal is "name" (must hold) or "!name" (must not).
+// Derived: "stage:<element>:<stage>" holds when the element is at that stage or later; task atoms
+// "task:<id>:accepted" and "task:<id>:done" are set by task events. Undeclared atoms only warn.
+struct AtlasAtomDef : Moveable<AtlasAtomDef> {
+	String name;
+	String text;
+	bool   gate = false;   // may appear in a version's contract
+
+	void Jsonize(JsonIO& io) { io("name", name)("text", text)("gate", gate); }
+};
+
+struct AtlasAction : Moveable<AtlasAction> {
+	String         name;
+	String         text;
+	Vector<String> requires;
+	Vector<String> effects;
+
+	void Jsonize(JsonIO& io) { io("name", name)("text", text)("requires", requires)("effects", effects); }
+};
+
+// When every "when" literal holds, every "must" literal must hold. from_vid and to_vid bound the
+// versions it applies to (empty means open).
+struct AtlasConstraint : Moveable<AtlasConstraint> {
+	String         id;
+	String         text;
+	Vector<String> when;
+	Vector<String> must;
+	String         from_vid;
+	String         to_vid;
+
+	void Jsonize(JsonIO& io) {
+		io("id", id)("text", text)("when", when)("must", must)("from_vid", from_vid)("to_vid", to_vid);
+	}
+};
+
+struct AtlasRules : Moveable<AtlasRules> {
+	Vector<String>          initial;      // atoms true at the start
+	Vector<AtlasAtomDef>    atoms;
+	Vector<AtlasAction>     actions;
+	Vector<AtlasConstraint> constraints;
+
+	void Jsonize(JsonIO& io) {
+		io("initial", initial)("atoms", atoms)("actions", actions)("constraints", constraints);
+	}
+
+	int FindAtom(const String& name) const;
+	int FindAction(const String& name) const;
+	int FindConstraint(const String& id) const;
+};
+
+// One finding of the replay. Errors and warnings are advisory: nothing is refused for them.
+struct AtlasRoadmapMessage : Moveable<AtlasRoadmapMessage> {
+	String severity;      // error | warning
+	String vid;
+	String subject_kind;
+	String subject_id;
+	String rule;          // contract-gate | contract-task | requires | constraint | stage-order | dependency-order | dependency-cycle | unscheduled | undeclared-atom | orphan | task-state
+	String text;
+
+	void Jsonize(JsonIO& io) {
+		io("severity", severity)("vid", vid)("subject_kind", subject_kind)("subject_id", subject_id)
+		  ("rule", rule)("text", text);
+	}
+};
+
+// Replays the roadmap: versions in order, each one's contract on entry, then its events, then its constraints.
+// worlds[i] holds the true atoms after version i. Messages are appended to out; nothing is refused.
+void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                        const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                        Vector<Vector<String>>& worlds);
 void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMap& head, AtlasCheck& out);
 
 // The state of one subject at one version.

@@ -39,6 +39,11 @@ bool AtlasCanEdit(WebRequest& r);
 bool AtlasMapReadable(WebRequest& r, const String& head_key);
 bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& element_id);
 
+// Planning rules of a family: one document, revision-checked on its own.
+bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& rules, String& revision, String& error);
+bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRules& rules,
+                    const String& expected_revision, String& new_revision, String& error);
+
 // The JSON API of the roadmap (AtlasApi.cpp); called by InstallAtlasSite.
 void InstallAtlasApi(EngineSite& site);
 

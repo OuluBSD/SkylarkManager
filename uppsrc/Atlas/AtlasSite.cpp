@@ -111,6 +111,7 @@ bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
 
 static const char *ATLAS_FAMILY_COLLECTION = "families";
 static const char *ATLAS_EVENT_COLLECTION = "events";
+static const char *ATLAS_RULES_COLLECTION = "rules";
 
 String AtlasNowIso()
 {
@@ -125,6 +126,40 @@ static IRecordCollection& Families(const String& data_root)
 static IRecordCollection& Events(const String& data_root)
 {
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_EVENT_COLLECTION);
+}
+
+static IRecordCollection& Rules(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_RULES_COLLECTION);
+}
+
+// A family without stored rules has none: an empty rule set, with no revision yet.
+bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& rules, String& revision, String& error)
+{
+	rules = AtlasRules();
+	revision.Clear();
+	String json;
+	StoreResult g = Rules(data_root).Get(family, json, revision);
+	if(!g.ok) {
+		revision.Clear();
+		return true;
+	}
+	if(!LoadFromJson(rules, json)) {
+		error = "rules record is unreadable: " + family;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRules& rules,
+                    const String& expected_revision, String& new_revision, String& error)
+{
+	StoreResult p = Rules(data_root).Put(family, StoreAsJson(rules), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
 }
 
 // An event document is keyed "<family>.<event id>", so one family's events list with one prefix.

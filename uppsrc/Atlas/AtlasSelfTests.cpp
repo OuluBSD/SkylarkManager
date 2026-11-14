@@ -505,6 +505,223 @@ static void RoadmapStoreChecks(const String& scratch)
 	      "a family lists only its own events, with their text");
 }
 
+static bool HasMessage(const Vector<AtlasRoadmapMessage>& m, const char *severity, const char *rule)
+{
+	for(const AtlasRoadmapMessage& x : m)
+		if(x.severity == severity && x.rule == rule)
+			return true;
+	return false;
+}
+
+static bool HasAtom(const Vector<String>& world, const char *atom)
+{
+	for(const String& a : world)
+		if(a == atom)
+			return true;
+	return false;
+}
+
+static void TwoVersions(AtlasFamily& f)
+{
+	f.head_key = "t-v0.0.2";
+	f.versions.Add(pick(Ver("v1", "0.0.1")));
+	f.versions.Add(pick(Ver("v2", "0.0.2")));
+}
+
+// The planning rules the checks use: a gate and a design atom, an action that needs the design and
+// sets trial_run, and a constraint that a trial run needs the gate.
+static void PlanRules(AtlasRules& r)
+{
+	AtlasAtomDef gate;
+	gate.name = "gate_ready";
+	gate.gate = true;
+	r.atoms.Add(pick(gate));
+	AtlasAtomDef design;
+	design.name = "design_done";
+	r.atoms.Add(pick(design));
+	AtlasAction run;
+	run.name = "run_trial";
+	run.requires.Add("design_done");
+	run.effects.Add("trial_run");
+	r.actions.Add(pick(run));
+	AtlasConstraint c;
+	c.id = "trial_needs_gate";
+	c.when.Add("trial_run");
+	c.must.Add("gate_ready");
+	r.constraints.Add(pick(c));
+}
+
+static AtlasMap PlanHead()
+{
+	AtlasMap h;
+	h.map = "t";
+	h.version = "v0.0.2";
+	h.title = "Plan";
+	h.elements.Add(Element("x", "Xray", "block", "", 0, 0, 100, 100));
+	h.elements.Add(Element("y", "Yankee", "block", "", 200, 0, 100, 100));
+	AtlasRoad dep;
+	dep.id = "r_dep";
+	dep.from = "x";
+	dep.to = "y";
+	dep.kind = "dependency";
+	h.roads.Add(pick(dep));
+	return h;
+}
+
+// Contracts, tasks, actions, constraints, stages, dependencies and atoms. Every check reports; none refuses.
+static void RoadmapChecks()
+{
+	AtlasFamily f;
+	TwoVersions(f);
+	AtlasRules rules;
+	PlanRules(rules);
+	AtlasMap head = PlanHead();
+	Vector<AtlasRoadmapMessage> out;
+	Vector<Vector<String>> worlds;
+
+	// A: a trial at v1 sets the gate, and task t7, accepted and done at v1, meets v2's contract on entry.
+	f.versions[1].requires.Add("gate_ready");
+	Vector<AtlasEvent> a;
+	{
+		AtlasEvent e = Ev("ta1", "v1", "task", "t7", "proposed");
+		e.target = "v2";
+		e.name = "Ship";
+		a.Add(pick(e));
+	}
+	a.Add(pick(Ev("ta2", "v1", "task", "t7", "accepted")));
+	a.Add(pick(Ev("ta3", "v1", "task", "t7", "done")));
+	{
+		AtlasEvent e = Ev("ta4", "v1", "element", "x", "note");
+		e.effects.Add("gate_ready");
+		a.Add(pick(e));
+	}
+	AtlasReplayRoadmap(head, f, rules, a, out, worlds);
+	Check(!HasMessage(out, "error", "contract-gate") && !HasMessage(out, "error", "contract-task"),
+	      "a gate set at an earlier version and a task done for the target meet the contract");
+	Check(worlds.GetCount() == 2 && HasAtom(worlds[0], "gate_ready") && HasAtom(worlds[0], "task:t7:done"),
+	      "the world after v1 holds the atoms its events set");
+	Check(HasMessage(out, "warning", "unscheduled"), "an element with no event is reported as unscheduled");
+
+	// B: the gate is set in v2 itself, so it is not there on entry; the accepted task is not done either.
+	Vector<AtlasEvent> b;
+	{
+		AtlasEvent e = Ev("tb1", "v1", "task", "t7", "proposed");
+		e.target = "v2";
+		b.Add(pick(e));
+	}
+	b.Add(pick(Ev("tb2", "v1", "task", "t7", "accepted")));
+	{
+		AtlasEvent e = Ev("tb3", "v2", "element", "x", "note");
+		e.effects.Add("gate_ready");
+		b.Add(pick(e));
+	}
+	AtlasReplayRoadmap(head, f, rules, b, out, worlds);
+	Check(HasMessage(out, "error", "contract-gate"), "a gate set in the same version does not satisfy that version's contract");
+	Check(HasMessage(out, "error", "contract-task"), "an accepted task not done before its target is reported");
+
+	// C: the action's requirement holds (design first), and the gate is set, so the constraint holds.
+	Vector<AtlasEvent> c;
+	{
+		AtlasEvent e = Ev("tc1", "v1", "element", "x", "note");
+		e.effects.Add("design_done");
+		c.Add(pick(e));
+	}
+	{
+		AtlasEvent e = Ev("tc2", "v1", "element", "x", "note");
+		e.action = "run_trial";
+		c.Add(pick(e));
+	}
+	{
+		AtlasEvent e = Ev("tc3", "v1", "element", "x", "note");
+		e.effects.Add("gate_ready");
+		c.Add(pick(e));
+	}
+	AtlasReplayRoadmap(head, f, rules, c, out, worlds);
+	Check(!HasMessage(out, "error", "requires") && !HasMessage(out, "error", "constraint"),
+	      "an action with its requirement met and its constraint satisfied reports nothing");
+
+	// D: the action runs before the design: its requirement fails, its effect still applies, and the constraint fails.
+	Vector<AtlasEvent> d;
+	{
+		AtlasEvent e = Ev("td1", "v1", "element", "x", "note");
+		e.action = "run_trial";
+		d.Add(pick(e));
+	}
+	AtlasReplayRoadmap(head, f, rules, d, out, worlds);
+	Check(HasMessage(out, "error", "requires"), "an action whose requirement is not yet true is reported");
+	Check(HasMessage(out, "error", "constraint") && HasAtom(worlds[0], "trial_run"),
+	      "a failed requirement still applies the action's effects and the constraint is checked");
+
+	// E: y reaches implementation while its dependency x is not merged.
+	Vector<AtlasEvent> e;
+	e.Add(pick(Ev("te1", "v1", "element", "y", "stage")));
+	e[0].stage = "implementation";
+	AtlasReplayRoadmap(head, f, rules, e, out, worlds);
+	Check(HasMessage(out, "warning", "dependency-order"), "a dependant reaching implementation before its dependency is merged warns");
+
+	// F: a stage moved back is an error; a stage skipped is a warning.
+	Vector<AtlasEvent> g;
+	{
+		AtlasEvent s1 = Ev("tf1", "v1", "element", "y", "stage");
+		s1.stage = "planned";
+		g.Add(pick(s1));
+		AtlasEvent s2 = Ev("tf2", "v1", "element", "y", "stage");
+		s2.stage = "trials";
+		g.Add(pick(s2));
+		AtlasEvent s3 = Ev("tf3", "v1", "element", "y", "stage");
+		s3.stage = "planned";
+		g.Add(pick(s3));
+	}
+	AtlasReplayRoadmap(head, f, rules, g, out, worlds);
+	Check(HasMessage(out, "error", "stage-order") && HasMessage(out, "warning", "stage-order"),
+	      "a stage moved back is an error and a skipped stage a warning");
+
+	// G: dependency roads that loop are a cycle.
+	AtlasMap loop = PlanHead();
+	AtlasRoad back;
+	back.id = "r_back";
+	back.from = "y";
+	back.to = "x";
+	back.kind = "dependency";
+	loop.roads.Add(pick(back));
+	Vector<AtlasEvent> none;
+	AtlasReplayRoadmap(loop, f, rules, none, out, worlds);
+	Check(HasMessage(out, "error", "dependency-cycle"), "dependency roads that form a loop are an error");
+	AtlasReplayRoadmap(head, f, rules, none, out, worlds);
+	Check(!HasMessage(out, "error", "dependency-cycle"), "dependency roads without a loop are not");
+
+	// H: a task done before it is accepted warns; a drop clears its accepted atom from that version on.
+	Vector<AtlasEvent> h;
+	{
+		AtlasEvent p = Ev("th1", "v1", "task", "t9", "proposed");
+		p.target = "v2";
+		h.Add(pick(p));
+	}
+	h.Add(pick(Ev("th2", "v1", "task", "t9", "done")));
+	h.Add(pick(Ev("th3", "v1", "task", "t9", "accepted")));
+	h.Add(pick(Ev("th4", "v2", "task", "t9", "dropped")));
+	AtlasReplayRoadmap(head, f, rules, h, out, worlds);
+	Check(HasMessage(out, "warning", "task-state"), "a task done before it is accepted warns");
+	Check(HasAtom(worlds[0], "task:t9:accepted") && !HasAtom(worlds[1], "task:t9:accepted"),
+	      "a dropped task's accepted atom is cleared from the version it is dropped at");
+
+	// I: an atom no rule declares warns, and does not stop the replay.
+	AtlasRules loose;
+	PlanRules(loose);
+	AtlasConstraint stray;
+	stray.id = "stray";
+	stray.when.Add("design_done");
+	stray.must.Add("mystery");
+	loose.constraints.Add(pick(stray));
+	AtlasReplayRoadmap(head, f, loose, none, out, worlds);
+	Check(HasMessage(out, "warning", "undeclared-atom") && worlds.GetCount() == 2,
+	      "an atom the rules never declare is a warning, and the replay still completes");
+	bool trial_warned = false;
+	for(const AtlasRoadmapMessage& m : out)
+		trial_warned = trial_warned || m.text.Find("trial_run") >= 0;
+	Check(!trial_warned, "an atom an action sets is declared by that action and is not reported");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -515,6 +732,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	VersionChecks();
 	EventChecks();
 	RoadmapStoreChecks(scratch_dir);
+	RoadmapChecks();
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }
