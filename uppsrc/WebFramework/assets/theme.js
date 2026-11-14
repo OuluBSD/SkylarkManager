@@ -46,7 +46,7 @@ var WebThemeManager = (function() {
   }
   // The shell tells its framed app about a user's change. Only a whitelisted id is sent, to the frame's own origin.
   function broadcast(themeId) {
-    let frame = document.getElementById('portal-frame');
+    let frame = document.querySelector('iframe[data-wf-broadcast]');
     if (!frame || !frame.contentWindow) return;
     let origin = originOf(frame.src);
     if (origin) frame.contentWindow.postMessage({ type: 'wf-theme', value: themeId }, origin);

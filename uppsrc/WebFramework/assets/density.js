@@ -34,7 +34,7 @@ var WebDensityManager = (function() {
   }
   // The shell tells its framed app about a user's change. Only a whitelisted level is sent, to the frame's own origin.
   function broadcast(lvl) {
-    let frame = document.getElementById('portal-frame');
+    let frame = document.querySelector('iframe[data-wf-broadcast]');
     if (!frame || !frame.contentWindow) return;
     let origin = originOf(frame.src);
     if (origin) frame.contentWindow.postMessage({ type: 'wf-density', value: lvl }, origin);

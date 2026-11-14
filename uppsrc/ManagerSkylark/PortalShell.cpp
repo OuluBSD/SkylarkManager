@@ -240,7 +240,7 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 
 	String main;
 	main << "<div class=\"portal-main\">\n"
-	     << "  <iframe id=\"portal-frame\" class=\"portal-frame\" name=\"portal-frame\" src=\"" << EscapeHtml(apps[sel].url)
+	     << "  <iframe id=\"portal-frame\" class=\"portal-frame\" name=\"portal-frame\" data-wf-broadcast src=\"" << EscapeHtml(apps[sel].url)
 	     << "\" title=\"" << EscapeHtml(apps[sel].title) << "\"></iframe>\n"
 	     << "  <div id=\"portal-status\" class=\"portal-status\" role=\"status\" hidden>\n"
 	     << "    <div class=\"portal-loading\">Loading " << EscapeHtml(apps[sel].title) << "...</div>\n"

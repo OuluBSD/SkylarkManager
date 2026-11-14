@@ -156,7 +156,7 @@ String YouTubePlannerLevelBody(int index)
 
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 	       "<title>" + Esc(title) + " - YouTubePlanner</title>" + YouTubePlannerStylesheet() + "</head>"
 	       "<body>"

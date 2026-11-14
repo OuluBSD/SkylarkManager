@@ -71,14 +71,14 @@ static void RenderLoginPage(WebRequest& r, const String& error, int code)
 	// With MetaAccount SSO on, a composed site has no password form of its own: the browser signs
 	// in through MetaAccount (task 042). MetaAccount itself keeps its own login form.
 	if(TheWebEngine().MetaSso() && r.Site().id != SSO_IDP_SITE) {
-		r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
+		r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Sign in</title>" + LoginStylesheet() + "</head><body>"
 		       "<h1>Sign in</h1>" + alert +
 		       "<p>Sign in with your MetaAccount to open this site.</p>"
 		       "<p><a href=\"" + EscHtml(r.Site().Url("session/sso")) + "?next=%2F\">Continue with MetaAccount</a></p>"
 		       "</body></html>");
 		return;
 	}
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Sign in</title>" + LoginStylesheet() + "</head><body>"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Sign in</title>" + LoginStylesheet() + "</head><body>"
 	       "<h1>Sign in</h1>" + alert + "<form method=\"post\" action=\"" + EscHtml(r.Site().Url("session/login")) + "\">" + hidden + csrf +
 	       "<p><label>Username <input name=\"username\" autocomplete=\"username\" required></label></p>"
 	       "<p><label>Password <input type=\"password\" name=\"password\" autocomplete=\"current-password\" required></label></p>"
@@ -361,7 +361,7 @@ static void SsoContinue(WebRequest& r)
 			      << "<p><button type=\"submit\">Request account</button></p></form>";
 		}
 	}
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Continue with MetaAccount</title></head><body>"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Continue with MetaAccount</title></head><body>"
 	       "<h1>Continue with MetaAccount</h1>"
 	       "<p>No MetaAccount session is open in this browser, or this account is not linked to this site.</p>" + offer +
 	       "<p><a href=\"" + EscHtml(login) + "\">Sign in to MetaAccount</a></p>"
@@ -382,7 +382,7 @@ static void SsoReply(WebRequest& r, const ValueMap& m, int code)
 		return;
 	}
 	r.Status(code, "Error");
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Link not requested</title></head><body>"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + "<title>Link not requested</title></head><body>"
 	       "<h1>Link not requested</h1><p>" + EscHtml((String)m.Get("error")) + "</p>"
 	       "<p><a href=\"" + EscHtml(r.Site().Url("")) + "\">Back to this site</a></p></body></html>");
 }
@@ -590,6 +590,50 @@ String SessionChromeHtml(WebRequest& r)
 		out << " <form method=\"post\" action=\"" << EscHtml(r.Site().Url("session/sso/link")) << "\" class=\"wf-session-form\">" << csrf
 		    << "<button type=\"submit\" id=\"wf-link-meta\">Link to MetaAccount</button></form>";
 	return out + "</span>";
+}
+
+// The theme and density whitelists match the WebFramework ids (ThemeRegistry, density.js). WebEngine does not
+// depend on WebFramework, so the lists are repeated here; a value outside them is never written to the page.
+static bool ThemeAllowed(const String& v)
+{
+	static const char *ids[] = { "vivid-dark", "vivid-light", "vivid-mixed", "github-dark", "github-light",
+	                             "sourceforge-dark", "sourceforge-classic" };
+	for(const char *id : ids)
+		if(v == id)
+			return true;
+	return false;
+}
+
+static bool DensityAllowed(const String& v)
+{
+	return v == "dense" || v == "compact" || v == "comfortable" || v == "spacious";
+}
+
+String ThemeHtmlAttrs(WebRequest& r)
+{
+	String theme = r.RequestCookie("wf_theme");
+	String density = r.RequestCookie("wf_density");
+	if(!ThemeAllowed(theme))
+		theme = "vivid-dark";
+	if(!DensityAllowed(density))
+		density = "comfortable";
+	return " data-theme=\"" + theme + "\" data-density=\"" + density + "\"";
+}
+
+// Applies a shell broadcast. It accepts only a message from the same host (any port) and a whitelisted value,
+// and sets an attribute, never HTML.
+String ThemeHeadScript()
+{
+	return "<script>(function(){"
+	       "var T=['vivid-dark','vivid-light','vivid-mixed','github-dark','github-light','sourceforge-dark','sourceforge-classic'];"
+	       "var L=['dense','compact','comfortable','spacious'];"
+	       "function sameHost(o){try{var u=new URL(o);return(u.protocol==='http:'||u.protocol==='https:')&&u.hostname===location.hostname;}catch(e){return false;}}"
+	       "window.addEventListener('message',function(e){"
+	       "if(!sameHost(e.origin)||!e.data)return;"
+	       "var d=e.data,h=document.documentElement;"
+	       "if(d.type==='wf-theme'&&T.indexOf(d.value)>=0)h.setAttribute('data-theme',d.value);"
+	       "else if(d.type==='wf-density'&&L.indexOf(d.value)>=0)h.setAttribute('data-density',d.value);"
+	       "});})();</script>";
 }
 
 void InstallSessionRoutes(EngineSite& site)

@@ -123,7 +123,7 @@ static bool RequireLogin(WebRequest& r)
 
 static void Page(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
 	       "<title>" + Esc(title) + "</title></head><body>"
 	       "<nav><a href=\"" + Esc(r.Site().Url("")) + "\">Board</a> " + SessionChromeHtml(r) + "</nav>"
 	       "<h1>" + Esc(title) + "</h1>" + body + "</body></html>");

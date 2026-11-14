@@ -38,7 +38,7 @@ static ValueMap JsonOk(bool ok, const String& err = String())
 
 static void HtmlPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
 	       "<title>" + title + "</title></head><body>"
 	       "<header>" + SessionChromeHtml(r) + "</header>"
 	       "<h1>" + title + "</h1>" + body + "</body></html>");
@@ -99,7 +99,7 @@ a { color: #7f71fe; text-decoration: none; cursor: pointer; }
 
 static void MetaPage(WebRequest& r, const String& title, const String& body)
 {
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
+	r.Html("<!doctype html><html" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
 	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 	       "<title>" + title + "</title>" + MetaLoginStyle() + "</head><body>"
 	       "<main class=\"m-container\">" + body + "</main></body></html>");
