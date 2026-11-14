@@ -714,7 +714,12 @@ String AtlasScript()
     var flagged = document.getElementById('atlas-frame-errors');
     if (flagged) { flagged.textContent = errors + ' errors, ' + warnings + ' warnings at this version'; }
     var world = document.getElementById('atlas-world');
-    if (world) { world.textContent = (ver.world || []).length ? ver.world.join(' \u00b7 ') : 'no atoms set'; }
+    if (world) {
+      // The count shows; the atoms themselves are in the tooltip, so the strip keeps its height.
+      var atoms = ver.world || [];
+      world.textContent = atoms.length ? atoms.length + (atoms.length === 1 ? ' atom' : ' atoms') : 'no atoms set';
+      world.title = atoms.join(' \u00b7 ');
+    }
     var scrub = document.getElementById('atlas-scrub');
     if (scrub && Number(scrub.value) !== k) { scrub.value = String(k); }
   }
