@@ -296,12 +296,14 @@ static bool SaveRules(WebRequest& r, const AtlasRules& rules, const String& rrev
 // The rules of the family, with their revision, for a reader.
 static void RulesGet(WebRequest& r)
 {
-	if(!ApiAuth(r, false))
-		return;
 	AtlasFamily f;
 	String frev;
 	if(!LoadFamily(r, f, frev))
 		return;
+	if(!AtlasMapReadable(r, f.head_key)) {
+		ApiFail(r, 404, "map not found");
+		return;
+	}
 	AtlasRules rules;
 	String rrev;
 	if(!LoadRules(r, rules, rrev))
@@ -563,12 +565,14 @@ static void TaskNote(WebRequest& r)    { TaskEvent(r, "note"); }
 // The replay's messages. ?vid= keeps the ones at one version. Never refuses anything: findings only.
 static void CheckGet(WebRequest& r)
 {
-	if(!ApiAuth(r, false))
-		return;
 	AtlasFamily f;
 	String frev;
 	if(!LoadFamily(r, f, frev))
 		return;
+	if(!AtlasMapReadable(r, f.head_key)) {
+		ApiFail(r, 404, "map not found");
+		return;
+	}
 	AtlasMap head;
 	String hrev, err;
 	if(!LoadHead(r, f, head, hrev))
@@ -608,8 +612,6 @@ static void CheckGet(WebRequest& r)
 
 static void VersionsGet(WebRequest& r)
 {
-	if(!ApiAuth(r, false))
-		return;
 	AtlasFamily f;
 	String frev;
 	if(!LoadFamily(r, f, frev))
@@ -752,8 +754,6 @@ static void VersionsDelete(WebRequest& r)
 
 static void StateGet(WebRequest& r)
 {
-	if(!ApiAuth(r, false))
-		return;
 	AtlasFamily f;
 	String frev;
 	if(!LoadFamily(r, f, frev))
@@ -804,8 +804,6 @@ static void StateGet(WebRequest& r)
 
 static void EventsGet(WebRequest& r)
 {
-	if(!ApiAuth(r, false))
-		return;
 	AtlasFamily f;
 	String frev;
 	if(!LoadFamily(r, f, frev))
