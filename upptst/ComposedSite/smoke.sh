@@ -560,9 +560,11 @@ link_account() {
 # Handoff: MetaAccount signs in once and returns to the app that asked (task 039). Runs before the
 # ambiguity step below, which links a second account and so must not affect this one.
 HO_JAR="$T/sso_handoff.jar"
-got=$(curl -s -o "$T/sso_handoff_form" -w '%{http_code}' -G --data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/session/login")
+got=$(curl -s -o "$T/sso_handoff_form" -w '%{http_code}' -G --data-urlencode "next=$ATL_URL/session/sso?next=/" "$META_URL/login")
 if [ "$got" = "200" ] && grep -q 'name="next"' "$T/sso_handoff_form"; then pass "MetaAccount login form carries an allowlisted return target"; else fail "MetaAccount login form carries an allowlisted return target (got $got)"; fi
 
+redir=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -G --data-urlencode "next=/x" "$META_URL/session/login")
+if [ "$redir" = "302 $META_URL/login?next=%2Fx" ]; then pass "the MetaAccount session/login page redirects to login"; else fail "the MetaAccount session/login page redirects to login (got $redir)"; fi
 rm -f "$T/sso_cont.jar"
 curl -s -c "$T/sso_cont.jar" -b "$T/sso_cont.jar" -o "$T/sso_cont" "$ATL_URL/session/sso?next=/"
 if grep -q "127.0.0.1:$META_PORT/login?next=" "$T/sso_cont"; then pass "unlinked continue links to MetaAccount with a return to this app"; else fail "unlinked continue links to MetaAccount with a return to this app"; fi
@@ -728,6 +730,7 @@ nonenrolled=$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $META_URL" -H "
 if [ "$nonenrolled" = "200" ]; then pass "a non-enrolled MetaAccount still signs in without a code"; else fail "a non-enrolled MetaAccount still signs in without a code (got $nonenrolled)"; fi
 meta_form=$(curl -s "$META_URL/login")
 if printf '%s' "$meta_form" | grep -q 'name="code"'; then pass "the MetaAccount sign-in form asks for the second factor"; else fail "the MetaAccount sign-in form asks for the second factor"; fi
+if [ "$(printf '%s' "$meta_form" | grep -c '<form')" = "1" ] && ! printf '%s' "$meta_form" | grep -q 'Continue with MetaAccount\|session/login' && printf '%s' "$meta_form" | grep -q 'Register (not available yet)'; then pass "the MetaAccount sign-in is one form with no cross-links and Register disabled"; else fail "the MetaAccount sign-in is one form with no cross-links and Register disabled"; fi
 
 kill $pid 2>/dev/null
 wait $pid 2>/dev/null

@@ -70,13 +70,49 @@ static String EscText(const String& s)
 	return String(out);
 }
 
+// The sign-in look follows the reference card (~/webref/javascript-login-form): dark navy, violet
+// accent, labeled form groups. No external font or script: the page falls back to the system stack.
+static String MetaLoginStyle()
+{
+	return R"MLOGIN(<style>
+body { margin: 0; min-height: 100vh; box-sizing: border-box; padding: 16px; background: #1d015a; color: rgba(255, 255, 255, 0.6);
+  font-family: Raleway, system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; align-items: center; justify-content: center; }
+a { color: #7f71fe; text-decoration: none; cursor: pointer; }
+.m-container { width: 100%; max-width: 375px; box-sizing: border-box; padding: 30px 0; border-radius: 16px;
+  border: 4px solid rgba(255, 255, 255, 0.1); background: linear-gradient(0deg, rgba(4, 158, 116, 0.3), rgba(255, 255, 215, 0.02));
+  box-shadow: 0 32px 47px rgba(32, 23, 23, 0.09); }
+.m-form { width: 100%; padding: 0 30px; box-sizing: border-box; }
+.m-form_title { color: #fff; font-size: 26px; font-weight: 500; margin: 0 0 20px; }
+.m-form_group { display: flex; flex-wrap: wrap; justify-content: space-between; padding-bottom: 18px; }
+.m-form_label { display: block; margin-bottom: 10px; font-size: 15px; }
+.m-form_input { width: 100%; appearance: none; outline: 0; line-height: 44px; border: 1px solid rgba(255, 255, 255, 0.09);
+  background-color: rgba(255, 255, 255, 0.04); border-radius: 3px; padding: 0 15px; font-size: 18px; font-family: inherit;
+  box-sizing: border-box; color: #fff; font-weight: 300; }
+.m-form_input:focus { border-color: #7f71fe; }
+.m-form_btn { appearance: none; outline: 0; background-color: #7f71fe; border: 0; margin-top: 15px; line-height: 44px; padding: 0 15px;
+  color: #fff; font-weight: 500; border-radius: 3px; width: 100%; cursor: pointer; font-size: 18px; font-family: inherit; }
+.m-form_link { text-align: center; }
+.m-form_btn-register { display: block; line-height: 44px; color: rgba(255, 255, 255, 0.35); cursor: not-allowed; }
+.m-form_error { margin: 0 0 18px; padding: 8px 12px; border: 1px solid rgba(255, 140, 140, 0.5); border-radius: 3px; color: #ffb8b8; }
+</style>)MLOGIN";
+}
+
+static void MetaPage(WebRequest& r, const String& title, const String& body)
+{
+	r.Html("<!doctype html><html><head><meta charset=\"utf-8\">"
+	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+	       "<title>" + title + "</title>" + MetaLoginStyle() + "</head><body>"
+	       "<main class=\"m-container\">" + body + "</main></body></html>");
+}
+
 // A browser sign-in that failed gets a readable page with the reason (task 042). An API caller keeps JSON.
 static void BrowserError(WebRequest& r, const String& back, const String& message, int code)
 {
 	r.Status(code, "Error");
-	r.Html("<!doctype html><html><head><meta charset=\"utf-8\"><title>Not done</title></head><body>"
-	       "<h1>Not done</h1><p role=\"alert\">" + EscText(message) + "</p>"
-	       "<p><a href=\"" + r.Site().Url(back) + "\">Back</a></p></body></html>");
+	MetaPage(r, "Not done",
+	         "<div class=\"m-form\"><h2 class=\"m-form_title\">Not done</h2>"
+	         "<p class=\"m-form_error\" role=\"alert\">" + EscText(message) + "</p>"
+	         "<div class=\"m-form_link\"><a href=\"" + EscText(r.Site().Url(back)) + "\">Back</a></div></div>");
 }
 
 
@@ -104,12 +140,28 @@ static void MetaHome(WebRequest& r)
 static void MetaLoginForm(WebRequest& r)
 {
 	r.EnsureSession();
-	String body = HtmlForm(r.Site().Url("login:POST"), r.CsrfToken(),
-		"<input name=\"username\" placeholder=\"username\"><br>"
-		"<input name=\"password\" type=\"password\"><br>"
-		"<input name=\"code\" placeholder=\"2FA code (if enrolled)\"><br>"
-		"<input type=\"hidden\" name=\"next\" value=\"" + EscText(r.Param("next")) + "\">");
-	HtmlPage(r, "Sign in", body);
+	String body = "<form class=\"m-form\" method=\"post\" action=\"" + EscText(r.Site().Url("login:POST")) + "\">"
+	       "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" + EscText(r.CsrfToken()) + "\">"
+	       "<h2 class=\"m-form_title\">Account Login</h2>"
+	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"username\">Username</label>"
+	       "<input class=\"m-form_input\" type=\"text\" id=\"username\" name=\"username\" autocomplete=\"username\" required></div>"
+	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"password\">Password</label>"
+	       "<input class=\"m-form_input\" type=\"password\" id=\"password\" name=\"password\" autocomplete=\"current-password\" required></div>"
+	       "<div class=\"m-form_group\"><label class=\"m-form_label\" for=\"code\">Authentication code</label>"
+	       "<input class=\"m-form_input\" type=\"text\" id=\"code\" name=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\""
+	       " placeholder=\"6 digits, if enrolled\"></div>"
+	       "<input type=\"hidden\" name=\"next\" value=\"" + EscText(r.Param("next")) + "\">"
+	       "<div class=\"m-form_group\"><button class=\"m-form_btn\" type=\"submit\">Log In</button></div>"
+	       "<div class=\"m-form_link\"><span class=\"m-form_btn-register\" aria-disabled=\"true\">Register (not available yet)</span></div>"
+	       "</form>";
+	MetaPage(r, "Sign in", body);
+}
+
+// One sign-in surface: session/login is kept for the API caller, and a browser that opens it goes to login (task 048).
+static void MetaLoginRedirect(WebRequest& r)
+{
+	String next = r.Param("next");
+	r.Redirect(r.Site().Url(next.IsEmpty() ? String("login") : "login?next=" + UrlEncode(next)));
 }
 
 static void MetaLoginSubmit(WebRequest& r)
@@ -376,7 +428,7 @@ void InstallMetaAccountSite(EngineSite& site, WebGrants& grants)
 	rt.Add("login:POST", MetaLoginSubmit);
 	// The composed-site sign-in and the API caller (session-login) reach the same handler, so the
 	// site has one credential path, always TOTP-enforced (task 047).
-	rt.Add("session/login", MetaLoginForm);
+	rt.Add("session/login", MetaLoginRedirect);
 	rt.Add("session/login:POST", MetaLoginSubmit);
 	rt.Add("logout:POST", MetaLogout);
 	rt.Add("totp/begin:POST", MetaTotpBegin);
