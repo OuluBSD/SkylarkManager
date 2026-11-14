@@ -46,6 +46,13 @@ The ManagerSkylark process composes fenced engine sites on separate ports
 dashboard, GitHub/SourceForge webapps, host inspection, WebChat, SweAgent, and the
 `/docs` documentation portal.
 
+### MetaAccount sign-in when SSO is on
+
+- With `--enable-meta-sso`, a composed site takes no password from a browser form. A browser `POST session/login` on a composed site returns 403 with "This site signs in through MetaAccount", and the sign-in page renders no password field. The user signs in through "Continue with MetaAccount" instead.
+- The JSON API keeps the password path on composed sites (a request with `Accept` or `Content-Type` containing `json`). This is the documented operator exception for automation and `skylarkctl session-login`. A browser form cannot reach it.
+- MetaAccount has one sign-in surface, `login`, which enforces TOTP. A browser `GET session/login` on MetaAccount redirects to `login`; `session/login:POST` is the JSON API.
+- With SSO off, browser password sign-in on composed sites is unchanged.
+
 ---
 
 ## AI Knowledge Framework (`ai/`)
