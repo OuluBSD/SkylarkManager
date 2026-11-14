@@ -467,9 +467,23 @@ check "content policy set is refused to anonymous callers" 401 "$ATL_URL/api/pol
 	-H "Origin: $ATL_URL" -d "scope=site&level=public"
 check "content policy link creation is refused to anonymous callers" 401 "$ATL_URL/api/policy/link" -X POST \
 	-H "Origin: $ATL_URL" -d "scope=site"
+check "content policy page is refused to anonymous callers" 401 "$ATL_URL/policy"
 curl -s -c "$T/atl.jar" -o "$T/atl_login" -H "Origin: $ATL_URL" -H "Accept: application/json" \
 	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
 atl_csrf=$(curl -s -b "$T/atl.jar" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
+# The admin's settings page and actions (task 053): a form answer goes back to the page, a link answers once with its token.
+check "content policy page renders for the atlas admin" 200 "$ATL_URL/policy" -b "$T/atl.jar"
+got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$T/atl.jar" -H "Origin: $ATL_URL" \
+	--data "__wf_csrf__=$atl_csrf&back=$ATL_URL/policy&scope=site&level=protected" "$ATL_URL/api/policy/set")
+if [ "$got" = "302 $ATL_URL/policy" ]; then pass "a policy form answer returns to the settings page"; else fail "a policy form answer returns to the settings page (got $got)"; fi
+got=$(curl -s -b "$T/atl.jar" "$ATL_URL/policy")
+if echo "$got" | grep -q "<b>protected</b>"; then pass "the settings page shows the saved site level"; else fail "the settings page shows the saved site level"; fi
+got=$(curl -s -b "$T/atl.jar" -H "Origin: $ATL_URL" --data "__wf_csrf__=$atl_csrf&scope=site&kind=user&value=atlasdev" "$ATL_URL/api/policy/grant")
+if echo "$got" | grep -q '"ok": *true'; then pass "the admin grants a user access"; else fail "the admin grants a user access ($got)"; fi
+got=$(curl -s -b "$T/atl.jar" -H "Origin: $ATL_URL" --data "__wf_csrf__=$atl_csrf&scope=site&label=review" "$ATL_URL/api/policy/link")
+link_token=$(echo "$got" | sed -n 's/.*"token": *"\([^"]*\)".*/\1/p')
+if [ -n "$link_token" ]; then pass "the admin creates a secret link and gets its token once"; else fail "the admin creates a secret link ($got)"; fi
+if curl -s -b "$T/atl.jar" "$ATL_URL/policy" | grep -q "$link_token"; then fail "the link token is not shown on the settings page"; else pass "the link token is not shown on the settings page"; fi
 check "atlas create refuses a missing csrf token" 403 "$ATL_URL/atlas/create" -b "$T/atl.jar" \
 	-H "Origin: $ATL_URL" --data "map=pkr&version=v0.0.1&title=PKR" -X POST
 check "atlas create a map version" 302 "$ATL_URL/atlas/create" -b "$T/atl.jar" -H "Origin: $ATL_URL" \
