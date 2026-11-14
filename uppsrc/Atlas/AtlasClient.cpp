@@ -570,11 +570,39 @@ String AtlasScript()
   onClick('atlas-actual', actualSize);
   onClick('atlas-maximize', function () { setMaximized(true); });
   onClick('atlas-close', function () { setMaximized(false); });
+  // The three view options are remembered per browser. Storage may be blocked; then they start unchecked.
+  var VIEW_KEY = 'atlas-view';
+  function readView() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(VIEW_KEY) || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (e) { return {}; }
+  }
+  function writeView() {
+    var saved = {};
+    [['contents', contentsBox], ['tight', tightBox], ['edges', edgesBox]].forEach(function (pair) {
+      if (pair[1]) { saved[pair[0]] = !!pair[1].checked; }
+    });
+    try { window.localStorage.setItem(VIEW_KEY, JSON.stringify(saved)); } catch (e) { /* not remembered */ }
+  }
+  var savedView = readView();
+  [['contents', contentsBox], ['tight', tightBox], ['edges', edgesBox]].forEach(function (pair) {
+    if (pair[1] && typeof savedView[pair[0]] === 'boolean') { pair[1].checked = savedView[pair[0]]; }
+  });
   [contentsBox, tightBox, edgesBox].forEach(function (box) {
-    if (box) { box.addEventListener('change', function () { draw(); }); }
+    if (box) { box.addEventListener('change', function () { writeView(); draw(); }); }
   });
 
-  document.addEventListener('keydown', function (ev) {
+  // Listeners on document and window outlive this page's elements; they are removed when the shell
+  // swaps the page content in place, so a later page does not inherit them.
+  var detach = [];
+  function listen(target, type, fn) {
+    target.addEventListener(type, fn);
+    detach.push(function () { target.removeEventListener(type, fn); });
+  }
+  if (window.AdShell) { window.AdShell.onLeave(function () { detach.forEach(function (off) { off(); }); }); }
+
+  listen(document, 'keydown', function (ev) {
     var tag = ev.target && ev.target.tagName ? ev.target.tagName : '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') { return; }
     if (ev.key === 'Escape' && stage.classList.contains('atlas-max')) { setMaximized(false); return; }
@@ -583,8 +611,8 @@ String AtlasScript()
     else if (ev.key === '0') { view.manual = false; fitView(); }
   });
 
-  window.addEventListener('hashchange', function () { readHash(); draw(); });
-  window.addEventListener('resize', function () { draw(); });
+  listen(window, 'hashchange', function () { readHash(); draw(); });
+  listen(window, 'resize', function () { draw(); });
   readHash();
   draw();
 })();

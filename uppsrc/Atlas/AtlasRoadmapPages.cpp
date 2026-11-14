@@ -162,20 +162,71 @@ static String EventDetail(const AtlasEvent& e)
 	return String(b);
 }
 
+// One event's full detail, shown in the split pane when its row is selected.
+static String EventTemplate(WebRequest& r, const RoadmapData& d, const AtlasEvent& e, bool edit, const String& family)
+{
+	StringBuffer b;
+	b << "<template id=\"" << AtlasEsc(e.id) << "\"><h2>" << AtlasEsc(e.type) << " on " << AtlasEsc(e.subject_kind)
+	  << " " << AtlasEsc(e.subject_id) << "</h2>"
+	  << "<dl class=\"ad-dl\"><dt>Version</dt><dd>" << AtlasEsc(VidLabel(d, e.vid)) << "</dd>"
+	  << "<dt>At</dt><dd class=\"ad-mono\">" << AtlasEsc(e.at) << "</dd>"
+	  << "<dt>By</dt><dd>" << AtlasEsc(e.actor) << "</dd>"
+	  << "<dt>Id</dt><dd class=\"ad-mono\">" << AtlasEsc(e.id) << "</dd>";
+	if(e.stage.GetCount()) b << "<dt>Stage</dt><dd>" << AtlasEsc(e.stage) << "</dd>";
+	if(e.status.GetCount()) b << "<dt>Status</dt><dd>" << AtlasEsc(e.status) << "</dd>";
+	if(e.name.GetCount()) b << "<dt>Name</dt><dd>" << AtlasEsc(e.name) << "</dd>";
+	if(e.from.GetCount() || e.to.GetCount())
+		b << "<dt>Road</dt><dd>" << AtlasEsc(e.from) << " &rarr; " << AtlasEsc(e.to)
+		  << (e.label.GetCount() ? " (" + AtlasEsc(e.label) + ")" : String()) << "</dd>";
+	if(e.action.GetCount()) b << "<dt>Action</dt><dd>" << AtlasEsc(e.action) << "</dd>";
+	if(e.requires.GetCount()) b << "<dt>Needs</dt><dd>" << Pills(e.requires, "is-info") << "</dd>";
+	if(e.effects.GetCount()) b << "<dt>Sets</dt><dd>" << Pills(e.effects, "is-ok") << "</dd>";
+	if(e.target.GetCount()) b << "<dt>Target</dt><dd>" << AtlasEsc(VidLabel(d, e.target)) << "</dd>";
+	if(e.link.GetCount()) b << "<dt>About</dt><dd class=\"ad-mono\">" << AtlasEsc(e.link) << "</dd>";
+	b << "</dl>";
+	if(e.text.GetCount())
+		b << "<div class=\"ad-text ad-note-text\">" << AtlasEsc(e.text) << "</div>";
+	if(e.subject_kind == "element" && e.subject_id.GetCount())
+		b << "<p><a href=\"" << AtlasEsc(r.Site().Url("atlas/" + d.f.head_key + "/element/" + e.subject_id))
+		  << "\">Open " << AtlasEsc(e.subject_id) << " on the map</a></p>";
+	if(edit && e.subject_kind == "element" && e.subject_id.GetCount())
+		b << ApiForm(Api(r, family, "/event/add"))
+		  << "<input type=\"hidden\" name=\"subject_kind\" value=\"element\">"
+		  << "<input type=\"hidden\" name=\"subject_id\" value=\"" << AtlasEsc(e.subject_id) << "\">"
+		  << "<input type=\"hidden\" name=\"type\" value=\"note\">"
+		  << "<label>Add a note on this element <textarea name=\"text\"></textarea></label>"
+		  << "<button class=\"ad-btn\" type=\"submit\">Add note</button></form>";
+	b << "</template>";
+	return String(b);
+}
+
 static String TimelineBody(WebRequest& r, const RoadmapData& d, bool edit, const String& family)
 {
 	StringBuffer b;
-	b << "<section class=\"ad-panel\"><header><h2>Timeline</h2><p>" << d.events.GetCount()
-	  << " events, newest first. Events are only added, never rewritten.</p></header>"
-	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Version</th><th>At</th><th>By</th><th>Subject</th><th>Event</th><th>Detail</th></tr>";
+	b << "<p class=\"ad-note\">" << d.events.GetCount()
+	  << " events. Events are only added, never rewritten. Click a row to see it; drag the bar to resize.</p>"
+	  << "<div class=\"ad-split-tools\"><input type=\"search\" placeholder=\"Filter events\" data-filter-for=\"timeline-table\" aria-label=\"Filter events\">"
+	  << "<button class=\"ad-btn\" type=\"button\" data-split-toggle=\"timeline\">Layout</button></div>"
+	  << "<div class=\"ad-split\" data-split=\"timeline\" data-orient=\"horizontal\">"
+	  << "<div class=\"ad-pane-list\"><div class=\"ad-table-wrap\"><table class=\"ad-table\" id=\"timeline-table\" data-sortable>"
+	  << "<tr><th data-sort=\"num\" data-sort-default=\"descending\" aria-sort=\"descending\">Version</th>"
+	  << "<th data-sort=\"text\">At</th><th data-sort=\"text\">By</th><th data-sort=\"text\">Subject</th>"
+	  << "<th data-sort=\"text\">Event</th><th>Detail</th></tr>";
+	StringBuffer templates;
 	for(int i = d.events.GetCount() - 1; i >= 0; i--) {
 		const AtlasEvent& e = d.events[i];
+		int code = d.f.Find(e.vid) >= 0 ? d.f.versions[d.f.Find(e.vid)].code : 0;
 		String subject = AtlasEsc(e.subject_kind) + ": " + AtlasEsc(e.subject_id);
-		b << "<tr><td>" << AtlasEsc(VidLabel(d, e.vid)) << "</td><td class=\"ad-mono\">" << AtlasEsc(e.at)
-		  << "</td><td>" << AtlasEsc(e.actor) << "</td><td>" << subject << "</td><td>" << AtlasEsc(e.type)
-		  << "</td><td>" << EventDetail(e) << "</td></tr>";
+		b << "<tr data-detail=\"" << AtlasEsc(e.id) << "\" tabindex=\"0\"><td data-v=\"" << code << "\">"
+		  << AtlasEsc(VidLabel(d, e.vid)) << "</td><td class=\"ad-mono\" data-v=\"" << AtlasEsc(e.at) << "\">"
+		  << AtlasEsc(e.at) << "</td><td>" << AtlasEsc(e.actor) << "</td><td>" << subject << "</td><td>"
+		  << AtlasEsc(e.type) << "</td><td>" << EventDetail(e) << "</td></tr>";
+		templates << EventTemplate(r, d, e, edit, family);
 	}
-	b << "</table></div></section>";
+	b << "</table></div></div>"
+	  << "<div class=\"ad-gutter\" tabindex=\"0\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize the panes\"></div>"
+	  << "<div class=\"ad-pane-detail\"><p class=\"ad-empty\">Select an event to see its details.</p></div>"
+	  << "</div>" << String(templates);
 	return String(b);
 }
 
@@ -419,12 +470,16 @@ void InstallAtlasRoadmapPages(EngineSite& site)
 String AtlasRoadmapScript()
 {
 	return R"ARS((function () {
-  var csrf = document.body.getAttribute('data-csrf') || '';
-  var forms = document.querySelectorAll('form[data-api]');
-  for (var i = 0; i < forms.length; i++) {
-    forms[i].addEventListener('submit', function (ev) {
-      ev.preventDefault();
-      var form = this;
+  // Bound once for the document: forms in a detail pane are built after load, and a page change
+  // runs this script again, so the guard keeps a single listener.
+  if (window.__atlasRoadmapBound) { return; }
+  window.__atlasRoadmapBound = true;
+  document.addEventListener('submit', function (ev) {
+    var form = ev.target && ev.target.closest ? ev.target.closest('form[data-api]') : null;
+    if (!form) { return; }
+    ev.preventDefault();
+    var csrf = document.body.getAttribute('data-csrf') || '';
+    {
       var parts = [];
       for (var j = 0; j < form.elements.length; j++) {
         var el = form.elements[j];
@@ -441,15 +496,15 @@ String AtlasRoadmapScript()
         return res.json().then(function (j) { return { status: res.status, body: j }; });
       }).then(function (res) {
         if (res.status === 200 && res.body && res.body.ok) {
-          window.location.reload();
+          if (window.AdShell) { window.AdShell.reload(); } else { window.location.reload(); }
         } else {
           window.alert('Not saved: ' + ((res.body && res.body.error) || res.status));
         }
       }).catch(function () {
         window.alert('Not saved: the server did not answer.');
       });
-    });
-  }
+    }
+  });
 })();)ARS";
 }
 

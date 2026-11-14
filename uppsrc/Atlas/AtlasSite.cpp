@@ -328,6 +328,7 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 			l.href = r.Site().Url("atlas/roadmap/" + family + (i == 0 ? String() : String("/") + ids[i]));
 			l.icon = icons[i];
 			l.active = section == ids[i];
+			l.separator_before = i == 0;
 			s.nav.Add(pick(l));
 		}
 		WebsiteShellLink crumb_family;
