@@ -98,6 +98,10 @@ static BrokerResult AskCompany(WebRequest& r, const String& op, const ValueMap& 
 
 static void Summary(WebRequest& r)
 {
+	if(!r.HasUser()) {
+		Page(r, "Financials", "<p>Financials summarises the ledger.</p><p><a href=\"" + Esc(r.Site().Url("session/login")) + "\">Sign in</a> to see the details.</p>");
+		return;
+	}
 	if(!RequireLogin(r))
 		return;
 	BrokerResult res = AskCompany(r, "ledger-summary", ValueMap());

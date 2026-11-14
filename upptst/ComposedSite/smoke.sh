@@ -141,7 +141,7 @@ if grep -q 'name="password"' "$T/body"; then pass "meta /login is the sign-in fo
 if grep -q 'href="/login?next=' "$T/shell_guest.html"; then fail "composed default shows no stock sign-in link"; else pass "composed default shows no stock sign-in link"; fi
 check "science paper list is public" 200 "$SC_URL/api/papers"
 check "science article write is refused without a session" 403 "$SC_URL/api/papers/x/article" -X POST -d '{}'
-for gated in "$ATL_URL/" "$PH_URL/" "$TF_URL/" "$META_URL/" "$CH_URL/" "$FIN_URL/"; do
+for gated in "$META_URL/"; do
 	check "gated root $gated redirects to sign-in" 302 "$gated"
 done
 for hub in ai github sourceforge host mesh home; do
@@ -208,7 +208,7 @@ got=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$MAIN_URL/api/cli/manifest
 if [ "$got" != "200" ]; then pass "manifest refuses writes ($got)"; else fail "manifest refuses writes ($got)"; fi
 
 # Anonymous callers on composed ports get no content.
-check "privatehub / anonymous redirects" 302 "$PH_URL/"
+check "privatehub / is a public landing" 200 "$PH_URL/"
 check "privatehub project issues anonymous redirects" 302 "$PH_URL/privatehub/acme/widget/issues"
 
 # Login is per site: the PrivateHub session is established on its own cookie.
@@ -320,7 +320,7 @@ curl -s -c "$T/tf.jar" -o "$T/tf_login" -H "Origin: $TF_URL" -H "Accept: applica
 	--data "username=tfdev&password=pw-tf" "$TF_URL/session/login"
 tf_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/tf_login")
 if [ -n "$tf_csrf" ]; then pass "taskfoundry login returns a csrf token"; else fail "taskfoundry login returns a csrf token"; fi
-check "taskfoundry board anonymous redirects" 302 "$TF_URL/"
+check "taskfoundry board is a public landing" 200 "$TF_URL/"
 # post_form <path> <form data>: prints "<status> <redirect url>".
 post_form() {
 	curl -s -o "$T/tf_body" -w '%{http_code} %{redirect_url}' -b "$T/tf.jar" \
@@ -431,7 +431,8 @@ fi
 
 # The Channels site (task 012): session-gated reads over the canned shim; no
 # writes exist.
-check "channels overview anonymous redirects" 302 "$CH_URL/overview"
+check "channels overview is a public landing" 200 "$CH_URL/overview"
+check "channels view anonymous redirects" 302 "$CH_URL/channels/a/b"
 curl -s -c "$T/chan.jar" -o "$T/chan_login" -H "Origin: $CH_URL" -H "Accept: application/json" \
 	--data "username=cviewer&password=pw-chan" "$CH_URL/session/login"
 check "channels overview lists the node channels" 200 "$CH_URL/overview" -b "$T/chan.jar"
@@ -445,7 +446,9 @@ fi
 
 # The Financials site (task 016): the real, freshly seeded Company store has
 # an empty ledger, so the finance viewer renders the empty states end to end.
-check "financials summary anonymous redirects" 302 "$FIN_URL/financials"
+check "financials summary is a public landing" 200 "$FIN_URL/financials"
+check "financials ledger anonymous redirects" 302 "$FIN_URL/ledger"
+if curl -s "$FIN_URL/financials" | grep -q "Credits"; then fail "financials landing shows no ledger totals"; else pass "financials landing shows no ledger totals"; fi
 curl -s -c "$T/fin.jar" -o "$T/fin_login" -H "Origin: $FIN_URL" -H "Accept: application/json" \
 	--data "username=ffin&password=pw-fin" "$FIN_URL/session/login"
 check "financials summary for the finance role" 200 "$FIN_URL/financials" -b "$T/fin.jar"
@@ -457,7 +460,7 @@ if grep -q "No contracts yet" "$T/body"; then pass "financials contracts shows t
 # The Atlas site (task 029): anonymous requests redirect to login; the admin
 # account creates a map version through the fenced form, and the empty map
 # renders its canvas and the edit panel.
-check "atlas list anonymous redirects" 302 "$ATL_URL/atlas"
+check "atlas list is a public read" 200 "$ATL_URL/atlas"
 curl -s -c "$T/atl.jar" -o "$T/atl_login" -H "Origin: $ATL_URL" -H "Accept: application/json" \
 	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
 atl_csrf=$(curl -s -b "$T/atl.jar" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
@@ -499,8 +502,8 @@ curl -s -c "$META_ONLY" -o "$T/sso_meta" -H "Origin: $META_URL" -H "Accept: appl
 	--data "username=tfmeta&password=pw-meta" "$META_URL/session/login" >/dev/null
 sso_meta_csrf=$(sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p' "$T/sso_meta")
 cp "$META_ONLY" "$SSO_JAR"
-check "a central session alone does not open an unlinked app" 302 "$ATL_URL/" -b "$META_ONLY"
-check "a central session alone does not open an unlinked channels app" 302 "$CH_URL/" -b "$META_ONLY"
+check "a central session alone does not open an unlinked app" 401 "$ATL_URL/session/whoami" -b "$META_ONLY"
+check "a central session alone does not open an unlinked channels app" 401 "$CH_URL/session/whoami" -b "$META_ONLY"
 
 curl -s -c "$SSO_JAR" -b "$SSO_JAR" -o "$T/sso_atl" -H "Origin: $ATL_URL" -H "Accept: application/json" \
 	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login" >/dev/null
@@ -517,19 +520,19 @@ got=$(curl -s -o "$T/sso_decide" -w '%{http_code}' -b "$SSO_JAR" -H "Origin: $ME
 	-H "X-WF-CSRF: $sso_meta_csrf" --data "grant_id=$sso_gid&approve=1" "$META_URL/consent/decide")
 if [ "$got" = "200" ]; then pass "the central user approves the atlas link on MetaAccount"; else fail "the central user approves the atlas link on MetaAccount (got $got)"; fi
 
-check "a linked account opens atlas with the central session only" 200 "$ATL_URL/" -b "$META_ONLY"
-check "an atlas link does not open the channels app" 302 "$CH_URL/" -b "$META_ONLY"
+check "a linked account opens atlas with the central session only" 200 "$ATL_URL/session/whoami" -b "$META_ONLY"
+check "an atlas link does not open the channels app" 401 "$CH_URL/session/whoami" -b "$META_ONLY"
 
 # Local sign-out: this app only; its marker keeps an automatic check from signing back in.
 out=$(curl -s -D - -o /dev/null -b "$SSO_JAR" -c "$SSO_JAR" -H "Origin: $ATL_URL" -H "x-wf-csrf: $sso_atl_csrf" \
 	-X POST "$ATL_URL/session/logout")
 if echo "$out" | grep -qi "wfs_atlas_sso_off="; then pass "atlas sign-out sets its own sign-out marker"; else fail "atlas sign-out sets its own sign-out marker"; fi
-check "after a local sign-out atlas does not sign back in silently" 302 "$ATL_URL/" -b "$SSO_JAR"
+check "after a local sign-out atlas does not sign back in silently" 401 "$ATL_URL/session/whoami" -b "$SSO_JAR"
 check "the central session survives an atlas sign-out" 200 "$META_URL/consent" -b "$SSO_JAR"
 
 got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$SSO_JAR" -c "$SSO_JAR" "$ATL_URL/session/sso?next=/")
 if [ "${got%% *}" = "302" ] && [ "${got#* }" = "$ATL_URL/" ]; then pass "continue with MetaAccount returns to the app path"; else fail "continue with MetaAccount returns to the app path ($got)"; fi
-check "after continue atlas opens again with the central session" 200 "$ATL_URL/" -b "$SSO_JAR"
+check "after continue atlas opens again with the central session" 200 "$ATL_URL/session/whoami" -b "$SSO_JAR"
 
 got=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$META_ONLY" "$ATL_URL/session/sso?next=//evil.example.invalid/x")
 if [ "$got" = "$ATL_URL/" ]; then pass "a continue target off the site is replaced with the site root"; else fail "a continue target off the site is replaced with the site root (got $got)"; fi
@@ -575,7 +578,7 @@ got=$(curl -s -o /dev/null -w '%{redirect_url}' -H "Accept: text/html" -c "$HO_J
 if [ "$got" = "$ATL_URL/session/sso?next=/" ]; then pass "MetaAccount sign-in returns to the atlas session route"; else fail "MetaAccount sign-in returns to the atlas session route (got $got)"; fi
 got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -b "$HO_JAR" -c "$HO_JAR" "$ATL_URL/session/sso?next=/")
 if [ "$got" = "302 $ATL_URL/" ]; then pass "the return adopts the linked atlas account"; else fail "the return adopts the linked atlas account (got $got)"; fi
-check "after the handoff atlas opens for the linked account" 200 "$ATL_URL/" -b "$HO_JAR"
+check "after the handoff atlas opens for the linked account" 200 "$ATL_URL/session/whoami" -b "$HO_JAR"
 
 for target in "http://127.0.0.1:$ATL_PORT@evil.example.invalid/" "http://evil.example.invalid:$ATL_PORT/session/sso?next=/" "http://127.0.0.1:9/x"; do
 	got=$(curl -s -o /dev/null -w '%{redirect_url}' -H "Accept: text/html" --data-urlencode "username=tfmeta" --data-urlencode "password=pw-meta" \
@@ -595,7 +598,7 @@ dev_gid=$(sed -n 's/.*"grant_id": *"\([^"]*\)".*/\1/p' "$T/sso_dev_link")
 got=$(curl -s -o "$T/sso_dev_decide" -w '%{http_code}' -b "$SSO_JAR" -H "Origin: $META_URL" \
 	-H "X-WF-CSRF: $sso_meta_csrf" --data "grant_id=$dev_gid&approve=1" "$META_URL/consent/decide")
 if [ -n "$dev_gid" ] && [ "$got" = "200" ]; then pass "a second local account is approved for the same central user"; else fail "a second local account is approved for the same central user (got $got)"; fi
-check "an ambiguous sign-in link denies the central session on atlas" 302 "$ATL_URL/" -b "$META_ONLY"
+check "an ambiguous sign-in link denies the central session on atlas" 401 "$ATL_URL/session/whoami" -b "$META_ONLY"
 
 # Roles: a central user linked to the reader account keeps the reader role after the handoff.
 # The reader can read but not edit; the linked admin still can edit (task 039 residual 6).
@@ -623,7 +626,7 @@ rd_ho_csrf=$(curl -s -b "$RD_HO" -c "$RD_HO" -H "Accept: application/json" "$ATL
 got=$(curl -s -o "$T/sso_rd_create" -w '%{http_code}' -b "$RD_HO" -c "$RD_HO" -H "Origin: $ATL_URL" -H "x-wf-csrf: $rd_ho_csrf" \
 	-X POST --data "title=reader" "$ATL_URL/atlas/create")
 if [ "$got" = "403" ] && grep -q "needs the admin role" "$T/sso_rd_create"; then pass "the reader keeps the reader role: a map edit is refused"; else fail "the reader keeps the reader role: a map edit is refused (got $got)"; fi
-check "the reader can still read atlas" 200 "$ATL_URL/" -b "$RD_HO"
+check "the reader can still read atlas" 200 "$ATL_URL/session/whoami" -b "$RD_HO"
 
 got=$(curl -s -o "$T/sso_admin_create" -w '%{http_code}' -b "$HO_JAR" -c "$HO_JAR" -H "Origin: $ATL_URL" \
 	-H "x-wf-csrf: $(curl -s -b "$HO_JAR" -c "$HO_JAR" -H "Accept: application/json" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')" \
@@ -639,7 +642,7 @@ if grep -q "needs the finance role" "$T/body"; then pass "the viewer refusal nam
 
 # Channels through the handoff: a linked Channels account opens the app on the central session alone.
 link_account "$CH_URL" cviewer pw-chan tfmeta pw-meta chan-viewer
-check "a linked channels account opens channels through the handoff" 200 "$CH_URL/" -b "$T/chan-viewer.central.jar"
+check "a linked channels account opens channels through the handoff" 200 "$CH_URL/session/whoami" -b "$T/chan-viewer.central.jar"
 
 # Visible controls: a signed-in atlas page offers sign-out and a MetaAccount link; a guest page offers
 # neither. The browser forms post with the session's CSRF token and get a redirect, not JSON.
@@ -804,7 +807,7 @@ if start_off; then
 	check "SSO off: the diagnostics route is not served" 404 "$OFF_ATL_URL/session/sso/diagnostics"
 	check "SSO off: the central session is still valid on MetaAccount" 200 "$OFF_META_URL/session/whoami" -b "$OFF/central.jar"
 	# The same link that opened Atlas in phase 1 must not open it now: the central session stays a guest.
-	check "SSO off: a linked central session does not sign a guest in to Atlas" 302 "$OFF_ATL_URL/" -b "$OFF/central.jar"
+	check "SSO off: a linked central session does not sign a guest in to Atlas" 401 "$OFF_ATL_URL/session/whoami" -b "$OFF/central.jar"
 	if curl -s "$OFF_ATL_URL/session/login?next=http://127.0.0.1:$OFF_META/" | grep -q 'name="next"'; then
 		fail "SSO off: the sign-in form carries no return target"; else pass "SSO off: the sign-in form carries no return target"; fi
 	curl -s -c "$OFF/atl2.jar" -o /dev/null -H "Origin: $OFF_ATL_URL" -H "Accept: application/json" \

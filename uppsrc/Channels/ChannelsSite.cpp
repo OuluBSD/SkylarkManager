@@ -122,6 +122,10 @@ static bool CachedMessages(const String& key, bool fresh, Vector<AgentIpcMessage
 
 static void Overview(WebRequest& r)
 {
+	if(!r.HasUser()) {
+		Page(r, "Channels", "<p>Channels show the agent activity of this node.</p><p><a href=\"" + Esc(r.Site().Url("session/login")) + "\">Sign in</a> to see the details.</p>");
+		return;
+	}
 	if(!RequireLogin(r))
 		return;
 	Vector<AgentIpcChannelInfo> infos;

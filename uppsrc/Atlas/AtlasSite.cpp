@@ -199,8 +199,7 @@ static String ElementOptions(const AtlasMap& m, const String& selected)
 
 static void MapList(WebRequest& r)
 {
-	if(!RequireLogin(r))
-		return;
+	// Map reads are public (task 053). Edits are still limited to the admin role.
 	Vector<String> ids;
 	Maps(r.Site().data_root).List(ids);
 	StringBuffer b;
@@ -299,8 +298,6 @@ static String EditPanel(WebRequest& r, const AtlasMap& m, const String& key, con
 
 static void MapView(WebRequest& r)
 {
-	if(!RequireLogin(r))
-		return;
 	String key = r.PathArg(0);
 	AtlasMap m;
 	String rev, err;
@@ -335,8 +332,6 @@ static void MapView(WebRequest& r)
 
 static void ElementView(WebRequest& r)
 {
-	if(!RequireLogin(r))
-		return;
 	String key = r.PathArg(0);
 	AtlasMap m;
 	String rev, err;

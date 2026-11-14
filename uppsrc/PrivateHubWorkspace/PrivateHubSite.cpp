@@ -103,6 +103,10 @@ static String ProjectNav(WebRequest& r)
 // Workspace overview: organizations and their repositories.
 static void PrivateHubHome(WebRequest& r)
 {
+	if(!r.HasUser()) {
+		Page(r, "PrivateHub", "<p>PrivateHub is a private workspace.</p><p><a href=\"" + Esc(r.Site().Url("session/login")) + "\">Sign in</a> to see the details.</p>");
+		return;
+	}
 	if(!RequireUser(r))
 		return;
 	Vector<String> orgs;

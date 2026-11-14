@@ -167,6 +167,10 @@ static String ListItem(const String& href, const String& label, const String& st
 
 static void Board(WebRequest& r)
 {
+	if(!r.HasUser()) {
+		Page(r, "TaskFoundry", "<p>TaskFoundry tracks grant candidates and proposals.</p><p><a href=\"" + Esc(r.Site().Url("session/login")) + "\">Sign in</a> to see the details.</p>");
+		return;
+	}
 	if(!RequireGrant(r))
 		return;
 	TfResult res = Service().Board();
