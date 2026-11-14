@@ -26,6 +26,8 @@ void SsoAutoSignIn(WebRequest& r);
 
 // The signed-in account and its sign-out and link controls, for a composed page's header (task 039).
 String SessionChromeHtml(WebRequest& r);
+// Admin-only content policy routes and manifest commands for a site (task 053).
+void InstallContentPolicyRoutes(EngineSite& site);
 // Host-wide theme and density for a composed page (task 052): data attributes from the wf_theme / wf_density
 // cookies, whitelisted, and a small script that applies a shell broadcast from the same host.
 String ThemeHtmlAttrs(WebRequest& r);

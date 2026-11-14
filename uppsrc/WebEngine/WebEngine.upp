@@ -16,6 +16,7 @@ file
 	Router.cpp,
 	ContentPolicy.h,
 	ContentPolicy.cpp,
+	ContentPolicyRoutes.cpp,
 	Site.h,
 	Site.cpp,
 	Request.h,

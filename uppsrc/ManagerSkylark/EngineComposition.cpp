@@ -47,6 +47,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.privatehub.Create(cfg.privatehub_workspace, ph_root);
 	InstallPrivateHubSite(ph, *owned.privatehub);
 	InstallSessionRoutes(ph);
+	InstallContentPolicyRoutes(ph);
 	InstallCommandConsole(ph);
 	host.BindSite(cfg.privatehub_port, "privatehub");
 	String ph_broker_root = AppendFileName(ph_root, "broker");
@@ -84,6 +85,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.science.Create(cfg.science_corpus, cfg.science_corpus);
 	InstallScienceSite(sci, *owned.science, ~owned.grants);
 	InstallSessionRoutes(sci);
+	InstallContentPolicyRoutes(sci);
 	InstallCommandConsole(sci);
 	host.BindSite(cfg.science_port, "science");
 	// The broker takes ownership of the service it is given.
@@ -104,6 +106,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	owned.taskfoundry.Create(TheWebEngine().Broker(), tf_root);
 	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
 	InstallSessionRoutes(tf);
+	InstallContentPolicyRoutes(tf);
 	InstallCommandConsole(tf);
 	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
 
@@ -130,6 +133,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.channels_port), ch_root);
 	InstallChannelsSite(ch, ipc);
 	InstallSessionRoutes(ch);
+	InstallContentPolicyRoutes(ch);
 	InstallCommandConsole(ch);
 	host.BindSite(cfg.channels_port, "channels");
 
@@ -141,6 +145,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.financials_port), fin_root);
 	InstallFinancialsSite(fin);
 	InstallSessionRoutes(fin);
+	InstallContentPolicyRoutes(fin);
 	InstallCommandConsole(fin);
 	host.BindSite(cfg.financials_port, "financials");
 
@@ -152,6 +157,7 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		Format("http://127.0.0.1:%d", cfg.atlas_port), atlas_root);
 	InstallAtlasSite(atl);
 	InstallSessionRoutes(atl);
+	InstallContentPolicyRoutes(atl);
 	InstallCommandConsole(atl);
 	host.BindSite(cfg.atlas_port, "atlas");
 	// The YouTubePlanner stub: the six planning levels, read-only (task 040). No data, no YouTube calls.

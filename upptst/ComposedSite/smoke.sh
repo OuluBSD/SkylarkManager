@@ -461,6 +461,12 @@ if grep -q "No contracts yet" "$T/body"; then pass "financials contracts shows t
 # account creates a map version through the fenced form, and the empty map
 # renders its canvas and the edit panel.
 check "atlas list is a public read" 200 "$ATL_URL/atlas"
+# Content policy settings are admin-only (task 053): anonymous callers get 401, never the policy.
+check "content policy read is refused to anonymous callers" 401 "$ATL_URL/api/policy"
+check "content policy set is refused to anonymous callers" 401 "$ATL_URL/api/policy/set" -X POST \
+	-H "Origin: $ATL_URL" -d "scope=site&level=public"
+check "content policy link creation is refused to anonymous callers" 401 "$ATL_URL/api/policy/link" -X POST \
+	-H "Origin: $ATL_URL" -d "scope=site"
 curl -s -c "$T/atl.jar" -o "$T/atl_login" -H "Origin: $ATL_URL" -H "Accept: application/json" \
 	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
 atl_csrf=$(curl -s -b "$T/atl.jar" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
