@@ -22,6 +22,10 @@ bool AtlasFamilyReadable(WebRequest& r, const String& family);
 
 // Document key of a map version: "pkr" + "v0.0.1" -> "pkr-v0.0.1".
 String AtlasDocKey(const String& map, const String& version);
+// The family of a map key (name-vX.Y.Z): the part before the last "-v".
+String AtlasFamilyOfKey(const String& key);
+// The keys of every map in the data root and in each registered project's store.
+void AtlasListMapKeys(const String& data_root, Vector<String>& ids);
 
 // Store access for the host and the self-tests. Load fails with error set when
 // the document is missing or unreadable. Save is revision-checked: an empty

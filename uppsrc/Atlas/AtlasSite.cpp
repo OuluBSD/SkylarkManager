@@ -81,10 +81,16 @@ String AtlasDocKey(const String& map, const String& version)
 	return map + "-" + version;
 }
 
+String AtlasFamilyOfKey(const String& key)
+{
+	int i = key.ReverseFind("-v");
+	return i < 0 ? key : key.Left(i);
+}
+
 bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, String& revision, String& error)
 {
 	String json;
-	StoreResult g = Maps(data_root).Get(key, json, revision);
+	StoreResult g = Maps(AtlasStoreRoot(data_root, AtlasFamilyOfKey(key))).Get(key, json, revision);
 	if(!g.ok) {
 		error = "map not found: " + key;
 		return false;
@@ -102,7 +108,7 @@ bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, Strin
 bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
                   const String& expected_revision, String& new_revision, String& error)
 {
-	StoreResult p = Maps(data_root).Put(key, StoreAsJson(m), expected_revision, new_revision);
+	StoreResult p = Maps(AtlasStoreRoot(data_root, AtlasFamilyOfKey(key))).Put(key, StoreAsJson(m), expected_revision, new_revision);
 	if(!p.ok) {
 		error = p.error;
 		return false;
@@ -117,6 +123,24 @@ static const char *ATLAS_RULES_COLLECTION = "rules";
 String AtlasNowIso()
 {
 	return NowIso();
+}
+
+// The keys of every map: the data root's, and each project's store's.
+void AtlasListMapKeys(const String& data_root, Vector<String>& ids)
+{
+	Maps(data_root).List(ids);
+	Vector<AtlasProject> all;
+	String err;
+	if(!AtlasLoadProjects(data_root, all, err))
+		return;
+	for(const AtlasProject& p : all) {
+		if(p.store.IsEmpty())
+			continue;
+		Vector<String> more;
+		Maps(AtlasStoreRoot(data_root, p.name)).List(more);
+		for(const String& id : more)
+			ids.Add(id);
+	}
 }
 
 static IRecordCollection& Families(const String& data_root)
@@ -140,7 +164,7 @@ bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& r
 	rules = AtlasRules();
 	revision.Clear();
 	String json;
-	StoreResult g = Rules(data_root).Get(family, json, revision);
+	StoreResult g = Rules(AtlasStoreRoot(data_root, family)).Get(family, json, revision);
 	if(!g.ok) {
 		revision.Clear();
 		return true;
@@ -155,7 +179,7 @@ bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& r
 bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRules& rules,
                     const String& expected_revision, String& new_revision, String& error)
 {
-	StoreResult p = Rules(data_root).Put(family, StoreAsJson(rules), expected_revision, new_revision);
+	StoreResult p = Rules(AtlasStoreRoot(data_root, family)).Put(family, StoreAsJson(rules), expected_revision, new_revision);
 	if(!p.ok) {
 		error = p.error;
 		return false;
@@ -172,7 +196,7 @@ static String EventKey(const String& family, const String& event_id)
 bool AtlasLoadFamily(const String& data_root, const String& family, AtlasFamily& f, String& revision, String& error)
 {
 	String json;
-	StoreResult g = Families(data_root).Get(family, json, revision);
+	StoreResult g = Families(AtlasStoreRoot(data_root, family)).Get(family, json, revision);
 	if(!g.ok) {
 		error = "version list not found for " + family + "; initialise it with init";
 		return false;
@@ -188,7 +212,7 @@ bool AtlasLoadFamily(const String& data_root, const String& family, AtlasFamily&
 bool AtlasSaveFamily(const String& data_root, const String& family, const AtlasFamily& f,
                      const String& expected_revision, String& new_revision, String& error)
 {
-	StoreResult p = Families(data_root).Put(family, StoreAsJson(f), expected_revision, new_revision);
+	StoreResult p = Families(AtlasStoreRoot(data_root, family)).Put(family, StoreAsJson(f), expected_revision, new_revision);
 	if(!p.ok) {
 		error = p.error;
 		return false;
@@ -200,7 +224,7 @@ bool AtlasCreateFamily(const String& data_root, const String& family, const Atla
                        String& new_revision, String& error)
 {
 	String json, rev;
-	if(Families(data_root).Get(family, json, rev).ok) {
+	if(Families(AtlasStoreRoot(data_root, family)).Get(family, json, rev).ok) {
 		error = "a version list already exists for " + family;
 		return false;
 	}
@@ -210,8 +234,9 @@ bool AtlasCreateFamily(const String& data_root, const String& family, const Atla
 bool AtlasLoadEvents(const String& data_root, const String& family, Vector<AtlasEvent>& out, String& error)
 {
 	out.Clear();
+	String root = AtlasStoreRoot(data_root, family);
 	Vector<String> ids;
-	StoreResult l = Events(data_root).List(ids);
+	StoreResult l = Events(root).List(ids);
 	if(!l.ok) {
 		error = l.error;
 		return false;
@@ -221,7 +246,7 @@ bool AtlasLoadEvents(const String& data_root, const String& family, Vector<Atlas
 		if(!id.StartsWith(prefix))
 			continue;
 		String json, rev;
-		StoreResult g = Events(data_root).Get(id, json, rev);
+		StoreResult g = Events(root).Get(id, json, rev);
 		if(!g.ok) {
 			error = g.error;
 			return false;
@@ -240,11 +265,11 @@ bool AtlasLoadEvents(const String& data_root, const String& family, Vector<Atlas
 bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEvent& e, String& error)
 {
 	String json, rev;
-	if(Events(data_root).Get(EventKey(family, e.id), json, rev).ok) {
+	if(Events(AtlasStoreRoot(data_root, family)).Get(EventKey(family, e.id), json, rev).ok) {
 		error = "event already exists: " + e.id;
 		return false;
 	}
-	StoreResult p = Events(data_root).Put(EventKey(family, e.id), StoreAsJson(e), String(), rev);
+	StoreResult p = Events(AtlasStoreRoot(data_root, family)).Put(EventKey(family, e.id), StoreAsJson(e), String(), rev);
 	if(!p.ok) {
 		error = p.error;
 		return false;
@@ -446,8 +471,7 @@ static String ElementOptions(const AtlasMap& m, const String& selected)
 
 static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map);
 
-// The registered projects this viewer may edit, each with its import state. An editor imports a project from
-// here (POST atlas/import); a project nobody has imported yet has an Import button.
+// The registered projects this viewer may edit: each with its store, and the head map once the store has a family.
 static void ProjectsSection(WebRequest& r, StringBuffer& b)
 {
 	Vector<AtlasProject> all;
@@ -467,9 +491,7 @@ static void ProjectsSection(WebRequest& r, StringBuffer& b)
 		if(AtlasLoadFamily(r.Site().data_root, p.name, f, frev, ferr))
 			rows << "<a href=\"" << Esc(r.Site().Url("atlas/" + f.head_key)) << "\">" << Esc(f.head_key) << "</a>";
 		else
-			rows << "<form method=\"post\" action=\"" << Esc(r.Site().Url("atlas/import")) << "\">" << CsrfField(r)
-			     << "<input type=\"hidden\" name=\"project\" value=\"" << Esc(p.name) << "\">"
-			     << "<button type=\"submit\">Import</button></form>";
+			rows << "no family in " << Esc(p.store.GetCount() ? p.store : String("(no store)"));
 		rows << "</td></tr>";
 		listed++;
 	}
@@ -485,7 +507,7 @@ static void MapList(WebRequest& r)
 		return;
 	}
 	Vector<String> ids;
-	Maps(r.Site().data_root).List(ids);
+	AtlasListMapKeys(r.Site().data_root, ids);
 	Vector<String> visible_ids;
 	for(const String& id : ids)
 		if(AtlasPolicyStatus(r, "maps", id) == 0)
@@ -1257,36 +1279,6 @@ static void CreateMap(WebRequest& r)
 	r.Redirect(r.Site().Url("atlas/" + key));
 }
 
-// POST atlas/import: the project's editors and admins import its seed once, then land on its map. The permission
-// is checked before the project is looked up, so a viewer who may not edit learns nothing about other names.
-static void ImportProject(WebRequest& r)
-{
-	if(!RequireLogin(r))
-		return;
-	String name = r.Param("project");
-	if(!AtlasCanEditFamily(r, name)) {
-		Refuse(r, 403, "importing needs the admin role, or to be an editor of this project");
-		return;
-	}
-	Vector<AtlasProject> all;
-	String err;
-	if(!AtlasLoadProjects(r.Site().data_root, all, err)) {
-		Refuse(r, 500, err);
-		return;
-	}
-	int i = AtlasFindProject(all, name);
-	if(i < 0) {
-		Refuse(r, 404, "no project named " + name);
-		return;
-	}
-	AtlasImportResult res = AtlasImportProject(r.Site().data_root, all[i]);
-	if(!res.Ok()) {
-		Refuse(r, res.status, res.error);
-		return;
-	}
-	r.Redirect(r.Site().Url("atlas/" + res.key));
-}
-
 // The canvas's drag-to-move: a JSON answer, because the page does not reload.
 static void MoveElement(WebRequest& r)
 {
@@ -1339,7 +1331,6 @@ void InstallAtlasSite(EngineSite& site)
 	rt.Add("", MapList); // the root is the public map list (Atlas reads are public; edits remain gated)
 	rt.Add("atlas", MapList);
 	rt.Add("POST", "atlas/create", CreateMap);
-	rt.Add("POST", "atlas/import", ImportProject);
 	rt.Add("atlas/*", MapView);
 	rt.Add("atlas/*/element/*", ElementView);
 	rt.Add("POST", "atlas/*/element/move", MoveElement);

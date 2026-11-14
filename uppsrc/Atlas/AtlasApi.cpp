@@ -1138,8 +1138,8 @@ static void RoadModify(WebRequest& r)
 // Routes and SiteCli commands. Every command takes the family first ("map").
 // ---------------------------------------------------------------------------
 
-// Map documents for the import tools (skylarkctl and BrownBear). Creating and seeding are admin only; a registered
-// project's import is also open to that project's editors. Rules live in AtlasImport.cpp.
+// Map documents for the tools (skylarkctl). Creating and seeding are admin only. Projects have no import: their
+// records live in the repository (see AtlasImport.h).
 static void MapCreate(WebRequest& r)
 {
 	if(!ApiAuth(r, true))
@@ -1183,40 +1183,6 @@ static void MapSeed(WebRequest& r)
 	r.Json(out);
 }
 
-// Imports a registered project's seed file (projects.json in the data root) as its family.
-static void ProjectImport(WebRequest& r)
-{
-	String name = P(r, "project");
-	if(!ApiAuthFamily(r, name))
-		return;
-	Vector<AtlasProject> all;
-	String err;
-	if(!AtlasLoadProjects(r.Site().data_root, all, err)) {
-		ApiFail(r, 500, err);
-		return;
-	}
-	int i = AtlasFindProject(all, name);
-	if(i < 0) {
-		ApiFail(r, 404, "no project named " + name);
-		return;
-	}
-	const AtlasProject& p = all[i];
-	AtlasImportResult res = AtlasImportProject(r.Site().data_root, p);
-	if(!res.Ok()) {
-		ApiFail(r, res.status, res.error);
-		return;
-	}
-	ValueMap out;
-	out.Add("ok", true);
-	out.Add("project", p.name);
-	out.Add("key", res.key);
-	out.Add("revision", res.revision);
-	out.Add("level", p.level);
-	out.Add("elements", res.elements);
-	out.Add("roads", res.roads);
-	r.Json(out);
-}
-
 void InstallAtlasApi(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
@@ -1224,7 +1190,6 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/init", VersionsInit);
 	rt.Add("POST", "api/atlas/create", MapCreate);
 	rt.Add("POST", "api/atlas/seed", MapSeed);
-	rt.Add("POST", "api/atlas/project/import", ProjectImport);
 	rt.Add("POST", "api/atlas/*/versions/insert", VersionsInsert);
 	rt.Add("POST", "api/atlas/*/versions/rename", VersionsRename);
 	rt.Add("POST", "api/atlas/*/versions/delete", VersionsDelete);
@@ -1264,8 +1229,6 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-map-create", "POST", "api/atlas/create", write,
 	        "json", "Create an empty map document at a version (admin); level sets its visibility before any content",
 	        { "map:string:required", "version:string:required", "title:string", "width:int", "height:int", "level:string" }));
-	cm.Add(site.id, site.title, HttpCommand("atlas-project-import", "POST", "api/atlas/project/import", write,
-	        "json", "Import a registered project's seed as its family (admin, or the project's editors)", { "project:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-map-seed", "POST", "api/atlas/seed", write,
 	        "json", "Fill an empty map document with a seed (admin)",
 	        { "map:string:required", "version:string:required", "seed:text:required" }));

@@ -249,11 +249,10 @@ static void SeedChecks()
 	      "a seed refuses a map that already has elements and leaves it untouched");
 }
 
-static String ProjectJson(const char *name, const char *repo, const char *seed, const char *version, const char *level,
-                          const char *editors)
+static String ProjectJson(const char *name, const char *repo, const char *store, const char *level, const char *editors)
 {
-	return String("{\"projects\": [{\"name\": \"") + name + "\", \"repo\": \"" + repo + "\", \"seed\": \"" + seed
-	     + "\", \"version\": \"" + version + "\", \"level\": \"" + level + "\", \"editors\": [" + editors + "]}]}";
+	return String("{\"projects\": [{\"name\": \"") + name + "\", \"repo\": \"" + repo + "\", \"store\": \"" + store
+	     + "\", \"level\": \"" + level + "\", \"editors\": [" + editors + "]}]}";
 }
 
 static void ProjectChecks(const String& scratch)
@@ -266,151 +265,70 @@ static void ProjectChecks(const String& scratch)
 	Check(AtlasLoadProjects(AppendFileName(scratch, "no-projects-file"), all, err) && all.IsEmpty(),
 	      "a data root without projects.json has no projects");
 
-	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "atlas/pkr/goal-map.seed", "v1.0.0", "private", "\"Alice\", \"bob\""));
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "atlas/pkr", "private", "\"Alice\", \"bob\""));
 	bool loaded = AtlasLoadProjects(root, all, err);
-	Check(loaded && all.GetCount() == 1 && all[0].seed == "atlas/pkr/goal-map.seed" && all[0].level == "private"
+	Check(loaded && all.GetCount() == 1 && all[0].store == "atlas/pkr" && all[0].level == "private"
 	      && all[0].editors.GetCount() == 2 && all[0].editors[0] == "alice",
-	      "a project loads with its seed, and its editors in lower case");
+	      "a project loads with its store, and its editors in lower case");
 	Check(AtlasProjectEditor(root, "pkr", "ALICE") && !AtlasProjectEditor(root, "pkr", "carol")
 	      && !AtlasProjectEditor(root, "other", "alice") && !AtlasProjectEditor(root, "pkr", ""),
 	      "an editor is matched without case, and only for their own project");
 
-	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "../secrets.seed", "v1.0.0", "private", ""));
-	Check(!AtlasLoadProjects(root, all, err) && err.Find("seed") >= 0, "a seed outside the repository is refused");
-	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "/etc/passwd", "v1.0.0", "private", ""));
-	Check(!AtlasLoadProjects(root, all, err) && err.Find("seed") >= 0, "an absolute seed path is refused");
-	SaveFile(path, ProjectJson("pkr", "relative/brownbear", "a.seed", "v1.0.0", "private", ""));
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "", "private", ""));
+	Check(AtlasLoadProjects(root, all, err) && all.GetCount() == 1 && all[0].store.IsEmpty(),
+	      "a project without a store is listed, and has no records");
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "../secrets", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("store") >= 0, "a store outside the repository is refused");
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "/etc", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("store") >= 0, "an absolute store path is refused");
+	SaveFile(path, ProjectJson("pkr", "relative/brownbear", "atlas/pkr", "private", ""));
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("repo") >= 0, "a repository path must be absolute");
-	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "a.seed", "1.0", "private", ""));
-	Check(!AtlasLoadProjects(root, all, err) && err.Find("version") >= 0, "a project version must read v<a.b.c>");
-	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "a.seed", "v1.0.0", "shared", ""));
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "atlas/pkr", "shared", ""));
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("level") >= 0, "a project level must be a known visibility");
 	SaveFile(path, "[1, 2]");
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("not a JSON object") >= 0, "a projects file must be a JSON object");
 }
 
-// Roadmap format 2: a small family with rules, contracts and events. A good one imports; each defect is refused by the
-// replay and leaves no family and no map behind.
-static String RmEvent(int n, const char *version, const char *type, const char *element, const char *more = "")
+// A project's records are read and written in its repository's store, not in the data root, so the repository is the
+// source of truth and nothing is imported.
+static void ProjectStoreChecks(const String& scratch)
 {
-	return Format("{\"id\":\"ev-%d\",\"at\":\"2026-11-01T00:%02d:00Z\",\"version\":\"%s\",\"type\":\"%s\",\"element\":\"%s\"%s}",
-	              n, n, version, type, element, more);
-}
-
-// One element's events in one version: created, planned, implementation research, the action's note, implementation,
-// trials, merge.
-static String RmLadder(int& n, const char *version, const char *element, const char *action)
-{
-	String out;
-	out << RmEvent(n++, version, "created", element, Format(",\"name\":\"%s\"", element));
-	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"planned\"");
-	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"implementation_research\"");
-	out << "," << RmEvent(n++, version, "note", element, Format(",\"action\":\"%s\",\"text\":\"done\"", action));
-	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"implementation\"");
-	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"trials\"");
-	out << "," << RmEvent(n++, version, "stage", element, ",\"stage\":\"merge_to_master\"");
-	return out;
-}
-
-// Base builds on CFR and makes artifact x; Next needs x; Top needs Next. Version 0.0.2 requires artifact x. Each
-// option breaks the model in one place.
-static String RmRoadmap(const char *base_effects, const char *next_requires, bool top_first = false,
-                        const char *head = "1.0.0", const char *top_element = "Top")
-{
-	int n = 1;
-	String events;
-	events << RmLadder(n, "0.0.1", "Base", "Base");
-	if(top_first) {
-		events << "," << RmLadder(n, "0.0.2", top_element, top_element);
-		events << "," << RmLadder(n, "0.0.2", "Next", "Next");
-	}
-	else {
-		events << "," << RmLadder(n, "0.0.2", "Next", "Next");
-		events << "," << RmLadder(n, "0.0.2", top_element, top_element);
-	}
-	String t;
-	t << "{\"format\":2,"
-	  << "\"versions\":[{\"label\":\"0.0.1\",\"requires\":[]},{\"label\":\"0.0.2\",\"requires\":[\"artifact:x\"]},"
-	  << "{\"label\":\"" << head << "\",\"requires\":[\"done:Base\",\"done:Next\",\"done:Top\"]}],"
-	  << "\"rules\":{\"initial\":[\"built:CFR\"],"
-	  << "\"atoms\":["
-	  << "{\"name\":\"built:CFR\",\"text\":\"package\",\"gate\":true},"
-	  << "{\"name\":\"artifact:x\",\"text\":\"x\",\"gate\":true},"
-	  << "{\"name\":\"done:Base\",\"text\":\"\",\"gate\":true},{\"name\":\"done:Next\",\"text\":\"\",\"gate\":true},"
-	  << "{\"name\":\"done:Top\",\"text\":\"\",\"gate\":true}],"
-	  << "\"actions\":["
-	  << "{\"name\":\"Base\",\"text\":\"\",\"requires\":[\"built:CFR\"],\"effects\":[" << base_effects << "]},"
-	  << "{\"name\":\"Next\",\"text\":\"\",\"requires\":[" << next_requires << "],\"effects\":[\"done:Next\"]},"
-	  << "{\"name\":\"Top\",\"text\":\"\",\"requires\":[\"done:Next\"],\"effects\":[\"done:Top\"]}],"
-	  << "\"constraints\":[{\"id\":\"needs:Next:Base\",\"text\":\"\",\"when\":[\"stage:Next:implementation\"],"
-	  << "\"must\":[\"done:Base\"],\"from_vid\":\"\",\"to_vid\":\"\"}]},"
-	  << "\"events\":[" << events << "]}";
-	return t;
-}
-
-// Writes the seed and the roadmap for one case, then imports the project into the data root under the case's name.
-static AtlasImportResult RmImport(const String& scratch, const char *name, const String& roadmap_text)
-{
-	String repo = AppendFileName(scratch, Format("rm-repo-%s", name));
-	String data = AppendFileName(scratch, "roadmap-data");
-	RealizeDirectory(AppendFileName(repo, "atlas"));
+	String data = AppendFileName(scratch, "routing-data");
+	String repo = AppendFileName(scratch, "routing-repo");
 	RealizeDirectory(data);
-	SaveFile(AppendFileName(repo, "atlas/map.seed"),
-	         "Base | place | planned | first\nNext | place | planned | second\nTop | place | planned | third\n");
-	SaveFile(AppendFileName(repo, "atlas/roadmap.json"), roadmap_text);
-	AtlasProject p;
-	p.name = name;
-	p.repo = repo;
-	p.seed = "atlas/map.seed";
-	p.roadmap = "atlas/roadmap.json";
-	p.version = "v1.0.0";
-	p.title = name;
-	p.level = "private";
-	return AtlasImportProject(data, p);
-}
+	RealizeDirectory(repo);
+	SaveFile(AppendFileName(data, "projects.json"), ProjectJson("stored", repo, "atlas/stored", "private", "\"ed\""));
+	String store = AppendFileName(repo, "atlas/stored");
+	Check(AtlasStoreRoot(data, "stored") == store, "a project's family is stored in its repository's store");
+	Check(AtlasStoreRoot(data, "unregistered") == data, "a family without a project is stored in the data root");
+	Check(AtlasFamilyOfKey("stored-v1.0.0") == "stored" && AtlasFamilyOfKey("my-map-v0.0.2") == "my-map",
+	      "a map key names its family");
 
-// True when a refused import left neither a family nor its head map behind.
-static bool RmNothingStored(const String& scratch, const char *name)
-{
-	String data = AppendFileName(scratch, "roadmap-data");
-	AtlasFamily f;
 	AtlasMap m;
+	m.map = "stored";
+	m.version = "v1.0.0";
+	AtlasImportResult made = AtlasCreateMap(data, m, "private");
+	Check(made.Ok() && FileExists(AppendFileName(store, "data/maps/stored-v1.0.0.json"))
+	      && !FileExists(AppendFileName(data, "data/maps/stored-v1.0.0.json")),
+	      "a map of a project is written to its repository's store, not to the data root");
+
+	AtlasFamily f;
 	String rev, err;
-	return !AtlasLoadFamily(data, name, f, rev, err) && !AtlasLoadMap(data, AtlasDocKey(name, "v1.0.0"), m, rev, err);
-}
+	Check(AtlasCreateFamily(data, "stored", f, rev, err) && FileExists(AppendFileName(store, "data/families/stored.json"))
+	      && !FileExists(AppendFileName(data, "data/families/stored.json")),
+	      "a family of a project is written to its repository's store");
 
-static void RmRefused(const String& scratch, const char *name, const String& text, const char *fragment)
-{
-	AtlasImportResult r = RmImport(scratch, name, text);
-	Check(!r.Ok() && r.error.Find(fragment) >= 0 && RmNothingStored(scratch, name),
-	      Format("a roadmap with a defect (%s) is refused with %s and stores nothing", name, fragment));
-}
-
-static void RoadmapChecks(const String& scratch)
-{
-	const char *ok_base = "\"done:Base\",\"artifact:x\"";
-	AtlasImportResult good = RmImport(scratch, "rm-good", RmRoadmap(ok_base, "\"artifact:x\""));
-	AtlasFamily fam;
 	AtlasRules rules;
-	String rev, err, data = AppendFileName(scratch, "roadmap-data");
-	Vector<AtlasEvent> evs;
-	AtlasLoadFamily(data, "rm-good", fam, rev, err);
-	AtlasLoadRules(data, "rm-good", rules, rev, err);
-	AtlasLoadEvents(data, "rm-good", evs, err);
-	Check(good.Ok() && fam.versions.GetCount() == 3 && AtlasVersionLabel(fam.versions[1].code) == "0.0.2",
-	      "a format 2 roadmap imports its versions in order");
-	Check(good.Ok() && fam.versions[1].requires.GetCount() == 1 && fam.versions[1].requires[0] == "artifact:x",
-	      "a version keeps its contract");
-	Check(good.Ok() && rules.atoms.GetCount() == 5 && rules.actions.GetCount() == 3 && rules.constraints.GetCount() == 1,
-	      "the rules are stored with the family: atoms, actions and constraints");
-	Check(good.Ok() && evs.GetCount() == 3 * 7, "each element writes its created, stage and note events");
+	Check(AtlasSaveRules(data, "stored", rules, String(), rev, err) && FileExists(AppendFileName(store, "data/rules/stored.json")),
+	      "the rules of a project are written to its repository's store");
 
-	// Each defect is refused with its message, and nothing is stored.
-	RmRefused(scratch, "rm-no-producer", RmRoadmap("\"built:CFR\"", "\"artifact:x\""), "needs artifact:x on entry");
-	RmRefused(scratch, "rm-out-of-order", RmRoadmap(ok_base, "\"artifact:x\"", true), "done:Next");
-	RmRefused(scratch, "rm-undeclared", RmRoadmap(ok_base, "\"artifact:x\",\"built:Missing\""), "needs built:Missing first");
-	RmRefused(scratch, "rm-wrong-head", RmRoadmap(ok_base, "\"artifact:x\"", false, "0.0.2"), "versions must ascend");
-	RmRefused(scratch, "rm-unknown-element", RmRoadmap(ok_base, "\"artifact:x\"", false, "1.0.0", "Missing"), "Missing");
+	Vector<String> keys;
+	AtlasListMapKeys(data, keys);
+	int count = 0;
+	for(const String& k : keys)
+		if(k == "stored-v1.0.0")
+			count++;
+	Check(count == 1, "the map list names the project's map once, from its store");
 }
 
 static void StoreChecks(const String& scratch)
@@ -1032,7 +950,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	MarkdownChecks();
 	WhatsNextChecks();
 	ProjectChecks(scratch_dir);
-	RoadmapChecks(scratch_dir);
+	ProjectStoreChecks(scratch_dir);
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }
