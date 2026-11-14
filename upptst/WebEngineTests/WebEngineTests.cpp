@@ -3856,6 +3856,8 @@ CONSOLE_APP_MAIN
 		      rmap.body.Find("id=\"wf-btn-theme\"") >= 0 && rmap.body.Find("id=\"wf-btn-density\"") >= 0 &&
 		      rmap.body.Find("data-theme=\"light\"") < 0,
 		      "the map page has the maximize, contents, fit and 1:1 controls and the shared theme buttons");
+		Check(rmap.body.Find("id=\"atlas-tight\"") >= 0 && rmap.body.Find("id=\"atlas-edges\"") >= 0,
+		      "the map page has the remove-empty-space and edge-to-edge line options");
 
 		// Seed import: a hand-transcribed containment list plus one edge.
 		VectorMap<String, String> sf;

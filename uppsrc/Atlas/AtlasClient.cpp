@@ -85,6 +85,8 @@ String AtlasScript()
   var planeLabel = document.getElementById('atlas-plane');
   var upButton = document.getElementById('atlas-up');
   var contentsBox = document.getElementById('atlas-contents');
+  var tightBox = document.getElementById('atlas-tight');
+  var edgesBox = document.getElementById('atlas-edges');
   var zoomLabel = document.getElementById('atlas-zoom');
   var maximizeButton = document.getElementById('atlas-maximize');
   var closeButton = document.getElementById('atlas-close');
@@ -98,7 +100,7 @@ String AtlasScript()
   var revision = data.revision;
   // manual: the user zoomed or panned, so draws keep the view; otherwise the view fits the content.
   var view = { plane: '', scale: 1, tx: 24, ty: 24, manual: false, root: null, tiles: {},
-               contentW: 1, contentH: 1, hover: '' };
+               contentW: 1, contentH: 1, hover: '', tight: false, edges: false, packed: {} };
   var drag = null;
 
   function find(id) {
@@ -140,17 +142,6 @@ String AtlasScript()
     var cur = find(id);
     while (cur && cur.parent !== view.plane) { cur = cur.parent ? find(cur.parent) : null; }
     return cur;
-  }
-
-  // Position of an element relative to the current plane, summing the stored offsets of its parents.
-  function absPos(e) {
-    var x = e.x, y = e.y, p = e.parent ? find(e.parent) : null;
-    while (p && p.id !== view.plane) {
-      x += p.x;
-      y += p.y;
-      p = p.parent ? find(p.parent) : null;
-    }
-    return { x: x, y: y, w: e.w, h: e.h };
   }
 
   function readHash() {
@@ -242,56 +233,148 @@ String AtlasScript()
     return Math.max(11, Math.min(28, e.h * 0.16));
   }
 
+  // Rect of an element for the current view: the stored rect, or the packed rect when empty space is removed.
+  function rectOf(e) {
+    var p = view.tight ? view.packed[e.id] : null;
+    return p ? p : { x: e.x, y: e.y, w: e.w, h: e.h };
+  }
+
+  // Position of an element relative to the current plane, summing the offsets of its parents.
+  function absPos(e) {
+    var r = rectOf(e), x = r.x, y = r.y, p = e.parent ? find(e.parent) : null;
+    while (p && p.id !== view.plane) {
+      var q = rectOf(p);
+      x += q.x;
+      y += q.y;
+      p = p.parent ? find(p.parent) : null;
+    }
+    return { x: x, y: y, w: r.w, h: r.h };
+  }
+
+  // Empty space removal: each block is sized to its children, and siblings are packed in rows.
+  var PACK_GAP = 14, PACK_TITLE = 34;
+
+  function packKids(kids, origin) {
+    var sizes = kids.map(function (c) { return sizeOf(c); });
+    var maxW = 0, total = 0;
+    sizes.forEach(function (s) { maxW = Math.max(maxW, s.w); total += s.w * s.h; });
+    var target = Math.max(maxW, Math.sqrt(total) * 1.3);
+    var x = 0, y = 0, rowH = 0, right = 0;
+    kids.forEach(function (c, i) {
+      var s = sizes[i];
+      if (x > 0 && x + s.w > target) { x = 0; y += rowH + PACK_GAP; rowH = 0; }
+      view.packed[c.id] = { x: origin.x + x, y: origin.y + y, w: s.w, h: s.h };
+      x += s.w + PACK_GAP;
+      rowH = Math.max(rowH, s.h);
+      right = Math.max(right, x - PACK_GAP);
+    });
+    return { w: origin.x + right, h: origin.y + y + rowH };
+  }
+
+  function sizeOf(e) {
+    var kids = childrenOf(e.id);
+    if (!kids.length) { return { w: e.w, h: e.h }; }
+    var inner = packKids(kids, { x: PACK_GAP, y: PACK_TITLE });
+    return { w: Math.max(inner.w + PACK_GAP, e.name.length * 9 + 28), h: inner.h + PACK_GAP };
+  }
+
   function drawTree(parentG, e) {
-    var g = node('g', { 'data-id': e.id, transform: 'translate(' + e.x + ',' + e.y + ')' });
+    var r = rectOf(e);
+    var g = node('g', { 'data-id': e.id, transform: 'translate(' + r.x + ',' + r.y + ')' });
     if (e.kind === 'sea') {
-      g.appendChild(node('rect', { x: 0, y: 0, width: e.w, height: e.h, rx: 24, 'class': 'sea' }));
+      g.appendChild(node('rect', { x: 0, y: 0, width: r.w, height: r.h, rx: 24, 'class': 'sea' }));
     } else {
       g.appendChild(node('rect', {
-        x: 0, y: 0, width: e.w, height: e.h, rx: 12,
+        x: 0, y: 0, width: r.w, height: r.h, rx: 12,
         'class': 'el kind-' + e.kind + ' status-' + e.status
       }));
     }
-    var fs = titleFont(e);
+    var fs = titleFont(r);
     g.appendChild(node('text', { x: 12, y: fs + 6, 'class': 'label', style: 'font-size:' + fs + 'px' }, e.name));
     var inside = childCount(e.id);
-    if (inside && e.h >= 60) {
-      g.appendChild(node('text', { x: 12, y: e.h - 10, 'class': 'badge' }, inside + ' inside'));
+    if (inside && r.h >= 60) {
+      g.appendChild(node('text', { x: 12, y: r.h - 10, 'class': 'badge' }, inside + ' inside'));
     }
     childrenOf(e.id).forEach(function (c) { drawTree(g, c); });
     parentG.appendChild(g);
   }
 
-  // Road end on the drawn map: the block itself in contents mode, the tile holding it in overview.
-  function endpoint(id, contents) {
+  // The drawn box of a road end: the block itself in contents mode, the tile holding it in the overview.
+  function roadBox(id, contents) {
     var e = find(id);
     if (!e) { return null; }
     if (contents) {
       if (!inPlane(id)) { return null; }
       var p = absPos(e);
-      return { id: e.id, cx: p.x + p.w / 2, cy: p.y + p.h / 2 };
+      return { id: e.id, x: p.x, y: p.y, w: p.w, h: p.h };
     }
     var top = inPlane(id);
     var t = top ? view.tiles[top.id] : null;
-    return t ? { id: top.id, cx: t.x + t.w / 2, cy: t.y + t.h / 2 } : null;
+    return t ? { id: top.id, x: t.x, y: t.y, w: t.w, h: t.h } : null;
+  }
+
+  // Side of a box that faces a point (edge mode), by the direction from the box centre.
+  function sideOf(box, ox, oy) {
+    var dx = ox - (box.x + box.w / 2), dy = oy - (box.y + box.h / 2);
+    if (Math.abs(dx) * box.h >= Math.abs(dy) * box.w) { return dx >= 0 ? 'right' : 'left'; }
+    return dy >= 0 ? 'bottom' : 'top';
+  }
+
+  // Road ends: each block side (or the centre, when edge mode is off) spreads its ends, so no two lines share one point.
+  function roadEnds(list) {
+    var groups = {};
+    list.forEach(function (ro, i) {
+      [['a', ro.a, ro.b], ['b', ro.b, ro.a]].forEach(function (part) {
+        var box = part[1], other = part[2];
+        var ox = other.x + other.w / 2, oy = other.y + other.h / 2;
+        var side = view.edges ? sideOf(box, ox, oy) : 'centre';
+        var key = box.id + '|' + side;
+        (groups[key] = groups[key] || []).push({ i: i, which: part[0], box: box, side: side, ox: ox, oy: oy });
+      });
+    });
+    var points = {};
+    Object.keys(groups).forEach(function (key) {
+      var g = groups[key];
+      var vertical = g[0].side === 'top' || g[0].side === 'bottom';
+      g.sort(function (p, q) { return vertical || g[0].side === 'centre' ? p.ox - q.ox : p.oy - q.oy; });
+      var n = g.length;
+      g.forEach(function (p, k) {
+        var b = p.box, t = (k + 1) / (n + 1), pt;
+        if (p.side === 'top') { pt = { x: b.x + t * b.w, y: b.y }; }
+        else if (p.side === 'bottom') { pt = { x: b.x + t * b.w, y: b.y + b.h }; }
+        else if (p.side === 'left') { pt = { x: b.x, y: b.y + t * b.h }; }
+        else if (p.side === 'right') { pt = { x: b.x + b.w, y: b.y + t * b.h }; }
+        else {
+          var step = Math.min(16, (b.w * 0.8) / n);
+          pt = { x: b.x + b.w / 2 + (k - (n - 1) / 2) * step, y: b.y + b.h / 2 };
+        }
+        points[p.i + p.which] = pt;
+      });
+    });
+    return points;
   }
 
   function drawRoads(root, contents) {
-    var seen = {};
+    var list = [], seen = {};
     map.roads.forEach(function (r) {
-      var a = endpoint(r.from, contents);
-      var b = endpoint(r.to, contents);
+      var a = roadBox(r.from, contents);
+      var b = roadBox(r.to, contents);
       if (!a || !b || a.id === b.id) { return; }
       var key = a.id + '>' + b.id;
       if (seen[key]) { return; }
       seen[key] = true;
+      list.push({ r: r, a: a, b: b });
+    });
+    var points = roadEnds(list);
+    list.forEach(function (ro, i) {
+      var p = points[i + 'a'], q = points[i + 'b'];
       root.appendChild(node('path', {
-        d: 'M' + a.cx + ' ' + a.cy + ' L' + b.cx + ' ' + b.cy,
-        'class': 'road kind-' + r.kind,
-        'data-a': a.id, 'data-b': b.id
+        d: 'M' + p.x + ' ' + p.y + ' L' + q.x + ' ' + q.y,
+        'class': 'road kind-' + ro.r.kind,
+        'data-a': ro.a.id, 'data-b': ro.b.id
       }));
-      if (r.label) {
-        root.appendChild(node('text', { x: (a.cx + b.cx) / 2, y: (a.cy + b.cy) / 2 - 4, 'class': 'road-label' }, r.label));
+      if (ro.r.label) {
+        root.appendChild(node('text', { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 4, 'class': 'road-label' }, ro.r.label));
       }
     });
   }
@@ -325,19 +408,28 @@ String AtlasScript()
     if (upButton) { upButton.disabled = !view.plane; }
 
     var contents = !!(contentsBox && contentsBox.checked);
+    view.tight = contents && !!(tightBox && tightBox.checked);
+    view.edges = !!(edgesBox && edgesBox.checked);
     var root = node('g', {});
     svg.appendChild(root);
     view.root = root;
     var kids = childrenOf(view.plane);
     view.tiles = {};
+    view.packed = {};
     // The fit uses the drawn content only. The stored world size can be smaller than the layout.
     if (contents) {
-      view.contentW = 1;
-      view.contentH = 1;
-      kids.forEach(function (e) {
-        view.contentW = Math.max(view.contentW, e.x + e.w);
-        view.contentH = Math.max(view.contentH, e.y + e.h);
-      });
+      if (view.tight) {
+        var packed = packKids(kids, { x: PACK_GAP, y: PACK_GAP });
+        view.contentW = Math.max(packed.w + PACK_GAP, 1);
+        view.contentH = Math.max(packed.h + PACK_GAP, 1);
+      } else {
+        view.contentW = 1;
+        view.contentH = 1;
+        kids.forEach(function (e) {
+          view.contentW = Math.max(view.contentW, e.x + e.w);
+          view.contentH = Math.max(view.contentH, e.y + e.h);
+        });
+      }
       root.appendChild(node('rect', { x: 0, y: 0, width: view.contentW, height: view.contentH, 'class': 'plane' }));
       kids.forEach(function (e) {
         if (e.kind === 'sea') { drawTree(root, e); }
@@ -410,7 +502,7 @@ String AtlasScript()
     var id = hitId(ev.target);
     var e = id ? find(id) : null;
     // Only the stored layout of a contents view can be edited; overview tiles pan the map.
-    var moves = !!(e && contentsBox && contentsBox.checked && editable);
+    var moves = !!(e && contentsBox && contentsBox.checked && !(tightBox && tightBox.checked) && editable);
     drag = {
       id: id, moves: moves, startX: ev.clientX, startY: ev.clientY,
       tx0: view.tx, ty0: view.ty, origX: e ? e.x : 0, origY: e ? e.y : 0, moved: false
@@ -478,9 +570,9 @@ String AtlasScript()
   onClick('atlas-actual', actualSize);
   onClick('atlas-maximize', function () { setMaximized(true); });
   onClick('atlas-close', function () { setMaximized(false); });
-  if (contentsBox) {
-    contentsBox.addEventListener('change', function () { draw(); });
-  }
+  [contentsBox, tightBox, edgesBox].forEach(function (box) {
+    if (box) { box.addEventListener('change', function () { draw(); }); }
+  });
 
   document.addEventListener('keydown', function (ev) {
     var tag = ev.target && ev.target.tagName ? ev.target.tagName : '';

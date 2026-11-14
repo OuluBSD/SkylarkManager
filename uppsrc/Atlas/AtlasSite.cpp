@@ -360,6 +360,8 @@ static void MapView(WebRequest& r)
 	  << "<div id=\"atlas-stage\">"
 	  << "<div class=\"toolbar\"><span id=\"atlas-plane\"></span> <button type=\"button\" id=\"atlas-up\">Up</button> "
 	  << "<label><input type=\"checkbox\" id=\"atlas-contents\"> Show contents</label>"
+	  << "<label><input type=\"checkbox\" id=\"atlas-tight\"> Remove empty space</label>"
+	  << "<label><input type=\"checkbox\" id=\"atlas-edges\"> Edge-to-edge lines</label>"
 	  << "<button type=\"button\" id=\"atlas-zoom-out\" title=\"Zoom out (-)\">&minus;</button>"
 	  << "<span id=\"atlas-zoom\">100%</span>"
 	  << "<button type=\"button\" id=\"atlas-zoom-in\" title=\"Zoom in (+)\">+</button>"
