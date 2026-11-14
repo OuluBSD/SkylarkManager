@@ -353,6 +353,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 		Cerr() << "FAILED: YouTubePlanner stub tests\n";
 		return false;
 	}
+	if(!SystemAuthSelfTests(AppendFileName(fixture.path, "system-auth"))) {
+		Cerr() << "FAILED: portal bridge host-account and return-port tests\n";
+		return false;
+	}
 	if(!PortalShellSelfTests()) {
 		Cerr() << "FAILED: portal shell (left pane, user row, link host) tests\n";
 		return false;

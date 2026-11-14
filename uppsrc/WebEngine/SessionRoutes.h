@@ -16,6 +16,7 @@ class WebRequest;
 bool SsoReturnAllowed(WebRequest& r, const String& url);
 // The MetaAccount central session cookie name, and the username behind a central session id (task 050).
 String SsoCentralCookieName();
+bool SsoPortAllowed(int port);
 bool SsoCentralUsername(const String& session_id, String& username);
 
 // Shared MetaAccount sign-in (task 039): signs a guest in from a live central session

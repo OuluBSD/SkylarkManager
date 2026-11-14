@@ -184,6 +184,17 @@ static String SsoSiteUrl(WebRequest& r, const String& site_id, const String& pat
 // A MetaAccount return target is accepted only when it is an http URL on this request's host, on the
 // port of a composed site, with a same-site path. Anything else (another host, an unlisted port, a
 // scheme, or a path that fails SsoSafeNext) is refused, so the caller falls back to "/".
+// A MetaAccount return may go to a composed site port or to the stock host port (task 050), and nowhere else.
+bool SsoPortAllowed(int port)
+{
+	if(port == TheWebEngine().HostPort())
+		return true;
+	for(const EngineSiteListing& site : TheWebEngine().ListSites())
+		if(site.port == port)
+			return true;
+	return false;
+}
+
 bool SsoReturnAllowed(WebRequest& r, const String& url)
 {
 	String host = SsoRequestHost(r);
@@ -197,12 +208,7 @@ bool SsoReturnAllowed(WebRequest& r, const String& url)
 	if(port_s.IsEmpty() || port_s.GetCount() > 5)
 		return false;
 	int port = ScanInt(port_s);
-	bool composed = false;
-	Vector<EngineSiteListing> sites = TheWebEngine().ListSites();
-	for(const EngineSiteListing& s : sites)
-		if(s.port == port)
-			composed = true;
-	if(!composed && port != TheWebEngine().HostPort())
+	if(!SsoPortAllowed(port))
 		return false;
 	String path = rest.Mid(i);
 	return path.IsEmpty() || SsoSafeNext(path) == path;

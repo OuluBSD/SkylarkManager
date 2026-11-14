@@ -138,7 +138,7 @@ String SystemAuthService::ExtractCookie(const Http& http, const char* name)
 }
 
 // A host account is a credential entry in auth.json. The bridge checks only that the name exists.
-static bool SystemAccountKnown(const String& username)
+bool SystemAuthService::HasSiteAccount(const String& username)
 {
 	String conf_file = AppendFileName(ConfiguredSiteDir(), "auth.json");
 	if(username.IsEmpty() || !FileExists(conf_file) || GetFileLength(conf_file) > 64 * 1024)
@@ -171,12 +171,18 @@ UserSession SystemAuthService::BridgeMetaSession(Http& http, bool ignore_suppres
 		return none;
 	if(central_user)
 		*central_user = username;
-	if(!SystemAccountKnown(username))
-		return none;
-	UserSession sess = CreateSession(username);
+	UserSession sess = AdoptHostAccount(username);
 	if(sess.is_authenticated)
 		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, false, true);
 	return sess;
+}
+
+// A host session for an existing host account. It never creates an account.
+UserSession SystemAuthService::AdoptHostAccount(const String& username)
+{
+	if(!HasSiteAccount(username))
+		return UserSession();
+	return CreateSession(username);
 }
 
 bool SystemAuthService::VerifySystemPassword(const String& username, const String& password)
@@ -503,6 +509,46 @@ SKYLARK(ApiAuthLogin, "api/auth/login:POST_RAW")
 	}
 	http.Response(401, "Unauthorized");
 	http.ContentType("application/json") << "{\"error\":\"invalid_credentials\"}";
+}
+
+// Self-tests for the portal bridge's pure parts (task 050): the host account lookup and adoption, which
+// never create an account, and the return-port allowance. The cookie and central-session halves run
+// only on a live request and are covered by the scratch Aria matrix.
+bool SystemAuthSelfTests(const String& scratch_dir)
+{
+	String dir = AppendFileName(scratch_dir, "bridge");
+	RealizeDirectory(dir);
+	String auth_file = AppendFileName(dir, "auth.json");
+	SaveFile(auth_file, "{\"seppo\": {\"password_hash\": \"unused\"}}");
+	String saved_dir = ConfiguredSiteDir();
+	bool saved_demo = ConfiguredDemoSite();
+	SystemAuthService::ConfigureSite(dir, false);
+
+	int checks = 0, failed = 0;
+	auto check = [&](bool ok, const char *what) {
+		checks++;
+		if(!ok) failed++;
+		Cout() << (ok ? "ok   " : "FAIL ") << what << "\n";
+	};
+
+	check(SystemAuthService::HasSiteAccount("seppo"), "a host account in auth.json is found by its username");
+	UserSession adopted = SystemAuthService::AdoptHostAccount("seppo");
+	check(adopted.is_authenticated && adopted.username == "seppo", "adopting an existing host account gives its session");
+	check(!SystemAuthService::HasSiteAccount("mallory"), "a username with no host account is not found");
+	UserSession refused = SystemAuthService::AdoptHostAccount("mallory");
+	check(!refused.is_authenticated, "adopting a username with no host account gives no session");
+	check(LoadFile(auth_file) == "{\"seppo\": {\"password_hash\": \"unused\"}}", "auth.json is unchanged: no account was created");
+	check(!SystemAuthService::HasSiteAccount(""), "an empty username is not a host account");
+
+	int saved_host = TheWebEngine().HostPort();
+	TheWebEngine().SetHostPort(8081);
+	check(SsoPortAllowed(8081), "the stock host port is an allowed MetaAccount return");
+	check(!SsoPortAllowed(9999), "a port that is neither the host nor a composed site is refused");
+	TheWebEngine().SetHostPort(saved_host);
+
+	SystemAuthService::ConfigureSite(saved_dir, saved_demo);
+	Cout() << "\nSystem auth bridge self-tests: " << (checks - failed) << "/" << checks << "\n";
+	return failed == 0;
 }
 
 END_UPP_NAMESPACE
