@@ -722,6 +722,39 @@ static void RoadmapChecks()
 	Check(!trial_warned, "an atom an action sets is declared by that action and is not reported");
 }
 
+// The demo roadmap, replayed in memory. Its findings are the ones it was written to show: 1.0.0 is not
+// reached yet (two errors, its contract and its task), and one dependency is merged after a stage that
+// needed it. Nothing else may be reported, or the demo history has drifted from the rules.
+static void DemoChecks()
+{
+	AtlasFamily f;
+	AtlasMap head;
+	AtlasRules rules;
+	Vector<AtlasEvent> events;
+	AtlasDemoModel(f, head, rules, events);
+	Vector<AtlasRoadmapMessage> out;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(head, f, rules, events, out, worlds);
+
+	int errors = 0, at_head = 0, other = 0;
+	for(const AtlasRoadmapMessage& m : out) {
+		if(m.severity == "error") {
+			errors++;
+			if(m.vid == "v6")
+				at_head++;
+		}
+		if(m.rule == "stage-order" || m.rule == "unscheduled" || m.rule == "undeclared-atom" || m.rule == "orphan")
+			other++;
+	}
+	Check(errors == 2 && at_head == 2, "the demo reports exactly the two errors that keep 1.0.0 from being reached");
+	Check(HasMessage(out, "error", "contract-gate") && HasMessage(out, "error", "contract-task"),
+	      "the demo's 1.0.0 errors are its contract gate and its task");
+	Check(HasMessage(out, "warning", "dependency-order"), "the demo shows a dependency merged after its dependant");
+	Check(other == 0, "the demo has no stage, scheduling, atom or orphan findings");
+	Check(worlds.GetCount() == 6 && HasAtom(worlds[1], "gate_camera_calibrated") && HasAtom(worlds[2], "gate_detector_trained"),
+	      "the demo's gates hold where its contracts need them");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -733,6 +766,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	EventChecks();
 	RoadmapStoreChecks(scratch_dir);
 	RoadmapChecks();
+	DemoChecks();
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }

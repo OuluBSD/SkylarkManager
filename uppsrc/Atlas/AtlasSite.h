@@ -13,6 +13,13 @@ NAMESPACE_UPP
 // site's JsonFileStore collection; every write is revision-checked.
 void InstallAtlasSite(EngineSite& site);
 
+// The Atlas page shell: navigation for the map family, breadcrumbs and the page body. section names
+// the open roadmap page: versions | timeline | rules | tasks | checks; empty for the map pages.
+void AtlasPage(WebRequest& r, const String& title, const String& body, const String& body_attrs = String(),
+               const String& family = String(), const String& section = String());
+String AtlasEsc(const String& value);
+bool AtlasFamilyReadable(WebRequest& r, const String& family);
+
 // Document key of a map version: "pkr" + "v0.0.1" -> "pkr-v0.0.1".
 String AtlasDocKey(const String& map, const String& version);
 
@@ -46,6 +53,13 @@ bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRu
 
 // The JSON API of the roadmap (AtlasApi.cpp); called by InstallAtlasSite.
 void InstallAtlasApi(EngineSite& site);
+// The roadmap pages of a family: versions, timeline, rules, tasks, checks (AtlasRoadmapPages.cpp).
+void InstallAtlasRoadmapPages(EngineSite& site);
+
+// The demo roadmap shipped with the server (AtlasDemo.cpp): written once, when its family is missing.
+void AtlasInstallDemo(const String& data_root);
+// The demo's model in memory: its family, head map, rules and events (for the self-tests).
+void AtlasDemoModel(AtlasFamily& f, AtlasMap& head, AtlasRules& rules, Vector<AtlasEvent>& events);
 
 // Self-tests: the pure model (validation, containment, seed parser and layout)
 // and a store round trip under scratch_dir. Run from ManagerSkylark --test.

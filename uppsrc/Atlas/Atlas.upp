@@ -16,4 +16,6 @@ file
 	AtlasSite.cpp,
 	AtlasApi.cpp,
 	AtlasClient.cpp,
+	AtlasRoadmapPages.cpp,
+	AtlasDemo.cpp,
 	AtlasSelfTests.cpp;

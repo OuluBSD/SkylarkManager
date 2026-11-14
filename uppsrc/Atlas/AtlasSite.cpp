@@ -282,16 +282,71 @@ static String RevisionField(const String& revision)
 	return "<input type=\"hidden\" name=\"expected_revision\" value=\"" + Esc(revision) + "\">";
 }
 
-static void Page(WebRequest& r, const String& title, const String& body, const String& body_attrs = String())
+String AtlasEsc(const String& value)
 {
-	r.Html("<!doctype html><html lang=\"en\"" + ThemeHtmlAttrs(r) + "><head><meta charset=\"utf-8\">" + ThemeHeadScript() + 
-	       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-	       "<title>" + Esc(title) + " - Atlas</title><style>" + WebsiteThemeStyles() + WebsiteDensityStyles() + "</style>"
-	       + AtlasStylesheet() + "</head>"
-	       "<body" + body_attrs + ">"
-	       "<nav class=\"atlas-nav\"><a href=\"" + Esc(r.Site().Url("atlas")) + "\">Atlas</a> " + SessionChromeHtml(r)
-	       + WebsiteThemeControlsHtml() + "</nav>"
-	       "<main><h1>" + Esc(title) + "</h1>" + body + "</main>" + WebsiteThemeControlsScript() + "</body></html>");
+	return Esc(value);
+}
+
+// The family's pages follow the content policy of the map list, as the map pages do.
+bool AtlasFamilyReadable(WebRequest& r, const String& family)
+{
+	return AtlasPolicyStatus(r, "maps", family) == 0;
+}
+
+// One Atlas page on the admin shell. family is set on the pages of one roadmap (the map family id),
+// and section marks which of its pages is open.
+void AtlasPage(WebRequest& r, const String& title, const String& body, const String& body_attrs,
+               const String& family, const String& section)
+{
+	WebsiteShell s;
+	s.title = title + " - Atlas";
+	s.brand = "Atlas";
+	s.brand_href = r.Site().Url("atlas");
+	s.html_attributes = " lang=\"en\"" + ThemeHtmlAttrs(r);
+	s.body_attributes = body_attrs;
+	s.head_script = ThemeHeadScript() + AtlasStylesheet();
+	s.topbar_html = SessionChromeHtml(r) + WebsiteThemeControlsHtml();
+
+	WebsiteShellLink maps;
+	maps.label = "Maps";
+	maps.href = r.Site().Url("atlas");
+	maps.icon = "map";
+	maps.active = family.IsEmpty() && section.IsEmpty();
+	s.nav.Add(pick(maps));
+	WebsiteShellLink crumb_maps;
+	crumb_maps.label = "Maps";
+	crumb_maps.href = maps.href;
+	s.crumbs.Add(pick(crumb_maps));
+
+	if(family.GetCount()) {
+		const char *ids[] = { "versions", "timeline", "rules", "tasks", "checks" };
+		const char *labels[] = { "Versions", "Timeline", "Rules", "Tasks", "Checks" };
+		const char *icons[] = { "list", "clock", "sliders", "check", "alert" };
+		for(int i = 0; i < 5; i++) {
+			WebsiteShellLink l;
+			l.label = labels[i];
+			l.href = r.Site().Url("atlas/roadmap/" + family + (i == 0 ? String() : String("/") + ids[i]));
+			l.icon = icons[i];
+			l.active = section == ids[i];
+			s.nav.Add(pick(l));
+		}
+		WebsiteShellLink crumb_family;
+		crumb_family.label = family;
+		crumb_family.href = r.Site().Url("atlas/roadmap/" + family);
+		s.crumbs.Add(pick(crumb_family));
+	}
+	WebsiteShellLink current;
+	current.label = title;
+	s.crumbs.Add(pick(current));
+
+	s.body = "<h1>" + Esc(title) + "</h1>" + body;
+	r.Html(RenderAdminShell(s));
+}
+
+static void Page(WebRequest& r, const String& title, const String& body, const String& body_attrs = String(),
+                 const String& family = String(), const String& section = String())
+{
+	AtlasPage(r, title, body, body_attrs, family, section);
 }
 
 static void Refuse(WebRequest& r, int code, const String& message)
@@ -492,6 +547,80 @@ static String EditPanel(WebRequest& r, const AtlasMap& m, const String& key, con
 	return String(b);
 }
 
+// The roadmap of the map's family: its version links, the checker's counts, and (with ?vid=) what
+// the map looked like at that version. Empty when the map has no version list.
+static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
+{
+	AtlasFamily f;
+	String frev, err;
+	if(!AtlasLoadFamily(r.Site().data_root, m.map, f, frev, err))
+		return String();
+	AtlasRules rules;
+	String rrev;
+	AtlasLoadRules(r.Site().data_root, m.map, rules, rrev, err);
+	Vector<AtlasEvent> events;
+	AtlasLoadEvents(r.Site().data_root, m.map, events, err);
+	Vector<AtlasRoadmapMessage> messages;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(m, f, rules, events, messages, worlds);
+	int errors = 0, warnings = 0;
+	for(const AtlasRoadmapMessage& x : messages)
+		if(x.severity == "error") errors++; else warnings++;
+
+	String at = r.Param("vid");
+	StringBuffer b;
+	b << "<section class=\"ad-panel\"><header><h2>Roadmap</h2><p>" << Esc(m.map) << " &middot; "
+	  << f.versions.GetCount() << " versions</p></header>"
+	  << "<div class=\"ad-cards\">"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << f.versions.GetCount() << "</div><div class=\"ad-card-label\">versions</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << rules.atoms.GetCount() << "</div><div class=\"ad-card-label\">rule atoms</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << events.GetCount() << "</div><div class=\"ad-card-label\">events</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << errors << "</div><div class=\"ad-card-label\">errors</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << warnings << "</div><div class=\"ad-card-label\">warnings</div></div>"
+	  << "</div><p class=\"ad-note\">Show the map at version: <a href=\"" << Esc(r.Site().Url("atlas/" + key)) << "\">head</a>";
+	for(const AtlasVersion& v : f.versions)
+		b << " &middot; <a href=\"" << Esc(r.Site().Url("atlas/" + key + "?vid=" + v.vid)) << "\">"
+		  << Esc(AtlasVersionLabel(v.code)) << "</a>";
+	b << " &middot; <a href=\"" << Esc(r.Site().Url("atlas/roadmap/" + m.map + "/checks")) << "\">checks</a></p>";
+
+	int vi = at.IsEmpty() ? -1 : f.Find(at);
+	if(vi >= 0) {
+		Vector<AtlasSubjectState> states;
+		if(AtlasStateAt(m, f, events, at, states, err)) {
+			b << "<h2>At " << Esc(AtlasVersionLabel(f.versions[vi].code)) << "</h2>"
+			  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Subject</th><th>Stage</th><th>Status</th></tr>";
+			int shown = 0;
+			for(const AtlasSubjectState& st : states) {
+				if(!st.present)
+					continue;
+				if(st.kind == "element" && !AtlasElementVisibleTo(r, f.head_key, st.id))
+					continue;
+				if(st.kind == "road" && (!AtlasElementVisibleTo(r, f.head_key, st.from) || !AtlasElementVisibleTo(r, f.head_key, st.to)))
+					continue;
+				shown++;
+				String label = st.kind == "road" ? Esc(st.from) + " &rarr; " + Esc(st.to) + (st.label.IsEmpty() ? String() : " (" + Esc(st.label) + ")")
+				                                 : st.name.IsEmpty() ? Esc(st.id) : Esc(st.name) + " (" + Esc(st.id) + ")";
+				b << "<tr><td>" << Esc(st.kind) << ": " << label << "</td><td>" << Esc(st.stage) << "</td><td>" << Esc(st.status) << "</td></tr>";
+			}
+			b << "</table></div>";
+			if(!shown)
+				b << "<p class=\"ad-empty\">Nothing was on the map at this version.</p>";
+			b << "<p>World state:";
+			int wi = vi;
+			if(wi < worlds.GetCount() && worlds[wi].GetCount())
+				for(const String& a : worlds[wi])
+					b << " <span class=\"ad-pill is-info\">" << Esc(a) << "</span>";
+			else
+				b << " <span class=\"ad-empty\">no atoms set</span>";
+			b << "</p>";
+		}
+		else
+			b << "<p class=\"err\">" << Esc(err) << "</p>";
+	}
+	b << "</section>";
+	return String(b);
+}
+
 static void MapView(WebRequest& r)
 {
 	String key = r.PathArg(0);
@@ -512,6 +641,7 @@ static void MapView(WebRequest& r)
 	FilterAtlasMap(r, key, m);
 	bool edit = CanEdit(r);
 	StringBuffer b;
+	b << RoadmapPanel(r, m, key);
 	b << "<p class=\"meta\">" << Esc(m.map) << " " << Esc(m.version) << " &middot; " << m.elements.GetCount()
 	  << " elements &middot; " << m.roads.GetCount() << " roads &middot; world " << m.world.width << " x "
 	  << m.world.height << "</p>"
@@ -543,7 +673,7 @@ static void MapView(WebRequest& r)
 	             + "\" data-base=\"" + Esc(r.Site().Url("atlas/" + key)) + "\"";
 	b << "<script type=\"application/json\" id=\"atlas-data\">" << ScriptJson(data) << "</script>"
 	  << "<script>" << AtlasScript() << "</script>";
-	Page(r, m.title, String(b), attrs);
+	Page(r, m.title, String(b), attrs, m.map, "map");
 }
 
 static void ElementView(WebRequest& r)
@@ -919,6 +1049,8 @@ void InstallAtlasSite(EngineSite& site)
 	                                        "html", "One element: containment path, roads, goal",
 	                                        { "map:string:required", "id:string:required" }));
 	InstallAtlasApi(site);
+	InstallAtlasRoadmapPages(site);
+	AtlasInstallDemo(site.data_root);
 }
 
 END_UPP_NAMESPACE
