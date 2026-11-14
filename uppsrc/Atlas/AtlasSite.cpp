@@ -731,6 +731,85 @@ static bool AtlasViewAt(WebRequest& r, const AtlasMap& head, const String& vid, 
 	return true;
 }
 
+// The playback controls of the animation: play, a version slider, the speed, and what the frame shows.
+static String PlayerHtml(int count, int start)
+{
+	return "<div class=\"toolbar atlas-player\"><button type=\"button\" id=\"atlas-play\">Play</button>"
+	       "<input type=\"range\" id=\"atlas-scrub\" min=\"0\" max=\"" + AsString(count - 1) + "\" step=\"1\" value=\""
+	       + AsString(start) + "\" aria-label=\"Version shown on the map\">"
+	       "<span id=\"atlas-frame-label\"></span>"
+	       "<label>Speed <select id=\"atlas-speed\"><option value=\"0.5\">0.5x</option><option value=\"1\" selected>1x</option>"
+	       "<option value=\"2\">2x</option></select></label>"
+	       "<span id=\"atlas-frame-errors\" class=\"meta\"></span>"
+	       "<span id=\"atlas-world\" class=\"meta\"></span></div>";
+}
+
+// The frames of the animation: for each version, the drawn subjects (the head's elements and roads) with
+// their presence and status, the atoms true there, and the errors and warnings flagged on them. count is
+// the number of versions; start is the frame the map opens at (the viewed version, else the head).
+static String FramesJson(WebRequest& r, const AtlasMap& head, const String& at, int& count, int& start)
+{
+	AtlasFamily f;
+	AtlasRules rules;
+	Vector<AtlasEvent> events;
+	String rev, err;
+	if(!AtlasLoadFamily(r.Site().data_root, head.map, f, rev, err))
+		return String();
+	AtlasLoadRules(r.Site().data_root, head.map, rules, rev, err);
+	AtlasLoadEvents(r.Site().data_root, head.map, events, err);
+	Vector<AtlasRoadmapMessage> messages;
+	Vector<Vector<String>> worlds;
+	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+
+	count = f.versions.GetCount();
+	start = at.IsEmpty() ? f.Head() : f.Find(at);
+	if(start < 0)
+		start = f.Head();
+	StringBuffer j;
+	j << "{\"head\":" << f.Head() << ",\"start\":" << start << ",\"versions\":[";
+	for(int k = 0; k < f.versions.GetCount(); k++) {
+		const AtlasVersion& v = f.versions[k];
+		Vector<AtlasSubjectState> states;
+		if(!AtlasStateAt(head, f, events, v.vid, states, err))
+			return String();
+		if(k)
+			j << ",";
+		j << "{\"vid\":" << AsJSON(Value(v.vid)) << ",\"label\":" << AsJSON(Value(AtlasVersionLabel(v.code)))
+		  << ",\"subjects\":[";
+		bool first = true;
+		for(const AtlasSubjectState& st : states) {
+			if(!st.in_head || (st.kind != "element" && st.kind != "road"))
+				continue;
+			if(!first)
+				j << ",";
+			first = false;
+			j << "{\"kind\":" << AsJSON(Value(st.kind)) << ",\"id\":" << AsJSON(Value(st.id))
+			  << ",\"present\":" << (st.present ? "true" : "false") << ",\"status\":" << AsJSON(Value(st.status)) << "}";
+		}
+		j << "],\"world\":[";
+		if(k < worlds.GetCount())
+			for(int a = 0; a < worlds[k].GetCount(); a++) {
+				if(a)
+					j << ",";
+				j << AsJSON(Value(worlds[k][a]));
+			}
+		j << "],\"flags\":[";
+		first = true;
+		for(const AtlasRoadmapMessage& m : messages) {
+			if(m.vid != v.vid || (m.subject_kind != "element" && m.subject_kind != "road"))
+				continue;
+			if(!first)
+				j << ",";
+			first = false;
+			j << "{\"kind\":" << AsJSON(Value(m.subject_kind)) << ",\"id\":" << AsJSON(Value(m.subject_id))
+			  << ",\"severity\":" << AsJSON(Value(m.severity)) << "}";
+		}
+		j << "]}";
+	}
+	j << "]}";
+	return String(j);
+}
+
 static void MapView(WebRequest& r)
 {
 	String key = r.PathArg(0);
@@ -761,14 +840,10 @@ static void MapView(WebRequest& r)
 	FilterAtlasMap(r, key, m);
 	AtlasMap& shown = viewing ? view : m;
 	bool edit = CanEdit(r) && !viewing;
+	int frame_count = 0, frame_start = 0;
+	String frames = FramesJson(r, m, viewing ? at : String(), frame_count, frame_start);
 	StringBuffer b;
 	b << RoadmapPanel(r, m, key);
-	{
-		AtlasFamily f;
-		String frev, err;
-		if(AtlasLoadFamily(r.Site().data_root, m.map, f, frev, err) && f.versions.GetCount())
-			b << SubjectsSection(r, m, key, viewing ? at : String(), edit);
-	}
 	if(!at.IsEmpty() && !viewing)
 		b << "<p class=\"err\">" << Esc(view_err) << "</p>";
 	if(viewing)
@@ -791,8 +866,10 @@ static void MapView(WebRequest& r)
 	  << "<button type=\"button\" id=\"atlas-close\" hidden>&#x2715; Close</button>"
 	  << "<span class=\"hint\">Wheel to zoom, drag to pan, click a block to go inside."
 	  << (edit ? " Drag an element to move it in Show contents." : "") << "</span></div>"
+	  << (frame_count > 1 ? PlayerHtml(frame_count, frame_start) : String())
 	  << "<svg id=\"atlas-canvas\" role=\"img\" aria-label=\"Topology map\"></svg></div>"
 	  << "<noscript><p>The canvas needs JavaScript; the lists below show the same map.</p></noscript>"
+	  << SubjectsSection(r, m, key, viewing ? at : String(), edit)
 	  << "<h2>Elements</h2>";
 	ElementTable(r, shown, key, b);
 	b << "<h2>Roads</h2>";
@@ -803,8 +880,10 @@ static void MapView(WebRequest& r)
 	String data = "{\"revision\":" + AsJSON(Value(rev)) + ",\"map\":" + StoreAsJson(shown) + "}";
 	String attrs = String(" data-editable=\"") + (edit ? "1" : "0") + "\" data-csrf=\"" + Esc(r.CsrfToken())
 	             + "\" data-base=\"" + Esc(r.Site().Url("atlas/" + key)) + "\"";
-	b << "<script type=\"application/json\" id=\"atlas-data\">" << ScriptJson(data) << "</script>"
-	  << "<script>" << AtlasScript() << "</script>"
+	b << "<script type=\"application/json\" id=\"atlas-data\">" << ScriptJson(data) << "</script>";
+	if(frames.GetCount())
+		b << "<script type=\"application/json\" id=\"atlas-frames\">" << ScriptJson(frames) << "</script>";
+	b << "<script>" << AtlasScript() << "</script>"
 	  << "<script>" << AtlasRoadmapScript() << "</script>";
 	Page(r, m.title, String(b), attrs, m.map, "map");
 }

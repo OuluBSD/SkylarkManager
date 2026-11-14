@@ -68,6 +68,13 @@ dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; }
 ol.path { padding-left: 20px; }
 @media (max-width: 600px) { main { padding: var(--pad); } #atlas-canvas { min-height: 320px; } }
+#atlas-canvas g[data-id] { transition: none; }
+#atlas-canvas g.flash-error > rect.el { stroke: var(--st-trouble); stroke-width: 3; animation: atlas-flash 1.2s ease-in-out infinite; }
+#atlas-canvas g.flash-warn > rect.el { stroke: var(--st-hot); stroke-width: 3; }
+@keyframes atlas-flash { 0%, 100% { stroke-opacity: 1; } 50% { stroke-opacity: .25; } }
+.atlas-player { align-items: center; }
+.atlas-player input[type=range] { width: min(240px, 100%); }
+@media (prefers-reduced-motion: reduce) { #atlas-canvas g.flash-error > rect.el { animation: none; } }
 </style>)ATLAS";
 }
 
@@ -371,7 +378,7 @@ String AtlasScript()
       root.appendChild(node('path', {
         d: 'M' + p.x + ' ' + p.y + ' L' + q.x + ' ' + q.y,
         'class': 'road kind-' + ro.r.kind,
-        'data-a': ro.a.id, 'data-b': ro.b.id
+        'data-a': ro.a.id, 'data-b': ro.b.id, 'data-road': ro.r.id
       }));
       if (ro.r.label) {
         root.appendChild(node('text', { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 4, 'class': 'road-label' }, ro.r.label));
@@ -460,6 +467,7 @@ String AtlasScript()
     }
     drawRoads(root, contents);
     markHover();
+    paintFrame();
     if (view.manual) { applyTransform(); } else { fitView(); }
   }
 
@@ -613,6 +621,171 @@ String AtlasScript()
 
   listen(window, 'hashchange', function () { readHash(); draw(); });
   listen(window, 'resize', function () { draw(); });
+  // ---- animation: each version is a frame of the map. A critically damped spring moves the playback
+  // position toward the chosen version; every drawn subject follows its presence and status at that
+  // position, and roads draw in as they appear. Reduced motion jumps between versions.
+  var framesBox = document.getElementById('atlas-frames');
+  var frames = null;
+  try { frames = framesBox ? JSON.parse(framesBox.textContent) : null; } catch (e) { frames = null; }
+  var OMEGA = 7;
+  var STEP_MS = 1400;
+  var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var motion = { t: 0, v: 0, target: 0, playing: false, speed: 1, next: 0, raf: 0, last: 0, count: 0, tracks: {} };
+
+  // The pure parts, exposed for tests: a smooth step, the spring, and sampling a per-frame list.
+  function smooth(f) { return f * f * (3 - 2 * f); }
+  function spring(x, v, target, dt, omega) {
+    var a = omega * omega * (target - x) - 2 * omega * v;
+    var nv = v + a * dt;
+    return { x: x + nv * dt, v: nv };
+  }
+  function sample(values, t) {
+    var n = values.length;
+    if (!n) { return 0; }
+    if (t <= 0) { return values[0]; }
+    if (t >= n - 1) { return values[n - 1]; }
+    var i = Math.floor(t);
+    return values[i] + (values[i + 1] - values[i]) * smooth(t - i);
+  }
+  window.AtlasMotion = { smooth: smooth, spring: spring, sample: sample };
+
+  // One track per subject: presence and status for every frame, and the flag (error or warning) it carries.
+  function buildTracks() {
+    var n = frames.versions.length;
+    motion.count = n;
+    frames.versions.forEach(function (ver, k) {
+      (ver.subjects || []).forEach(function (s) {
+        var key = s.kind + ':' + s.id;
+        var tr = motion.tracks[key] || (motion.tracks[key] = { present: [], status: [], flag: [] });
+        tr.present[k] = s.present ? 1 : 0;
+        tr.status[k] = s.status || '';
+      });
+      (ver.flags || []).forEach(function (f) {
+        var tr = motion.tracks[f.kind + ':' + f.id];
+        if (tr) { tr.flag[k] = f.severity; }
+      });
+    });
+    Object.keys(motion.tracks).forEach(function (key) {
+      var tr = motion.tracks[key];
+      for (var k = 0; k < n; k++) {
+        if (tr.present[k] === undefined) { tr.present[k] = 0; }
+        if (tr.status[k] === undefined) { tr.status[k] = ''; }
+        if (tr.flag[k] === undefined) { tr.flag[k] = ''; }
+      }
+    });
+  }
+
+  function paintFrame() {
+    if (!motion.count) { return; }
+    var k = Math.max(0, Math.min(motion.count - 1, Math.round(motion.t)));
+    var ver = frames.versions[k];
+    svg.querySelectorAll('g[data-id]').forEach(function (g) {
+      var tr = motion.tracks['element:' + g.getAttribute('data-id')];
+      if (!tr) { return; }
+      var p = sample(tr.present, motion.t);
+      g.style.opacity = String(p);
+      g.style.pointerEvents = p < 0.5 ? 'none' : '';
+      var rect = g.querySelector(':scope > rect.el');
+      if (rect) {
+        rect.setAttribute('class', rect.getAttribute('class').replace(/status-\S*/, 'status-' + (tr.status[k] || 'planned')));
+      }
+      g.classList.toggle('flash-error', tr.flag[k] === 'error');
+      g.classList.toggle('flash-warn', tr.flag[k] === 'warning');
+    });
+    svg.querySelectorAll('path[data-road]').forEach(function (path) {
+      var tr = motion.tracks['road:' + path.getAttribute('data-road')];
+      if (!tr) { return; }
+      var p = sample(tr.present, motion.t);
+      if (p >= 0.999) {
+        path.style.strokeDasharray = '';
+        path.style.strokeDashoffset = '';
+        path.style.opacity = '';
+        return;
+      }
+      var len = path.getTotalLength();
+      path.style.strokeDasharray = len + ' ' + len;
+      path.style.strokeDashoffset = String((1 - p) * len);
+      path.style.opacity = p > 0.02 ? '1' : '0';
+    });
+    var errors = 0, warnings = 0;
+    (ver.flags || []).forEach(function (f) { if (f.severity === 'error') { errors++; } else { warnings++; } });
+    var label = document.getElementById('atlas-frame-label');
+    if (label) { label.textContent = ver.label + (k === frames.head ? ' (head)' : ''); }
+    var flagged = document.getElementById('atlas-frame-errors');
+    if (flagged) { flagged.textContent = errors + ' errors, ' + warnings + ' warnings at this version'; }
+    var world = document.getElementById('atlas-world');
+    if (world) { world.textContent = (ver.world || []).length ? ver.world.join(' \u00b7 ') : 'no atoms set'; }
+    var scrub = document.getElementById('atlas-scrub');
+    if (scrub && Number(scrub.value) !== k) { scrub.value = String(k); }
+  }
+
+  function step(now) {
+    var dt = Math.min(0.05, Math.max(0, (now - motion.last) / 1000));
+    motion.last = now;
+    if (motion.playing && now >= motion.next) {
+      motion.target = motion.target >= motion.count - 1 ? 0 : motion.target + 1;
+      if (motion.target === 0) { motion.t = 0; motion.v = 0; }
+      motion.next = now + STEP_MS / motion.speed;
+    }
+    if (reduced) {
+      motion.t = motion.target;
+      motion.v = 0;
+    } else {
+      var s = spring(motion.t, motion.v, motion.target, dt, OMEGA);
+      motion.t = s.x;
+      motion.v = s.v;
+    }
+    paintFrame();
+    var settled = Math.abs(motion.target - motion.t) < 0.001 && Math.abs(motion.v) < 0.001;
+    if (motion.playing || !settled) {
+      motion.raf = requestAnimationFrame(step);
+    } else {
+      motion.t = motion.target;
+      motion.v = 0;
+      motion.raf = 0;
+      paintFrame();
+    }
+  }
+  function go(target) {
+    motion.target = Math.max(0, Math.min(motion.count - 1, target));
+    if (!motion.raf) {
+      motion.last = performance.now();
+      motion.raf = requestAnimationFrame(step);
+    }
+  }
+
+  var playButton = document.getElementById('atlas-play');
+  var scrubBox = document.getElementById('atlas-scrub');
+  var speedBox = document.getElementById('atlas-speed');
+  if (frames && frames.versions && frames.versions.length > 1) {
+    buildTracks();
+    motion.t = motion.target = frames.start;
+    if (playButton) {
+      playButton.addEventListener('click', function () {
+        motion.playing = !motion.playing;
+        playButton.textContent = motion.playing ? 'Pause' : 'Play';
+        motion.next = performance.now();
+        go(motion.target);
+      });
+    }
+    if (scrubBox) {
+      scrubBox.addEventListener('input', function () {
+        motion.playing = false;
+        if (playButton) { playButton.textContent = 'Play'; }
+        go(Number(scrubBox.value));
+      });
+    }
+    if (speedBox) {
+      speedBox.addEventListener('change', function () { motion.speed = Number(speedBox.value) || 1; });
+    }
+    // Stop the loop when the shell swaps the page away.
+    detach.push(function () {
+      motion.playing = false;
+      cancelAnimationFrame(motion.raf);
+      motion.raf = 0;
+    });
+  }
+
   readHash();
   draw();
 })();
