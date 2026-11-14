@@ -733,14 +733,16 @@ static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
 			b << "</table></div>";
 			if(!shown)
 				b << "<p class=\"ad-empty\">Nothing was on the map at this version.</p>";
-			b << "<p>World state:";
+			// The atoms can run to dozens of pills: collapsed, so the panel keeps its height.
 			int wi = vi;
-			if(wi < worlds.GetCount() && worlds[wi].GetCount())
+			int atoms = wi < worlds.GetCount() ? worlds[wi].GetCount() : 0;
+			b << "<details class=\"ad-atoms\"><summary>World state: " << atoms << (atoms == 1 ? " atom" : " atoms") << "</summary>";
+			if(atoms)
 				for(const String& a : worlds[wi])
 					b << " <span class=\"ad-pill is-info\">" << Esc(a) << "</span>";
 			else
 				b << " <span class=\"ad-empty\">no atoms set</span>";
-			b << "</p>";
+			b << "</details>";
 		}
 		else
 			b << "<p class=\"err\">" << Esc(err) << "</p>";
