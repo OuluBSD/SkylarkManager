@@ -1,4 +1,4 @@
-#include "AtlasSite.h"
+#include "AtlasImport.h"
 #include <WebStorage/WebStorage.h>
 
 NAMESPACE_UPP
@@ -52,6 +52,19 @@ static void ApiFail(WebRequest& r, int code, const String& error)
 	m.Add("ok", false);
 	m.Add("error", error);
 	r.Json(m, code);
+}
+
+static bool ApiAuthFamily(WebRequest& r, const String& family)
+{
+	if(!r.HasUser()) {
+		ApiFail(r, 401, "not signed in");
+		return false;
+	}
+	if(!AtlasCanEditFamily(r, family)) {
+		ApiFail(r, 403, "editing needs the admin role, or to be an editor of this map's project");
+		return false;
+	}
+	return true;
 }
 
 static String ApiJoin(const Vector<String>& v)
@@ -330,7 +343,7 @@ static bool ValidName(const String& name)
 
 static void AtomSet(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -367,7 +380,7 @@ static void AtomSet(WebRequest& r)
 
 static void AtomDelete(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -392,7 +405,7 @@ static void AtomDelete(WebRequest& r)
 
 static void ActionSet(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -425,7 +438,7 @@ static void ActionSet(WebRequest& r)
 
 static void ActionDelete(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -446,7 +459,7 @@ static void ActionDelete(WebRequest& r)
 
 static void ConstraintSet(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -484,7 +497,7 @@ static void ConstraintSet(WebRequest& r)
 
 static void ConstraintDelete(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -506,7 +519,7 @@ static void ConstraintDelete(WebRequest& r)
 // A version's contract: the literals that must hold on entry to it. Saved with the version list.
 static void ContractSet(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -529,7 +542,7 @@ static void ContractSet(WebRequest& r)
 // A task event: proposed (with its target), accepted, done, dropped, reopened, or a note.
 static void TaskEvent(WebRequest& r, const char *type)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -626,7 +639,7 @@ static void VersionsGet(WebRequest& r)
 // Creates a family from one existing document, which becomes the head as version v1.
 static void VersionsInit(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	String family = r.PathArg(0);
 	String head_key = P(r, "head");
@@ -661,7 +674,7 @@ static void VersionsInit(WebRequest& r)
 
 static void VersionsInsert(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -686,7 +699,7 @@ static void VersionsInsert(WebRequest& r)
 
 static void VersionsRename(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -709,7 +722,7 @@ static void VersionsRename(WebRequest& r)
 // Deletes a non-head version that no event names; the head holds the topology and cannot go.
 static void VersionsDelete(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -859,7 +872,7 @@ static void EventsGet(WebRequest& r)
 // An event on an element or road: a note, a stage, or a status. Topology changes have their own routes.
 static void EventAdd(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -911,7 +924,7 @@ static void EventAdd(WebRequest& r)
 
 static void ElementCreate(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -945,7 +958,7 @@ static void ElementCreate(WebRequest& r)
 // Layout and descriptive fields. No event: an element's geometry is not history. Status and stage are events.
 static void ElementUpdate(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -979,7 +992,7 @@ static void ElementUpdate(WebRequest& r)
 // Removes an element and the roads on it. Each road gets a disconnected event, the element a removed one.
 static void ElementRemove(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -1024,7 +1037,7 @@ static void ElementRemove(WebRequest& r)
 
 static void RoadCreate(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -1055,7 +1068,7 @@ static void RoadCreate(WebRequest& r)
 
 static void RoadDisconnect(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -1085,7 +1098,7 @@ static void RoadDisconnect(WebRequest& r)
 // Changes a road's kind or label. Its endpoints stay: reconnecting is a disconnect plus a create.
 static void RoadModify(WebRequest& r)
 {
-	if(!ApiAuth(r, true))
+	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	AtlasFamily f;
 	String frev;
@@ -1118,8 +1131,8 @@ static void RoadModify(WebRequest& r)
 // Routes and SiteCli commands. Every command takes the family first ("map").
 // ---------------------------------------------------------------------------
 
-// Map documents for the import tools (BrownBear's scripts/atlas-import.sh): an empty map at a version, and a
-// seed that fills it. Same rules as the form routes: admin only, the seed fills an empty map only.
+// Map documents for the import tools (skylarkctl and BrownBear). Creating and seeding are admin only; a registered
+// project's import is also open to that project's editors. Rules live in AtlasImport.cpp.
 static void MapCreate(WebRequest& r)
 {
 	if(!ApiAuth(r, true))
@@ -1131,53 +1144,17 @@ static void MapCreate(WebRequest& r)
 	int width = IntP(r, "width"), height = IntP(r, "height");
 	m.world.width = width > 0 ? width : 2400;
 	m.world.height = height > 0 ? height : 1600;
-	AtlasCheck check;
-	AtlasValidate(m, check);
-	String key = AtlasDocKey(m.map, m.version);
-	if(!JsonFileStore::ValidId(key))
-		check.errors.Add("map version has characters the store does not allow: " + m.version);
-	if(!check.Ok()) {
-		ApiFail(r, 400, ApiJoin(check.errors));
-		return;
-	}
-	AtlasMap existing;
-	String rev, err;
-	if(AtlasLoadMap(r.Site().data_root, key, existing, rev, err)) {
-		ApiFail(r, 409, "a map with that id and version already exists");
-		return;
-	}
-	// The level is stored before the map, so a private map is never readable as public, not even empty.
-	String level_name = P(r, "level");
-	if(level_name.GetCount()) {
-		ContentLevel level;
-		if(!ContentLevelParse(level_name, level)) {
-			ApiFail(r, 400, "level must be public, protected or private");
-			return;
-		}
-		ContentPolicyStore& store = ContentPolicyFor(r.Site().data_root);
-		if(store.LoadError().GetCount()) {
-			ApiFail(r, 500, store.LoadError());
-			return;
-		}
-		ContentPolicy p = store.Record(key);
-		p.level = level;
-		store.SetRecord(key, p);
-		String policy_err;
-		if(!store.Save(policy_err)) {
-			ApiFail(r, 500, policy_err);
-			return;
-		}
-	}
-	String new_rev;
-	if(!AtlasSaveMap(r.Site().data_root, key, m, String(), new_rev, err)) {
-		ApiFail(r, 500, err);
+	String level = P(r, "level");
+	AtlasImportResult res = AtlasCreateMap(r.Site().data_root, m, level);
+	if(!res.Ok()) {
+		ApiFail(r, res.status, res.error);
 		return;
 	}
 	ValueMap out;
 	out.Add("ok", true);
-	out.Add("key", key);
-	out.Add("revision", new_rev);
-	out.Add("level", level_name.GetCount() ? level_name : String("public"));
+	out.Add("key", res.key);
+	out.Add("revision", res.revision);
+	out.Add("level", level.IsEmpty() ? String("public") : level);
 	r.Json(out);
 }
 
@@ -1185,29 +1162,51 @@ static void MapSeed(WebRequest& r)
 {
 	if(!ApiAuth(r, true))
 		return;
-	String key = AtlasDocKey(P(r, "map"), P(r, "version"));
-	AtlasMap m;
-	String rev, err;
-	if(!AtlasLoadMap(r.Site().data_root, key, m, rev, err)) {
-		ApiFail(r, 404, err);
-		return;
-	}
-	AtlasCheck check;
-	if(!AtlasParseSeed(P(r, "seed"), m, check)) {
-		ApiFail(r, 400, ApiJoin(check.errors));
-		return;
-	}
-	String new_rev;
-	if(!AtlasSaveMap(r.Site().data_root, key, m, rev, new_rev, err)) {
-		ApiFail(r, err.Find("revision") >= 0 ? 409 : 500, err);
+	AtlasImportResult res = AtlasSeedMap(r.Site().data_root, AtlasDocKey(P(r, "map"), P(r, "version")), P(r, "seed"));
+	if(!res.Ok()) {
+		ApiFail(r, res.status, res.error);
 		return;
 	}
 	ValueMap out;
 	out.Add("ok", true);
-	out.Add("key", key);
-	out.Add("revision", new_rev);
-	out.Add("elements", m.elements.GetCount());
-	out.Add("roads", m.roads.GetCount());
+	out.Add("key", res.key);
+	out.Add("revision", res.revision);
+	out.Add("elements", res.elements);
+	out.Add("roads", res.roads);
+	r.Json(out);
+}
+
+// Imports a registered project's seed file (projects.json in the data root) as its family.
+static void ProjectImport(WebRequest& r)
+{
+	String name = P(r, "project");
+	if(!ApiAuthFamily(r, name))
+		return;
+	Vector<AtlasProject> all;
+	String err;
+	if(!AtlasLoadProjects(r.Site().data_root, all, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	int i = AtlasFindProject(all, name);
+	if(i < 0) {
+		ApiFail(r, 404, "no project named " + name);
+		return;
+	}
+	const AtlasProject& p = all[i];
+	AtlasImportResult res = AtlasImportProject(r.Site().data_root, p);
+	if(!res.Ok()) {
+		ApiFail(r, res.status, res.error);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("project", p.name);
+	out.Add("key", res.key);
+	out.Add("revision", res.revision);
+	out.Add("level", p.level);
+	out.Add("elements", res.elements);
+	out.Add("roads", res.roads);
 	r.Json(out);
 }
 
@@ -1218,6 +1217,7 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/init", VersionsInit);
 	rt.Add("POST", "api/atlas/create", MapCreate);
 	rt.Add("POST", "api/atlas/seed", MapSeed);
+	rt.Add("POST", "api/atlas/project/import", ProjectImport);
 	rt.Add("POST", "api/atlas/*/versions/insert", VersionsInsert);
 	rt.Add("POST", "api/atlas/*/versions/rename", VersionsRename);
 	rt.Add("POST", "api/atlas/*/versions/delete", VersionsDelete);
@@ -1257,6 +1257,8 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-map-create", "POST", "api/atlas/create", write,
 	        "json", "Create an empty map document at a version (admin); level sets its visibility before any content",
 	        { "map:string:required", "version:string:required", "title:string", "width:int", "height:int", "level:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-project-import", "POST", "api/atlas/project/import", write,
+	        "json", "Import a registered project's seed as its family (admin, or the project's editors)", { "project:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-map-seed", "POST", "api/atlas/seed", write,
 	        "json", "Fill an empty map document with a seed (admin)",
 	        { "map:string:required", "version:string:required", "seed:text:required" }));

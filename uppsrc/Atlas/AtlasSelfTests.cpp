@@ -1,4 +1,4 @@
-#include "AtlasSite.h"
+#include "AtlasImport.h"
 
 NAMESPACE_UPP
 
@@ -247,6 +247,46 @@ static void SeedChecks()
 	AtlasCheck fc;
 	Check(!AtlasParseSeed("X", filled, fc) && HasError(fc, "empty map") && filled.elements.GetCount() == 4,
 	      "a seed refuses a map that already has elements and leaves it untouched");
+}
+
+static String ProjectJson(const char *name, const char *repo, const char *seed, const char *version, const char *level,
+                          const char *editors)
+{
+	return String("{\"projects\": [{\"name\": \"") + name + "\", \"repo\": \"" + repo + "\", \"seed\": \"" + seed
+	     + "\", \"version\": \"" + version + "\", \"level\": \"" + level + "\", \"editors\": [" + editors + "]}]}";
+}
+
+static void ProjectChecks(const String& scratch)
+{
+	String root = AppendFileName(scratch, "projects");
+	RealizeDirectory(root);
+	String path = AppendFileName(root, "projects.json");
+	String err;
+	Vector<AtlasProject> all;
+	Check(AtlasLoadProjects(AppendFileName(scratch, "no-projects-file"), all, err) && all.IsEmpty(),
+	      "a data root without projects.json has no projects");
+
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "atlas/pkr/goal-map.seed", "v1.0.0", "private", "\"Alice\", \"bob\""));
+	bool loaded = AtlasLoadProjects(root, all, err);
+	Check(loaded && all.GetCount() == 1 && all[0].seed == "atlas/pkr/goal-map.seed" && all[0].level == "private"
+	      && all[0].editors.GetCount() == 2 && all[0].editors[0] == "alice",
+	      "a project loads with its seed, and its editors in lower case");
+	Check(AtlasProjectEditor(root, "pkr", "ALICE") && !AtlasProjectEditor(root, "pkr", "carol")
+	      && !AtlasProjectEditor(root, "other", "alice") && !AtlasProjectEditor(root, "pkr", ""),
+	      "an editor is matched without case, and only for their own project");
+
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "../secrets.seed", "v1.0.0", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("seed") >= 0, "a seed outside the repository is refused");
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "/etc/passwd", "v1.0.0", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("seed") >= 0, "an absolute seed path is refused");
+	SaveFile(path, ProjectJson("pkr", "relative/brownbear", "a.seed", "v1.0.0", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("repo") >= 0, "a repository path must be absolute");
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "a.seed", "1.0", "private", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("version") >= 0, "a project version must read v<a.b.c>");
+	SaveFile(path, ProjectJson("pkr", "/srv/brownbear", "a.seed", "v1.0.0", "shared", ""));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("level") >= 0, "a project level must be a known visibility");
+	SaveFile(path, "[1, 2]");
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("not a JSON object") >= 0, "a projects file must be a JSON object");
 }
 
 static void StoreChecks(const String& scratch)
@@ -867,6 +907,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	DemoChecks();
 	MarkdownChecks();
 	WhatsNextChecks();
+	ProjectChecks(scratch_dir);
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }

@@ -43,6 +43,8 @@ bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEve
 
 // Access for the API: the role check, the map's content policy, and per-element visibility.
 bool AtlasCanEdit(WebRequest& r);
+// Admin, or an editor of the family's project (AtlasImport.h). Use this for the maps and their parts.
+bool AtlasCanEditFamily(WebRequest& r, const String& family);
 bool AtlasMapReadable(WebRequest& r, const String& head_key);
 bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& element_id);
 

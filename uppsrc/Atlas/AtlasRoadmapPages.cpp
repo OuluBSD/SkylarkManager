@@ -708,7 +708,7 @@ static void RoadmapSection(WebRequest& r, const String& family, const String& se
 		r.Status(404, err);
 		return;
 	}
-	bool edit = AtlasCanEdit(r);
+	bool edit = AtlasCanEditFamily(r, family);
 	String body;
 	if(section == "timeline") body = TimelineBody(r, d, edit, family);
 	else if(section == "rules") body = RulesBody(r, d, edit, family);

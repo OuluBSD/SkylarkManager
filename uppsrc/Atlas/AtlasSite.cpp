@@ -1,4 +1,5 @@
 #include "AtlasSite.h"
+#include "AtlasImport.h"
 #include <WebStorage/WebStorage.h>
 #include <WebsiteTemplates/WebsiteTemplates.h>
 
@@ -267,8 +268,31 @@ static bool RequireLogin(WebRequest& r)
 	return false;
 }
 
+// A project editor reads the families they edit, public or not. The record is a family, a map key, or an element of
+// a map (key:element:id); the family is found from the map when the record names one.
+static bool EditsRecord(WebRequest& r, const String& record)
+{
+	if(!r.HasUser())
+		return false;
+	String id = record;
+	int at = id.Find(":element:");
+	if(at >= 0)
+		id = id.Left(at);
+	if(id.IsEmpty())
+		return false;
+	if(AtlasProjectEditor(r.Site().data_root, id, r.User().username))
+		return true;
+	AtlasMap m;
+	String rev, err;
+	if(!AtlasLoadMap(r.Site().data_root, id, m, rev, err))
+		return false;
+	return AtlasProjectEditor(r.Site().data_root, m.map, r.User().username);
+}
+
 static int AtlasPolicyStatus(WebRequest& r, const String& module, const String& record)
 {
+	if(EditsRecord(r, record))
+		return 0;
 	return ContentPolicyReadStatus(r, module, record, CONTENT_PUBLIC);
 }
 
@@ -340,14 +364,15 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	current.label = title;
 	s.crumbs.Add(pick(current));
 
-	// Editing is for the admin role. Say why the forms are missing, and how an operator grants it.
+	// Editing is for the admin role and the editors of the project. Say why the forms are missing, and how it is granted.
 	String hint;
 	bool editable = section == "map" || section == "versions" || section == "timeline" || section == "rules"
 	             || section == "tasks" || section == "checks" || section == "next";
-	if(editable && !CanEdit(r)) {
+	if(editable && !AtlasCanEditFamily(r, family)) {
 		if(r.HasUser())
 			hint = "<div class=\"ad-hint\" role=\"note\">You are signed in as <strong>" + Esc(r.User().username)
-			     + "</strong> without the admin role, so the forms are hidden. An operator can grant it with <code>ManagerSkylark --set-atlas-user "
+			     + "</strong> without edit rights for this project, so the forms are hidden. An operator can list you as an editor in the "
+			     + "Atlas <code>projects.json</code>, or grant the admin role with <code>ManagerSkylark --set-atlas-user "
 			     + Esc(r.User().username) + "</code>.</div>";
 		else
 			hint = "<div class=\"ad-hint\" role=\"note\">Read-only. <a href=\"" + Esc(r.Site().Url("session/login"))
@@ -475,6 +500,13 @@ bool AtlasCanEdit(WebRequest& r)
 	return CanEdit(r);
 }
 
+bool AtlasCanEditFamily(WebRequest& r, const String& family)
+{
+	if(CanEdit(r))
+		return true;
+	return r.HasUser() && AtlasProjectEditor(r.Site().data_root, family, r.User().username);
+}
+
 bool AtlasMapReadable(WebRequest& r, const String& head_key)
 {
 	return AtlasPolicyStatus(r, "maps", head_key) == 0;
@@ -487,6 +519,8 @@ bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& 
 
 static void FilterAtlasMap(WebRequest& r, const String& key, AtlasMap& map)
 {
+	if(r.HasUser() && AtlasProjectEditor(r.Site().data_root, map.map, r.User().username))
+		return;
 	for(int i = map.elements.GetCount() - 1; i >= 0; i--)
 		if(!AtlasElementVisible(r, key, map.elements[i].id))
 			map.elements.Remove(i);
@@ -839,7 +873,7 @@ static void MapView(WebRequest& r)
 	}
 	FilterAtlasMap(r, key, m);
 	AtlasMap& shown = viewing ? view : m;
-	bool edit = CanEdit(r) && !viewing;
+	bool edit = AtlasCanEditFamily(r, m.map) && !viewing;
 	int frame_count = 0, frame_start = 0;
 	String frames = FramesJson(r, m, viewing ? at : String(), frame_count, frame_start);
 	StringBuffer b;
@@ -967,8 +1001,8 @@ static void ElementView(WebRequest& r)
 	if(e.goal.picked || e.goal.note.GetCount())
 		b << "<h2>Goal</h2><p>" << Esc(e.goal.note) << "</p>";
 
-	if(CanEdit(r)) {
-		b << "<details class=\"edit\"><summary>Edit (admin)</summary>"
+	if(AtlasCanEditFamily(r, m.map)) {
+		b << "<details class=\"edit\"><summary>Edit</summary>"
 		  << "<form method=\"post\" action=\"" << Esc(base + "/element/edit") << "\">" << CsrfField(r) << RevisionField(rev)
 		  << "<input type=\"hidden\" name=\"id\" value=\"" << Esc(e.id) << "\">"
 		  << "<label>Name <input name=\"name\" required value=\"" << Esc(e.name) << "\"></label>"
@@ -1001,13 +1035,13 @@ static bool BeginEdit(WebRequest& r, AtlasMap& m, String& revision)
 {
 	if(!RequireLogin(r))
 		return false;
-	if(!CanEdit(r)) {
-		Refuse(r, 403, "editing needs the admin role on this site");
-		return false;
-	}
 	String err;
 	if(!AtlasLoadMap(r.Site().data_root, r.PathArg(0), m, revision, err)) {
 		Refuse(r, 404, err);
+		return false;
+	}
+	if(!AtlasCanEditFamily(r, m.map)) {
+		Refuse(r, 403, "editing needs the admin role, or to be an editor of this map's project");
 		return false;
 	}
 	if(r.Param("expected_revision") != revision) {
@@ -1197,14 +1231,14 @@ static void MoveElement(WebRequest& r)
 		JsonFail(r, 401, "not signed in");
 		return;
 	}
-	if(!CanEdit(r)) {
-		JsonFail(r, 403, "editing needs the admin role on this site");
-		return;
-	}
 	AtlasMap m;
 	String rev, err;
 	if(!AtlasLoadMap(r.Site().data_root, r.PathArg(0), m, rev, err)) {
 		JsonFail(r, 404, err);
+		return;
+	}
+	if(!AtlasCanEditFamily(r, m.map)) {
+		JsonFail(r, 403, "editing needs the admin role, or to be an editor of this map's project");
 		return;
 	}
 	if(r.Param("expected_revision") != rev) {
