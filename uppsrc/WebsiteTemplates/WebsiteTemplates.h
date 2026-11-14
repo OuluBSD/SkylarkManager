@@ -45,6 +45,34 @@ String WebsiteThemeControlsScript();
 // The <style> for a composed page: theme tokens, density tokens and the base page look.
 String WebsitePageStyles();
 
+// The admin shell: a collapsible sidebar, a sticky topbar and a breadcrumb header around the page
+// content. Every webapp renders it through RenderAdminShell; pages supply their own body.
+struct WebsiteShellLink : Moveable<WebsiteShellLink> {
+	String label;
+	String href;
+	String icon;      // shell icon id: home, map, list, clock, sliders, check, alert; empty for none
+	bool   active = false;
+};
+
+struct WebsiteShell : Moveable<WebsiteShell> {
+	String                   title;        // document title
+	String                   brand;        // sidebar heading
+	String                   brand_href;
+	Vector<WebsiteShellLink> nav;
+	Vector<WebsiteShellLink> crumbs;       // the last crumb is the current page and is not a link
+	String                   topbar_html;  // session chrome and theme controls
+	String                   body;
+	String                   html_attributes;
+	String                   body_attributes;   // e.g. data-* attributes the page script reads
+	String                   head_script;
+};
+
+// The admin-dashboard template's stylesheet and sidebar script. Colours come from the shared theme
+// tokens only; the script guards every element it touches and keeps the sidebar state in localStorage.
+String AdminDashboardCss();
+String AdminDashboardScript();
+String RenderAdminShell(const WebsiteShell& s);
+
 END_UPP_NAMESPACE
 
 #endif

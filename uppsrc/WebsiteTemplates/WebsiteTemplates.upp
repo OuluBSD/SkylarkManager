@@ -6,4 +6,5 @@ uses
 file
 	AGENTS.md,
 	WebsiteTemplates.h,
-	WebsiteTemplates.cpp;
+	WebsiteTemplates.cpp,
+	WebsiteShell.cpp;

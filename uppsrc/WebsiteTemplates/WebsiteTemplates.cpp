@@ -177,6 +177,15 @@ static void EnsureBuiltInTemplates()
 	engine_login.stylesheet = EngineLoginCss();
 	added = AddTemplate(registry, engine_login);
 	ASSERT(added);
+	WebsiteTemplate dashboard;
+	dashboard.id = "admin-dashboard";
+	dashboard.title = "Admin dashboard";
+	dashboard.description = "Collapsible sidebar, sticky topbar and breadcrumb header for admin webapps.";
+	dashboard.body_class = "ad-content";
+	dashboard.content_class = "ad-main";
+	dashboard.stylesheet = AdminDashboardCss();
+	added = AddTemplate(registry, dashboard);
+	ASSERT(added);
 }
 
 const Vector<WebsiteTemplate>& GetWebsiteTemplates()

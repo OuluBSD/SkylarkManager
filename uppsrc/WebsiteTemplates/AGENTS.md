@@ -35,3 +35,16 @@ implementation files.
 - Theme tokens are CSS variables: `--bg --panel --fg --muted --line --accent
   --control --sea`, status colours `--st-*`, density `--pad --gap --fs`. A new
   page styles itself with these, never with `light`/`dark` selectors.
+
+## Admin shell (`admin-dashboard`)
+
+- `RenderAdminShell(WebsiteShell)` renders the sidebar (`nav`, with `icon` ids and
+  `active`), the sticky topbar (`topbar_html`, e.g. session chrome and theme
+  controls), breadcrumbs (`crumbs`, last one is the current page) and the body.
+- `AdminDashboardCss()` and `AdminDashboardScript()` are the template's stylesheet
+  and sidebar script. Colours come from the theme tokens and the `--st-*`
+  status colours only. The sidebar collapse persists in `localStorage` inside
+  try/catch; below 760px the sidebar is an off-canvas panel.
+- Page components are classes: `ad-cards`/`ad-card` (stat cards), `ad-panel`
+  (a section with a header), `ad-table`, `ad-pill` with `is-ok|is-warn|is-err|is-info`,
+  `ad-form` (inline fields), `ad-btn` with `is-primary|is-danger`, `ad-note`, `ad-err`.
