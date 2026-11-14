@@ -38,6 +38,10 @@ public:
 	static UserSession GetCurrentSession(const Http& http);
 	static bool Login(Http& http, const String& username, const String& password);
 	static UserSession LoginSession(Http& http, const String& username, const String& password);
+	// Portal bridge to MetaAccount (task 050): adopts the host session of the host account that has the
+	// central user's username. Never creates an account; returns a guest when nothing matches.
+	static UserSession BridgeMetaSession(Http& http, bool ignore_suppression, String* central_user = nullptr);
+	static void SetHostSsoSuppressed(Http& http, bool on);
 	static void Logout(Http& http);
 	static bool RequireAuth(Http& http);
 	static String RenderLoginForm(const String& redirect_url = "", const String& error_msg = "");

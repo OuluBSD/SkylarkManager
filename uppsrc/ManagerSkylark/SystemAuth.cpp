@@ -1,6 +1,8 @@
 #include "ManagerSkylark.h"
 #include "SystemAuth.h"
 #include "EngineComposition.h"
+#include <WebEngine/SessionRoutes.h>
+#include "PortalShell.h"
 #include <WebAuth/WebAuth.h>
 
 NAMESPACE_UPP
@@ -75,7 +77,7 @@ VectorMap<String, UserSession>& SystemAuthService::Sessions()
 bool SystemAuthService::AuthorizeRequest(Http& http)
 {
 	String id = http.GetHandlerId();
-	bool public_route = id == "LoginPage" || id == "LoginPost" || id == "LogoutHandler" ||
+	bool public_route = id == "LoginPage" || id == "LoginPost" || id == "LogoutHandler" || id == "HostSsoContinue" ||
 	                    id == "PortalShellPage" || // the portal shell is public; gated webapps frame the login
 	                    id == "ApiHealth" || id == "ApiAuthStatus" || id == "ApiAuthLogin" ||
 	                    id == "ApiCliManifest" || id == "ApiCliManifestSite" || // public, read-only command manifest
@@ -133,6 +135,48 @@ String SystemAuthService::ExtractCookie(const Http& http, const char* name)
 			return TrimBoth(p.Mid((int)strlen(name) + 1));
 	}
 	return String();
+}
+
+// A host account is a credential entry in auth.json. The bridge checks only that the name exists.
+static bool SystemAccountKnown(const String& username)
+{
+	String conf_file = AppendFileName(ConfiguredSiteDir(), "auth.json");
+	if(username.IsEmpty() || !FileExists(conf_file) || GetFileLength(conf_file) > 64 * 1024)
+		return false;
+	Value v = ParseJSON(LoadFile(conf_file));
+	return v.Is<ValueMap>() && ((ValueMap)v).Find(username) >= 0;
+}
+
+// Set while the visitor has signed out of the portal, so a plain visit does not sign them back in.
+static const char *HOST_SSO_SUPPRESS = "wf_host_sso_suppress";
+
+void SystemAuthService::SetHostSsoSuppressed(Http& http, bool on)
+{
+	if(on)
+		http.SetCookie(HOST_SSO_SUPPRESS, "1", GetSysTime() + 30 * 24 * 3600, "/", NULL, false, true);
+	else
+		http.SetCookie(HOST_SSO_SUPPRESS, "", GetSysTime() - 3600, "/", NULL, false, true);
+}
+
+UserSession SystemAuthService::BridgeMetaSession(Http& http, bool ignore_suppression, String* central_user)
+{
+	UserSession none;
+	if(!TheWebEngine().MetaSso() || ConfiguredDemoSite())
+		return none;
+	if(!ignore_suppression && !ExtractCookie(http, HOST_SSO_SUPPRESS).IsEmpty())
+		return none;
+	String central = ExtractCookie(http, SsoCentralCookieName());
+	String username;
+	if(central.IsEmpty() || !SsoCentralUsername(central, username))
+		return none;
+	if(central_user)
+		*central_user = username;
+	if(!SystemAccountKnown(username))
+		return none;
+	UserSession sess = CreateSession(username);
+	if(sess.is_authenticated)
+		http.SetCookie("wf_auth_session", sess.token, sess.expires_at, "/", NULL, false, true);
+	return sess;
 }
 
 bool SystemAuthService::VerifySystemPassword(const String& username, const String& password)
@@ -247,6 +291,9 @@ void SystemAuthService::Logout(Http& http)
 		Sessions().RemoveKey(token);
 	}
 	http.SetCookie("wf_auth_session", "", GetSysTime() - 3600, "/", NULL, false, true);
+	// Signing out of the portal drops only the host session; the MetaAccount session is untouched (task 050).
+	if(TheWebEngine().MetaSso())
+		SetHostSsoSuppressed(http, true);
 }
 
 bool SystemAuthService::RequireAuth(Http& http)
@@ -320,6 +367,7 @@ String SystemAuthService::RenderLoginForm(const String& redirect_url, const Stri
 	  << "          <input type=\"password\" name=\"password\" required placeholder=\"••••••••\" style=\"width:100%; background:var(--wf-bg-view,#0d1117); border:1px solid var(--wf-border-color,#30363d); border-radius:6px; padding:8px 12px; color:var(--wf-fg-normal,#e6edf3); font-size:0.9rem;\">\n"
 	  << "        </div>\n"
 	  << "        <button type=\"submit\" class=\"wf-btn wf-btn-primary\" style=\"width:100%; padding:9px;\">Sign In</button>\n"
+	  << (TheWebEngine().MetaSso() ? "        <p style=\"margin-top:0.75rem; text-align:center;\"><a href=\"/sso/meta?next=" + UrlEncode(redirect_url.IsEmpty() ? String("/") : redirect_url) + "\">Continue with MetaAccount</a></p>\n" : String())
 	  << "      </form>\n"
 	  << "    </div>\n"
 	  << "    <div class=\"wf-card-footer\" style=\"font-size:0.78rem; justify-content:center;\">\n"
@@ -379,6 +427,42 @@ SKYLARK(LoginPost, "login/submit:POST_RAW")
 			back << "&next=" << UrlEncode(redir);
 		http.Redirect(back);
 	}
+}
+
+// Portal sign-in through MetaAccount (task 050). The browser goes to MetaAccount when no central session
+// exists, and MetaAccount returns here to the same route, which then bridges the session. Only a relative
+// return path is accepted; no token ever travels in the URL.
+SKYLARK(HostSsoContinue, "sso/meta")
+{
+	String next = http["next"];
+	if(next.IsEmpty() || !next.StartsWith("/") || next.StartsWith("//") || next.Find('\r') >= 0 || next.Find('\n') >= 0 ||
+	   next.StartsWith("/login") || next.StartsWith("/sso/meta"))
+		next = "/";
+	if(!TheWebEngine().MetaSso()) {
+		http.Redirect("/login");
+		return;
+	}
+	SystemAuthService::SetHostSsoSuppressed(http, false);
+	String central_user;
+	UserSession s = SystemAuthService::BridgeMetaSession(http, true, &central_user);
+	if(s.is_authenticated) {
+		http.Redirect(next);
+		return;
+	}
+	if(central_user.GetCount()) {
+		http.Redirect("/login?err=" + UrlEncode("MetaAccount signed in as " + central_user + ", but this portal has no account for it. Sign in with a portal account."));
+		return;
+	}
+	int meta_port = 0;
+	for(const EngineSiteListing& site : TheWebEngine().ListSites())
+		if(site.id == "meta")
+			meta_port = site.port;
+	if(meta_port == 0) {
+		http.Redirect("/login?err=" + UrlEncode("MetaAccount is not running here."));
+		return;
+	}
+	String back = "http://" + http.GetHeader("host") + "/sso/meta?next=" + UrlEncode(next);
+	http.Redirect(Format("http://%s:%d/login?next=%s", PortalLinkHost(http.GetHeader("host")), meta_port, UrlEncode(back)));
 }
 
 SKYLARK(LogoutHandler, "logout")

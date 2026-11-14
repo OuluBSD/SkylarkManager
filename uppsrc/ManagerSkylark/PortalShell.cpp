@@ -271,8 +271,12 @@ String RenderPortalShell(const String& host_header, const String& selected, cons
 
 SKYLARK(PortalShellPage, "")
 {
+	// A MetaAccount session that matches a portal account signs the shell in (task 050).
+	UserSession sess = SystemAuthService::GetCurrentSession(http);
+	if(!sess.is_authenticated)
+		sess = SystemAuthService::BridgeMetaSession(http, false);
 	http.ContentType("text/html; charset=utf-8") << RenderPortalShell(http.GetHeader("host"), http["app"],
-	                                                               SystemAuthService::GetCurrentSession(http),
+	                                                               sess,
 	                                                               TheWebEngine().ListSites());
 }
 

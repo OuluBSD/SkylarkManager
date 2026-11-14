@@ -238,6 +238,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 		if(!cla.GetArg("youtubeplanner-port").IsEmpty())
 			cfg.youtubeplanner_port = ScanInt(cla.GetArg("youtubeplanner-port"));
 		cfg.enable_meta_sso = cla.IsArg("enable-meta-sso");
+		TheWebEngine().SetHostPort(port);
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
 			cfg.agentipc_direct = cla.GetArg("agentipc-direct");
 		if(!cla.GetArg("agentipc-server").IsEmpty())

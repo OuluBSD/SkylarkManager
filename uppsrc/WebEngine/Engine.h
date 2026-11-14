@@ -41,6 +41,9 @@ public:
 	// routes, no link control and no sign-out marker, so per-site sign-in behaves as before SSO.
 	void SetMetaSso(bool on)              { meta_sso = on; }
 	bool MetaSso() const                  { return meta_sso; }
+	// The stock listener port: a MetaAccount return to the portal host is valid only on this port (task 050).
+	void SetHostPort(int p)               { host_port = p; }
+	int  HostPort() const                 { return host_port; }
 	CommandManifest& Manifest()           { return manifest; }
 	String      DiagnosticsJSON(int max_entries = 100) { return broker.DiagnosticsJSON(max_entries); }
 
@@ -56,6 +59,7 @@ private:
 	int                     default_port_site = -1;
 	WebBroker               broker;
 	bool                    meta_sso = false;
+	int                     host_port = 0;
 	CommandManifest         manifest;
 	Mutex                          mutex;
 };

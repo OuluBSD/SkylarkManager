@@ -202,7 +202,7 @@ bool SsoReturnAllowed(WebRequest& r, const String& url)
 	for(const EngineSiteListing& s : sites)
 		if(s.port == port)
 			composed = true;
-	if(!composed)
+	if(!composed && port != TheWebEngine().HostPort())
 		return false;
 	String path = rest.Mid(i);
 	return path.IsEmpty() || SsoSafeNext(path) == path;
@@ -224,6 +224,27 @@ static bool SsoCentralUser(WebRequest& r, BrokerCallContext& ctx, String& subjec
 	if(username)
 		*username = w.payload.Get("username");
 	return subject.GetCount() > 0;
+}
+
+String SsoCentralCookieName()
+{
+	return SiteAccounts::CookieNameFor(SSO_IDP_SITE);
+}
+
+// The username behind a central MetaAccount session id, or false. Used by the portal host bridge (task 050).
+bool SsoCentralUsername(const String& session_id, String& username)
+{
+	BrokerCallContext ctx;
+	ctx.from_site = "host";
+	ctx.to_site = SSO_IDP_SITE;
+	BrokerCall who;
+	who.op = "resolve-session";
+	who.payload.Add("session_id", session_id);
+	BrokerResult w = TheWebEngine().Broker().Call(ctx, who);
+	if(!w.ok)
+		return false;
+	username = w.payload.Get("username");
+	return username.GetCount() > 0;
 }
 
 // Adopts a site session for the linked account, if the grant is active. Returns
