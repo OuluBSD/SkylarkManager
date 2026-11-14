@@ -103,6 +103,15 @@ bool SiteCliBuildRequest(const ValueMap& command, const Vector<String>& words,
 			err = "argument '" + names[i] + "' must be a number";
 			return false;
 		}
+		// A "text" argument is multi-line: text=@path reads the value from a file.
+		if(set[i] && types[i] == "text" && value[i].StartsWith("@")) {
+			String path = value[i].Mid(1);
+			if(!FileExists(path)) {
+				err = "argument '" + names[i] + "': cannot read " + path;
+				return false;
+			}
+			value[i] = LoadFile(path);
+		}
 	}
 
 	// The first N declared arguments fill the N "*" segments of the route, in order.
