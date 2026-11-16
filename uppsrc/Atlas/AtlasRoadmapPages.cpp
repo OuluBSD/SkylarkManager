@@ -1,4 +1,5 @@
 #include "AtlasSite.h"
+#include "AtlasDiagram.h"
 
 NAMESPACE_UPP
 
@@ -13,7 +14,9 @@ struct RoadmapData {
 	AtlasMap                head;
 	AtlasRules              rules;
 	Vector<AtlasEvent>      events;   // in replay order after LoadRoadmap
-	Vector<AtlasRoadmapMessage> messages;
+	Vector<AtlasRoadmapMessage> messages;   // the report: findings, ledger errors, cut-off
+	Vector<AtlasRoadmapMessage> findings;   // every finding, for the warnings page
+	Vector<AtlasWarningAck> acks;
 	Vector<Vector<String>>  worlds;
 };
 
@@ -29,7 +32,10 @@ static bool LoadRoadmap(WebRequest& r, const String& family, RoadmapData& d, Str
 	if(!AtlasLoadEvents(r.Site().data_root, family, d.events, err))
 		return false;
 	AtlasSortEvents(d.events, d.f);
-	AtlasReplayRoadmap(d.head, d.f, d.rules, d.events, d.messages, d.worlds);
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, family, d.acks, ack_err);
+	AtlasRoadmapReport(d.head, d.f, d.rules, d.events, d.acks, d.messages, d.worlds);
+	AtlasRoadmapFindings(d.head, d.f, d.rules, d.events, d.findings, d.worlds);
 	return true;
 }
 
@@ -620,12 +626,300 @@ String AtlasSubjectsView(WebRequest& r, const AtlasMap& head, const AtlasFamily&
 // Routes
 // ---------------------------------------------------------------------------
 
+// The version diagram. Y is the version (earlier at the top); X only spreads the bubbles of one row across the width.
+// The bubbles are HTML, so their text can be selected and copied; the arrows are one SVG layer under them. The page is
+// as tall as the versions need. Work bubbles are coloured by what they produce, not by progress: the diagram is the
+// plan and everything in it is planned. Gates are dashed; accomplished features use the settled colour; a banner heads
+// each minor group. Hovering a bubble highlights its arrows.
+static Vector<String> WrapText(const String& text, int chars)
+{
+	Vector<String> lines;
+	String line;
+	for(String word : Split(text, ' ')) {
+		if(word.IsEmpty())
+			continue;
+		// A word longer than a line breaks inside itself, as the page does with overflow-wrap.
+		while(word.GetCount() > chars) {
+			if(line.GetCount()) {
+				lines.Add(line);
+				line.Clear();
+			}
+			lines.Add(word.Left(chars));
+			word = word.Mid(chars);
+		}
+		if(line.GetCount() && line.GetCount() + 1 + word.GetCount() > chars) {
+			lines.Add(line);
+			line.Clear();
+		}
+		if(line.GetCount())
+			line << ' ';
+		line << word;
+	}
+	if(line.GetCount())
+		lines.Add(line);
+	return lines;
+}
+
+// The colour of a work bubble says what it produces: a package realization, a test gate, a feature, or data.
+static String WorkVar(const AtlasDiagramBubble& b)
+{
+	for(const String& lit : b.effects)
+		if(lit.StartsWith("realized:"))
+			return "--accent";
+	if(b.processing)
+		return "--st-planned";
+	for(const String& lit : b.effects) {
+		if(lit.StartsWith("tested:")) return "--st-notready";
+		if(lit.StartsWith("done:")) return "--st-settled";
+	}
+	return "--st-active";
+}
+
+// A width in 1/1000 of the page as a percentage with one decimal: 905 -> "90.5".
+static String Tenths(int units)
+{
+	return AsString(units / 10) + "." + AsString(units % 10);
+}
+
+// An element or action name with a break opportunity before each capital that follows a lower-case letter or digit,
+// and before - and _, so long CamelCase names wrap inside a bubble instead of running out of it.
+static String BreakableName(const String& text)
+{
+	String out;
+	for(int i = 0; i < text.GetCount(); i++) {
+		int c = text[i];
+		bool camel = i > 0 && IsUpper(c) && (IsLower(text[i - 1]) || IsDigit(text[i - 1]));
+		if(camel || c == '-' || c == '_')
+			out << "<wbr>";
+		out << AtlasEsc(String(c, 1));
+	}
+	return out;
+}
+
+static String BubbleText(const AtlasDiagramBubble& b)
+{
+	if(b.kind == "gate") return b.literal;
+	if(b.kind == "accomplished") return "feature " + b.text;
+	return b.text;
+}
+
+// A banner and a declaration take a line to themselves; other bubbles share lines.
+static bool FullWidth(const String& kind)
+{
+	return kind == "banner" || kind == "declaration" || kind == "taskgroup";
+}
+
+static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const String& family)
+{
+	Vector<String> hidden;
+	for(const AtlasElement& e : d.head.elements)
+		if(!AtlasElementVisibleTo(r, d.f.head_key, e.id))
+			hidden.Add(e.id);
+	// The file records are the declarations; a family with none shows no declaration bubbles.
+	Vector<AtlasFile> files;
+	String file_err;
+	AtlasListFiles(r.Site().data_root, family, files, file_err);
+	AtlasVersionDiagram g;
+	AtlasBuildDiagram(d.f, d.head, d.rules, d.events, files, hidden, g);
+	if(g.rows.IsEmpty())
+		return "<p class=\"ad-empty\">No versions yet.</p>";
+
+	// Layout units: X and width are in 1/1000 of the width; Y and heights are pixels.
+	const int UNITS = 1000, LEFT = 90, RIGHT = 16, GAP = 14, TOP = 12, ROW_GAP = 40, LINE_GAP = 12, LINE_H = 19, PAD = 16;
+	const int avail = UNITS - LEFT - RIGHT;
+	int nb = g.bubbles.GetCount();
+	Vector<int> bx, by, bw, bh;
+	for(int i = 0; i < nb; i++) { bx.Add(0); by.Add(0); bw.Add(0); bh.Add(0); }
+	Vector<int> row_top;
+	int y = TOP;
+	const int PER_LINE = 4;   // bubbles side by side; a version with more stacks them in further lines
+	for(int ri = 0; ri < g.rows.GetCount(); ri++) {
+		const AtlasDiagramRow& row = g.rows[ri];
+		int n = row.bubbles.GetCount();
+		row_top.Add(y);
+		if(n == 0) {
+			y += 30 + ROW_GAP;
+			continue;
+		}
+		for(int first = 0; first < n;) {
+			// A banner or a declaration takes a line to itself; other bubbles share lines of PER_LINE.
+			bool full = FullWidth(g.bubbles[row.bubbles[first]].kind);
+			int m = 1;
+			if(!full)
+				while(m < PER_LINE && first + m < n && !FullWidth(g.bubbles[row.bubbles[first + m]].kind))
+					m++;
+			int slot = full ? avail : min(300, (avail - (m - 1) * GAP) / m);
+			int total = full ? avail : m * slot + (m - 1) * GAP;
+			int x0 = full ? LEFT : LEFT + (avail - total) / 2;
+			int line_h = 40;
+			int chars = max(12, slot / 9);
+			for(int k = 0; k < m; k++) {
+				int i = row.bubbles[first + k];
+				const AtlasDiagramBubble& b = g.bubbles[i];
+				int lines = WrapText(BubbleText(b), chars).GetCount();
+				if(b.kind == "declaration" || b.kind == "taskgroup") {
+					// Three columns share the signature lines of a full-width bubble.
+					int col_chars = max(12, chars / 3), n_lines = 0;
+					for(const String& line : b.declares)
+						n_lines += WrapText(line, col_chars).GetCount();
+					lines += (n_lines + 2) / 3;
+				}
+				if(b.kind == "task") {
+					lines += WrapText(b.detail, chars).GetCount();
+					if(b.assignee.GetCount())
+						lines += WrapText("assignee: " + b.assignee, chars).GetCount();
+				}
+				if(b.kind == "work") {
+					lines += 1;   // the package name can wrap onto a line of its own
+					if(b.action != b.text)
+						lines += WrapText(b.action, chars).GetCount();
+					lines += WrapText(b.detail, chars).GetCount();
+					lines += WrapText("in: " + (b.requires.IsEmpty() ? String("none") : JoinComma(b.requires)), chars).GetCount();
+					lines += WrapText("out: " + (b.effects.IsEmpty() ? String("none") : JoinComma(b.effects)), chars).GetCount();
+					if(b.waits.GetCount())
+						lines += WrapText("waits for " + JoinComma(b.waits), chars).GetCount();
+					if(b.unmet)
+						lines += WrapText("entry not produced above", chars).GetCount();
+				}
+				bx[i] = x0 + (full ? 0 : k * (slot + GAP));
+				bw[i] = slot;
+				bh[i] = max(36, PAD + LINE_H * max(1, lines) + 6);
+				line_h = max(line_h, bh[i]);
+			}
+			for(int k = 0; k < m; k++) {
+				int i = row.bubbles[first + k];
+				by[i] = y + (line_h - bh[i]) / 2;
+			}
+			y += line_h + LINE_GAP;
+			first += m;
+		}
+		y += ROW_GAP - LINE_GAP;
+	}
+	int H = y;
+
+	StringBuffer s;
+	s << "<style>"
+	     ".dg-wrap{position:relative;width:100%}"
+	     ".dg-b{position:absolute;box-sizing:border-box;border-radius:14px;padding:8px 10px;overflow:visible;overflow-wrap:anywhere;"
+	     "font-size:13px;line-height:19px;color:var(--fg);background:var(--panel)}"
+	     ".dg-b .dg-k{color:var(--muted);font-size:12px}"
+	     ".dg-work{border:2px solid}"
+	     ".dg-gate{border:1.5px dashed var(--line)}"
+	     ".dg-accomplished{border:1.5px solid var(--st-settled)}"
+	     ".dg-banner{border:2px solid var(--accent);background:var(--control);font-weight:600}"
+	     ".dg-declaration{border:1.5px solid var(--st-future)}"
+	     ".dg-task{border:2px solid var(--st-trouble)}"
+	     ".dg-taskgroup{border:2px solid var(--st-trouble)}"
+	     ".dg-unmet{border-style:dashed;border-color:var(--st-trouble) !important}"
+	     ".dg-row{position:absolute;left:0;font:12px monospace;color:var(--muted)}"
+	     ".dg-arrows{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}"
+	     "</style>";
+	s << "<div class=\"ad-panel\"><div class=\"ad-panel-header\">Version diagram</div>"
+	  << "<p class=\"ad-hint\">Down is later. Coloured bubbles are work: in is what must hold first, out is what it sets. "
+	     "Dashed bubbles are gates the version needs, settled-colour bubbles are features the version declares. Hover a bubble "
+	     "to see its arrows. A red bubble is a task still to be done; an arrow runs from it to the work that needs it. A dashed red bubble needs something no version above produces; an amber line names a task that is not drawn. "
+	     "A declaration bubble lists the files and the class and function signatures its work declares, with no bodies.</p>"
+	  << "<p class=\"ad-hint\">Colour says what the work produces: <span class=\"dg-k\" style=\"color:var(--accent)\">package</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-active)\">data</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-planned)\">processing</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-settled)\">feature</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-notready)\">test gate</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-trouble)\">task</span>. "
+	     "The diagram is the plan: nothing here shows progress.</p>"
+	  << "<div class=\"dg-wrap\" style=\"height:" << H << "px\">";
+
+	for(int ri = 0; ri < g.rows.GetCount(); ri++)
+		s << "<div class=\"dg-row\" style=\"top:" << row_top[ri] + 12 << "px\">" << AtlasEsc(g.rows[ri].label) << "</div>";
+
+	s << "<svg class=\"dg-arrows\" viewBox=\"0 0 " << UNITS << " " << H << "\" preserveAspectRatio=\"none\" aria-hidden=\"true\">"
+	     "<defs><marker id=\"dg-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" "
+	     "orient=\"auto\"><path d=\"M0,0 L10,5 L0,10 z\" style=\"fill:var(--muted)\"/></marker></defs>";
+	for(int a = 0; a < g.arrows.GetCount(); a++) {
+		const AtlasDiagramArrow& ar = g.arrows[a];
+		int fx = bx[ar.from] + bw[ar.from] / 2, fy = by[ar.from] + bh[ar.from];
+		int tx = bx[ar.to] + bw[ar.to] / 2, ty = by[ar.to];
+		String path;
+		if(g.bubbles[ar.from].row == g.bubbles[ar.to].row) {
+			int sx = bx[ar.from] + bw[ar.from], sy = by[ar.from] + bh[ar.from] / 2;
+			int ex = bx[ar.to], ey = by[ar.to] + bh[ar.to] / 2;
+			path << "M" << sx << "," << sy << " C" << (sx + ex) / 2 << "," << sy << " " << (sx + ex) / 2 << "," << ey << " " << ex << "," << ey;
+		}
+		else
+			path << "M" << fx << "," << fy << " C" << fx << "," << (fy + ty) / 2 << " " << tx << "," << (fy + ty) / 2 << " " << tx << "," << ty;
+		s << "<path class=\"dg-arrow\" data-from=\"" << ar.from << "\" data-to=\"" << ar.to << "\" d=\"" << path
+		  << "\" style=\"fill:none;stroke:var(--muted);stroke-width:1.2;opacity:.7\" marker-end=\"url(#dg-arrow)\"/>";
+	}
+	s << "</svg>";
+
+	for(int i = 0; i < nb; i++) {
+		const AtlasDiagramBubble& b = g.bubbles[i];
+		String cls = "dg-b dg-" + b.kind + (b.unmet ? " dg-unmet" : String());
+		String style = "left:" + Tenths(bx[i]) + "%;top:" + AsString(by[i]) + "px;width:"
+		             + Tenths(bw[i]) + "%;height:" + AsString(bh[i]) + "px;";
+		if(b.kind == "work") {
+			String v = WorkVar(b);
+			style << "border-color:var(" << v << ");background:color-mix(in srgb, var(" << v << ") 22%, var(--panel));";
+		}
+		else if(b.kind == "accomplished")
+			style << "background:color-mix(in srgb, var(--st-settled) 18%, var(--panel));";
+		else if(b.kind == "task" || b.kind == "taskgroup")
+			style << "background:color-mix(in srgb, var(--st-trouble) 14%, var(--panel));";
+		else if(b.kind == "declaration")
+			style << "background:color-mix(in srgb, var(--st-future) 12%, var(--panel));";
+		s << "<div class=\"" << cls << "\" data-bubble=\"" << i << "\" style=\"" << style << "\">";
+		if(b.kind == "work") {
+			s << "<strong>" << BreakableName(b.text) << "</strong>";
+			if(b.pkg.GetCount())
+				s << " <span class=\"ad-mono\">" << AtlasEsc(b.pkg) << "</span>";
+			if(b.action != b.text)
+				s << "<div class=\"ad-mono\">" << BreakableName(b.action) << "</div>";
+			if(b.detail.GetCount())
+				s << "<div class=\"dg-k\">" << AtlasEsc(b.detail) << "</div>";
+			s << "<div>in: " << (b.requires.IsEmpty() ? String("none") : AtlasEsc(JoinComma(b.requires))) << "</div>"
+			  << "<div>out: " << (b.effects.IsEmpty() ? String("none") : AtlasEsc(JoinComma(b.effects))) << "</div>";
+			if(b.waits.GetCount())
+				s << "<div style=\"color:var(--st-notready)\">waits for " << AtlasEsc(JoinComma(b.waits)) << "</div>";
+			if(b.unmet)
+				s << "<div style=\"color:var(--st-trouble)\">entry not produced above</div>";
+		}
+		else if(b.kind == "task") {
+			s << "<strong>" << BreakableName(b.text) << "</strong>"
+			     "<div class=\"dg-k\">" << AtlasEsc(b.detail) << "</div>";
+			if(b.assignee.GetCount())
+				s << "<div>assignee: " << AtlasEsc(b.assignee) << "</div>";
+		}
+		else if(b.kind == "declaration" || b.kind == "taskgroup") {
+			s << "<strong>" << BreakableName(b.text) << "</strong>";
+			if(b.kind == "declaration")
+				s << " <span class=\"dg-k\">declares</span>";
+			s << "<div style=\"column-count:3;column-gap:18px\">";
+			for(const String& line : b.declares)
+				s << "<div class=\"ad-mono\" style=\"white-space:pre-wrap\">" << BreakableName(line) << "</div>";
+			s << "</div>";
+		}
+		else
+			s << AtlasEsc(BubbleText(b));
+		s << "</div>";
+	}
+	s << "</div></div>";
+
+	s << "<script>(function(){var wrap=document.querySelector('.dg-wrap');if(!wrap)return;"
+	     "function hi(id,on){wrap.querySelectorAll('.dg-arrow').forEach(function(p){if(p.getAttribute('data-from')===id||p.getAttribute('data-to')===id){p.style.stroke=on?'var(--accent)':'var(--muted)';p.style.strokeWidth=on?'2.5':'1.2';p.style.opacity=on?'1':'.7';}});}"
+	     "wrap.querySelectorAll('.dg-b').forEach(function(g){var id=g.getAttribute('data-bubble');g.addEventListener('mouseenter',function(){hi(id,true);});g.addEventListener('mouseleave',function(){hi(id,false);});});})();</script>";
+
+	(void)edit;
+	(void)family;
+	return s;
+}
+
 static const char *RoadmapTitle(const String& section)
 {
+	if(section == "diagram") return "Diagram";
 	if(section == "timeline") return "Timeline";
 	if(section == "rules") return "Rules";
 	if(section == "tasks") return "Tasks";
 	if(section == "checks") return "Checks";
+	if(section == "warnings") return "Warnings";
 	if(section == "next") return "What's next";
 	return "Versions";
 }
@@ -696,6 +990,80 @@ static String NextBody(WebRequest& r, const RoadmapData& d, bool edit, const Str
 	return String(b);
 }
 
+// The warnings: every finding that is a warning, with its comment. A warning without a comment is open, and an open
+// warning is an error at the head until someone comments on it. Comments that no longer match a finding are stale.
+static String WarningsBody(WebRequest& r, const RoadmapData& d, bool edit, const String& family)
+{
+	Vector<AtlasRoadmapMessage> warnings;
+	for(const AtlasRoadmapMessage& m : d.findings)
+		if(m.severity == "warning")
+			warnings.Add(pick(m));
+	Vector<AtlasWarningAck> stale = AtlasStaleAcks(d.findings, d.acks);
+	int open = 0;
+	Vector<String> ids;
+	for(const AtlasRoadmapMessage& m : warnings) {
+		String id = AtlasWarningId(m);
+		ids.Add(id);
+		bool acked = false;
+		for(const AtlasWarningAck& a : d.acks)
+			if(a.warning_id == id)
+				acked = true;
+		if(!acked)
+			open++;
+	}
+	StringBuffer b;
+	b << "<div class=\"ad-cards\">"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << warnings.GetCount() << "</div><div class=\"ad-card-label\">warnings</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << open << "</div><div class=\"ad-card-label\">open</div></div>"
+	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << stale.GetCount() << "</div><div class=\"ad-card-label\">stale comments</div></div>"
+	  << "</div><p class=\"ad-note\">A warning does not block a change. An open warning is an error at the head until it has a comment: say why it is acceptable, or what will change in the plan. A comment goes stale when its finding changes or goes away.</p>";
+
+	b << "<section class=\"ad-panel\"><header><h2>Findings</h2></header>"
+	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Status</th><th>Version</th><th>Subject</th><th>Rule</th><th>Finding</th><th>Comment</th></tr>";
+	for(int i = 0; i < warnings.GetCount(); i++) {
+		const AtlasRoadmapMessage& m = warnings[i];
+		const AtlasWarningAck *ack = nullptr;
+		for(const AtlasWarningAck& a : d.acks)
+			if(a.warning_id == ids[i])
+				ack = &a;
+		String subject = AtlasEsc(m.subject_kind) + ": " + AtlasEsc(m.subject_id);
+		if(m.subject_kind == "element" && m.subject_id.GetCount())
+			subject = "<a href=\"" + AtlasEsc(r.Site().Url("atlas/" + d.f.head_key + "/element/" + m.subject_id)) + "\">" + subject + "</a>";
+		b << "<tr><td><span class=\"ad-pill " << (ack ? "is-ok" : "is-warn") << "\">" << (ack ? "commented" : "open")
+		  << "</span></td><td>" << AtlasEsc(VidLabel(d, m.vid)) << "</td><td>" << subject << "</td><td class=\"ad-mono\">"
+		  << AtlasEsc(m.rule) << "</td><td>" << AtlasEsc(m.text) << "</td><td>";
+		if(ack) {
+			b << AtlasEsc(ack->comment) << "<div class=\"ad-note\">" << AtlasEsc(ack->actor) << " &middot; " << AtlasEsc(ack->at) << "</div>";
+			if(edit)
+				b << ApiForm(Api(r, family, "/warning/unack"), "ad-inline") << "<input type=\"hidden\" name=\"id\" value=\""
+				  << AtlasEsc(ids[i]) << "\"><button class=\"ad-btn\" type=\"submit\">Remove comment</button></form>";
+		}
+		else if(edit)
+			b << ApiForm(Api(r, family, "/warning/ack"), "ad-inline") << "<input type=\"hidden\" name=\"id\" value=\""
+			  << AtlasEsc(ids[i]) << "\">" << Field("Comment", "comment", String(), "ad-wide")
+			  << "<button class=\"ad-btn is-primary\" type=\"submit\">Comment</button></form>";
+		b << "</td></tr>";
+	}
+	if(!warnings.GetCount())
+		b << "<tr><td colspan=\"6\" class=\"ad-empty\">No warnings.</td></tr>";
+	b << "</table></div></section>";
+
+	if(stale.GetCount()) {
+		b << "<section class=\"ad-panel\"><header><h2>Stale comments</h2><p>These comments are on findings that no longer exist. Remove them, or keep them until the finding returns.</p></header>"
+		  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Rule</th><th>Subject</th><th>Finding when commented</th><th>Comment</th><th>By</th></tr>";
+		for(const AtlasWarningAck& a : stale) {
+			b << "<tr><td class=\"ad-mono\">" << AtlasEsc(a.rule) << "</td><td>" << AtlasEsc(a.subject_kind) << ": " << AtlasEsc(a.subject_id)
+			  << "</td><td>" << AtlasEsc(a.text) << "</td><td>" << AtlasEsc(a.comment) << "</td><td>" << AtlasEsc(a.actor);
+			if(edit)
+				b << ApiForm(Api(r, family, "/warning/unack"), "ad-inline") << "<input type=\"hidden\" name=\"id\" value=\""
+				  << AtlasEsc(a.warning_id) << "\"><button class=\"ad-btn\" type=\"submit\">Remove</button></form>";
+			b << "</td></tr>";
+		}
+		b << "</table></div></section>";
+	}
+	return String(b);
+}
+
 static void RoadmapSection(WebRequest& r, const String& family, const String& section)
 {
 	if(!AtlasFamilyReadable(r, family)) {
@@ -710,13 +1078,15 @@ static void RoadmapSection(WebRequest& r, const String& family, const String& se
 	}
 	bool edit = AtlasCanEditFamily(r, family);
 	String body;
-	if(section == "timeline") body = TimelineBody(r, d, edit, family);
+	if(section == "diagram") body = DiagramBody(r, d, edit, family);
+	else if(section == "timeline") body = TimelineBody(r, d, edit, family);
 	else if(section == "rules") body = RulesBody(r, d, edit, family);
 	else if(section == "tasks") body = TasksBody(r, d, edit, family);
 	else if(section == "checks") body = ChecksBody(r, d);
+	else if(section == "warnings") body = WarningsBody(r, d, edit, family);
 	else if(section == "next") body = NextBody(r, d, edit, family);
 	else body = VersionsBody(r, d, edit, family);
-	if(!edit && section != "checks" && section != "timeline" && section != "next")
+	if(!edit && section != "checks" && section != "warnings" && section != "timeline" && section != "next" && section != "diagram")
 		body = "<p class=\"ad-note\">Read-only: editing needs the admin role on this site.</p>" + body;
 	String attrs = " data-csrf=\"" + AtlasEsc(r.CsrfToken()) + "\"";
 	body += "<script>" + AtlasRoadmapScript() + "</script>";

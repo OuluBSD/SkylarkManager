@@ -27,6 +27,28 @@ bool AtlasKindValid(const String& kind)
 	return kind == "continent" || kind == "block" || kind == "place" || kind == "sea";
 }
 
+bool AtlasSpanKindValid(const String& kind)
+{
+	return kind.IsEmpty() || kind == "class" || kind == "function";
+}
+
+bool AtlasSignatureValid(const String& signature)
+{
+	return signature.Find('{') < 0 && signature.Find('}') < 0 && signature.Find('\n') < 0;
+}
+
+bool AtlasPkgValid(const String& pkg)
+{
+	if(pkg.IsEmpty())
+		return true;
+	if(pkg.GetCount() > 64 || !IsUpper(pkg[0]))
+		return false;
+	for(int i = 1; i < pkg.GetCount(); i++)
+		if(!IsUpper(pkg[i]) && !IsLower(pkg[i]) && !IsDigit(pkg[i]))
+			return false;
+	return true;
+}
+
 bool AtlasStatusValid(const String& status)
 {
 	return status == "hot" || status == "active" || status == "planned" || status == "not-ready"
@@ -172,6 +194,8 @@ void AtlasValidate(const AtlasMap& m, AtlasCheck& out)
 			out.errors.Add("element " + e.id + " has an unknown kind: " + e.kind);
 		if(!AtlasStatusValid(e.status))
 			out.errors.Add("element " + e.id + " has an unknown status: " + e.status);
+		if(!AtlasPkgValid(e.pkg))
+			out.errors.Add("element " + e.id + " has a package name that is not CapitalCase: " + e.pkg);
 		if(e.w <= 0 || e.h <= 0)
 			out.errors.Add("element " + e.id + " must have a positive size");
 		if(e.x < 0 || e.y < 0)
@@ -918,6 +942,10 @@ struct AtlasWorldState {
 			int have = AtlasStageRank(p.GetCount() == 3 ? StageOf(p[1]) : String());
 			value = p.GetCount() == 3 && have >= 0 && have >= AtlasStageRank(p[2]);
 		}
+		else if(name.StartsWith("task:") && name.EndsWith(":done"))
+			// A planned task (proposed, not dropped) meets the entry of the work that waits for it, as planned work applies
+			// its expected outcome. The done atom itself stays the record of real completion, for contract-task.
+			value = Has(name) || Has(name.Left(name.GetCount() - 5) + ":planned");
 		else
 			value = Has(name);
 		return neg ? !value : value;
@@ -1025,9 +1053,10 @@ static bool DependencyCycle(const AtlasMap& head, String& on)
 	return on.GetCount() > 0;
 }
 
-void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
-                        const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
-                        Vector<Vector<String>>& worlds)
+// One replay. Like a compiler, it records an error and carries on; AtlasReplayRoadmap decides how many to show.
+static void ReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                          const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                          Vector<Vector<String>>& worlds)
 {
 	out.Clear();
 	worlds.Clear();
@@ -1123,8 +1152,11 @@ void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasR
 							       e.subject_id + " reaches " + e.stage + " before " + r.from + " is merged");
 				w.stages.GetAdd(e.subject_id) = e.stage;
 			}
-			else if(e.type == "proposed")
-				;  // a proposal sets no atom; the contract reads it through the target
+			else if(e.type == "proposed") {
+				// A proposed task is planned: it meets its gated work until it is dropped. Other proposals set no atom.
+				if(e.subject_kind == "task")
+					w.Apply("task:" + e.subject_id + ":planned");
+			}
 			else if(e.subject_kind == "task") {
 				String acc = "task:" + e.subject_id + ":accepted";
 				String done = "task:" + e.subject_id + ":done";
@@ -1139,10 +1171,13 @@ void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasR
 				}
 				else if(e.type == "dropped") {
 					w.Apply("!" + acc);
+					w.Apply("!task:" + e.subject_id + ":planned");
 					w.Apply("!" + done);
 				}
-				else if(e.type == "reopened")
+				else if(e.type == "reopened") {
 					w.Apply("!" + done);
+					w.Apply("task:" + e.subject_id + ":planned");
+				}
 			}
 		}
 
@@ -1182,6 +1217,245 @@ void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasR
 			Report(out, "warning", head_vid, "element", e.id, "unscheduled",
 			       "element " + e.id + " has no event; it exists at the head only");
 	}
+}
+
+// Like a compiler, the playback records errors and carries on. Once max_errors errors are reached the report stops
+// there: later messages are dropped and a too-many-errors error says so. The replay state is still computed in full.
+static void StopAfterErrors(Vector<AtlasRoadmapMessage>& out, int max_errors)
+{
+	int errors = 0;
+	for(int i = 0; i < out.GetCount(); i++) {
+		if(out[i].severity != "error")
+			continue;
+		if(++errors <= max_errors)
+			continue;
+		out.Trim(i);
+		Report(out, "error", String(), "rules", String(), "too-many-errors",
+		       Format("the playback stopped after %d errors; later findings are not reported", max_errors));
+		return;
+	}
+}
+
+void AtlasRoadmapFindings(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                          const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                          Vector<Vector<String>>& worlds)
+{
+	ReplayRoadmap(head, f, rules, events, out, worlds);
+	AtlasStrictness(head, f, rules, events, out);
+}
+
+void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                        const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                        Vector<Vector<String>>& worlds)
+{
+	AtlasRoadmapFindings(head, f, rules, events, out, worlds);
+	StopAfterErrors(out, rules.strict.max_errors);
+}
+
+String AtlasWarningId(const AtlasRoadmapMessage& m)
+{
+	String key = m.rule + "|" + m.subject_kind + "|" + m.subject_id + "|" + m.vid + "|" + m.text;
+	uint64 h = 14695981039346656037ULL;  // FNV-1a offset basis
+	for(int i = 0; i < key.GetCount(); i++) {
+		h ^= (byte)key[i];
+		h *= 1099511628211ULL;           // FNV-1a prime
+	}
+	StringBuffer hex;
+	for(int shift = 60; shift >= 0; shift -= 4)
+		hex.Cat("0123456789abcdef"[(h >> shift) & 15]);
+	return String(hex);
+}
+
+// The ledger: every warning needs a comment from a person. A warning without one is an error at the head, so
+// the head stays red until each warning is acknowledged. The error is named after the warning, not its subject.
+static void AddLedger(Vector<AtlasRoadmapMessage>& out, const Vector<AtlasWarningAck>& acks, const AtlasFamily& f)
+{
+	String head_vid = f.versions.IsEmpty() ? String() : f.versions[f.Head()].vid;
+	int findings = out.GetCount();
+	for(int i = 0; i < findings; i++) {
+		if(out[i].severity != "warning")
+			continue;
+		String id = AtlasWarningId(out[i]);
+		bool acked = false;
+		for(const AtlasWarningAck& a : acks)
+			if(a.warning_id == id)
+				acked = true;
+		if(!acked)
+			Report(out, "error", head_vid, "warning", id, "unacknowledged-warning",
+			       out[i].rule + " on " + out[i].subject_kind + " " + out[i].subject_id
+			       + " has no comment yet: comment on it, or change the plan");
+	}
+}
+
+void AtlasRoadmapReport(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                        const Vector<AtlasEvent>& events, const Vector<AtlasWarningAck>& acks,
+                        Vector<AtlasRoadmapMessage>& out, Vector<Vector<String>>& worlds)
+{
+	AtlasRoadmapFindings(head, f, rules, events, out, worlds);
+	StopAfterErrors(out, rules.strict.max_errors);  // the cut-off counts plan errors only
+	AddLedger(out, acks, f);
+}
+
+Vector<AtlasWarningAck> AtlasStaleAcks(const Vector<AtlasRoadmapMessage>& findings, const Vector<AtlasWarningAck>& acks)
+{
+	Vector<String> live;
+	for(const AtlasRoadmapMessage& m : findings)
+		if(m.severity == "warning")
+			live.Add(AtlasWarningId(m));
+	Vector<AtlasWarningAck> stale;
+	for(const AtlasWarningAck& a : acks)
+		if(IndexOf(live, a.warning_id) < 0)
+			stale.Add(a);
+	return stale;
+}
+
+// ---------------------------------------------------------------------------
+// Strictness: the rules themselves must be able to fail. A unit of work is an action: its entry is its requires (or
+// an explicit entry_none), its outcome is its effects. Thresholds come from rules.strict.
+// ---------------------------------------------------------------------------
+
+static String AtomName(const String& lit)
+{
+	return lit.StartsWith("!") ? lit.Mid(1) : lit;
+}
+
+static bool IsDerivedName(const String& name)
+{
+	return name.StartsWith("stage:") || name.StartsWith("task:") || name.StartsWith("pool:")
+	    || name.StartsWith("metric:") || name.StartsWith("approved:") || name.StartsWith("testset:");
+}
+
+static bool SameList(const Vector<String>& a, const Vector<String>& b)
+{
+	if(a.GetCount() != b.GetCount())
+		return false;
+	for(int i = 0; i < a.GetCount(); i++)
+		if(a[i] != b[i])
+			return false;
+	return true;
+}
+
+void AtlasStrictness(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                     const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out)
+{
+	// Each unit of work: its entry and its outcome must be declared, and it must stay small.
+	int entry_none = 0;
+	for(const AtlasAction& a : rules.actions) {
+		if(a.entry_none)
+			entry_none++;
+		if(a.requires.IsEmpty() && !a.entry_none)
+			Report(out, "error", String(), "action", a.name, "entry-undeclared",
+			       "action " + a.name + " declares no entry: give it requires, or set entry_none");
+		if(a.entry_none && !a.requires.IsEmpty())
+			Report(out, "error", String(), "action", a.name, "entry-conflict",
+			       "action " + a.name + " sets entry_none and also has requires");
+		if(a.effects.IsEmpty())
+			Report(out, "error", String(), "action", a.name, "outcome-missing",
+			       "action " + a.name + " declares no outcome: give it effects");
+		if(a.effects.GetCount() > rules.strict.max_outcomes)
+			Report(out, "error", String(), "action", a.name, "work-too-broad",
+			       Format("action %s has %d outcomes; the limit is %d: split it",
+			              a.name, a.effects.GetCount(), rules.strict.max_outcomes));
+	}
+	if(rules.actions.GetCount() && entry_none > rules.strict.max_entry_none_share * rules.actions.GetCount())
+		Report(out, "warning", String(), "rules", "actions", "entry-none-heavy",
+		       Format("%d of %d actions declare no entry; the limit is %d%%", entry_none, rules.actions.GetCount(),
+		              int(rules.strict.max_entry_none_share * 100)));
+
+	// An element that has child elements is a grouping, not a unit of work. One that also runs an action is too broad.
+	for(const AtlasElement& el : head.elements) {
+		bool has_children = false;
+		for(const AtlasElement& c : head.elements)
+			if(c.parent == el.id)
+				has_children = true;
+		if(!has_children)
+			continue;
+		for(const AtlasEvent& e : events)
+			if(e.subject_kind == "element" && e.subject_id == el.id && e.action.GetCount()) {
+				Report(out, "error", e.vid, "element", el.id, "work-too-broad",
+				       "element " + el.id + " has child elements and also runs action " + e.action + ": split the work");
+				break;
+			}
+	}
+
+	// A version with an empty contract, or one repeating its predecessor's, changes nothing that the rules check.
+	for(int i = 0; i < f.versions.GetCount(); i++) {
+		const AtlasVersion& v = f.versions[i];
+		String label = AtlasVersionLabel(v.code);
+		if(v.requires.IsEmpty())
+			Report(out, "warning", v.vid, "version", v.vid, "vacuous-version", "version " + label + " has an empty contract");
+		else if(i > 0 && SameList(v.requires, f.versions[i - 1].requires))
+			Report(out, "warning", v.vid, "version", v.vid, "vacuous-version",
+			       "version " + label + " repeats the contract of " + AtlasVersionLabel(f.versions[i - 1].code));
+	}
+
+	// Everything the rules, contracts, events and constraints read. An outcome outside this set has no consequence.
+	Vector<String> needed, set;
+	auto need = [&](const String& lit) {
+		String n = AtomName(lit);
+		if(IndexOf(needed, n) < 0)
+			needed.Add(n);
+	};
+	for(const AtlasVersion& v : f.versions)
+		for(const String& lit : v.requires)
+			need(lit);
+	for(const AtlasConstraint& c : rules.constraints) {
+		for(const String& lit : c.when)
+			need(lit);
+		for(const String& lit : c.must)
+			need(lit);
+	}
+	for(const AtlasAction& a : rules.actions) {
+		for(const String& lit : a.requires)
+			need(lit);
+		for(const String& lit : a.effects)
+			if(!lit.StartsWith("!"))
+				set.Add(lit);
+	}
+	for(const AtlasEvent& e : events) {
+		for(const String& lit : e.requires)
+			need(lit);
+		for(const String& lit : e.effects)
+			if(!lit.StartsWith("!"))
+				set.Add(lit);
+	}
+	for(const String& lit : rules.initial)
+		set.Add(AtomName(lit));
+
+	// Static approximation: an outcome counts as read when any contract, constraint, event or action reads it, whatever
+	// the order. A stronger test would need the replay to record when each read happens.
+	for(const AtlasAction& a : rules.actions)
+		for(const String& lit : a.effects)
+			if(!lit.StartsWith("!") && IndexOf(needed, AtomName(lit)) < 0)
+				Report(out, "warning", String(), "action", a.name, "outcome-never-used",
+				       "action " + a.name + " sets " + lit + ", which no contract, constraint, event or action reads");
+
+	// Atoms: a gate that nothing needs is decoration; an atom that is needed but set by nothing can never hold.
+	for(const AtlasAtomDef& d : rules.atoms)
+		if(d.gate && IndexOf(needed, d.name) < 0)
+			Report(out, "warning", String(), "atom", d.name, "atom-never-required",
+			       "gate " + d.name + " is required by no version, action, event or constraint");
+	for(const String& n : needed)
+		if(!IsDerivedName(n) && IndexOf(set, n) < 0)
+			Report(out, "warning", String(), "atom", n, "atom-never-set",
+			       "atom " + n + " is required, but no action, event or initial state sets it");
+
+	// A version that moves more elements to merge_to_master than the limit is a big bang, not a step.
+	for(const AtlasVersion& v : f.versions) {
+		int merged = 0;
+		for(const AtlasEvent& e : events)
+			if(e.vid == v.vid && e.subject_kind == "element" && e.type == "stage" && e.stage == "merge_to_master")
+				merged++;
+		if(merged > rules.strict.max_step_elements)
+			Report(out, "warning", v.vid, "version", v.vid, "big-bang",
+			       Format("version %s moves %d elements to merge_to_master; the limit is %d",
+			              AtlasVersionLabel(v.code), merged, rules.strict.max_step_elements));
+	}
+
+	for(const AtlasEvent& e : events)
+		if(e.subject_kind == "task" && e.type == "done" && e.text.IsEmpty())
+			Report(out, "warning", e.vid, "task", e.subject_id, "task-done-no-note",
+			       "task " + e.subject_id + " is done with no result note");
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1807,131 @@ bool AtlasWhatsNext(const AtlasMap& head, const AtlasFamily& f, const AtlasRules
 			out.todo.Add(pick(x));
 		}
 	return true;
+}
+
+// A relative path inside a source root: not empty, not absolute, no "..", no backslash, no control character.
+bool AtlasSafeSourcePath(const String& path)
+{
+	if(path.IsEmpty() || path[0] == '/' || path.Find("..") >= 0 || path.Find('\\') >= 0)
+		return false;
+	for(int i = 0; i < path.GetCount(); i++)
+		if((byte)path[i] < 32)
+			return false;
+	return true;
+}
+
+static bool IsMarker(const AtlasFileEdit& e)
+{
+	return e.start == 0 && e.end == -1 && e.text.IsEmpty();
+}
+
+Vector<String> AtlasSplitLines(const String& text)
+{
+	Vector<String> out;
+	String cur;
+	for(int i = 0; i < text.GetCount(); i++) {
+		if(text[i] == '\n') {
+			out.Add(cur);
+			cur.Clear();
+		}
+		else
+			cur.Cat(text[i]);
+	}
+	if(!cur.IsEmpty())
+		out.Add(cur);
+	return out;
+}
+
+bool AtlasApplyEdit(Vector<String>& lines, const AtlasFileEdit& e, String& err)
+{
+	if(IsMarker(e))
+		return true;
+	int n = lines.GetCount();
+	if(e.start < 1 || e.end < e.start - 1 || e.end > n || e.start > n + 1) {
+		err = Format("edit of %s replaces lines %d..%d, but the text has %d lines", e.vid, e.start, e.end, n);
+		return false;
+	}
+	Vector<String> out;
+	for(int i = 0; i < e.start - 1; i++)
+		out.Add(lines[i]);
+	for(const String& l : AtlasSplitLines(e.text))
+		out.Add(l);
+	for(int i = e.end; i < n; i++)
+		out.Add(lines[i]);
+	lines = pick(out);
+	return true;
+}
+
+bool AtlasApplyEdits(const Vector<String>& base, const Vector<AtlasFileEdit>& edits, Vector<String>& out, String& err)
+{
+	out.Clear();
+	for(const String& l : base)
+		out.Add(l);
+	for(const AtlasFileEdit& e : edits)
+		if(!AtlasApplyEdit(out, e, err))
+			return false;
+	return true;
+}
+
+bool AtlasValidateFile(const AtlasFile& f, const AtlasMap& head, const AtlasFamily& fam,
+                       const Vector<String>& base, bool has_base, AtlasCheck& out)
+{
+	int before = out.errors.GetCount();
+	if(!AtlasIdValid(f.id))
+		out.errors.Add("file id must be a valid id: " + f.id);
+	if(!AtlasIdValid(f.source))
+		out.errors.Add("file " + f.id + ": source must be a valid alias: " + f.source);
+	if(!AtlasSafeSourcePath(f.path))
+		out.errors.Add("file " + f.id + ": path must be relative, inside the source root: " + f.path);
+	if(f.kind != "code" && f.kind != "artifact")
+		out.errors.Add("file " + f.id + ": kind must be code or artifact");
+
+	int prev_end = 0;
+	for(const AtlasFileSpan& sp : f.spans) {
+		String where = "file " + f.id + " span " + sp.id;
+		if(!AtlasIdValid(sp.id))
+			out.errors.Add(where + ": id must be a valid id");
+		if(head.FindElement(sp.element) < 0)
+			out.errors.Add(where + ": element " + sp.element + " is not in the goal map");
+		if(sp.role != "evidence" && sp.role != "destination")
+			out.errors.Add(where + ": role must be evidence or destination");
+		if(!AtlasSpanKindValid(sp.kind))
+			out.errors.Add(where + ": kind must be empty, class or function");
+		if(sp.signature.GetCount() && (sp.kind.IsEmpty() || !AtlasSignatureValid(sp.signature)))
+			out.errors.Add(where + ": a signature needs a class or function kind, and holds one line with no body");
+		if(sp.start == 0 && sp.end == 0)
+			continue;
+		if(sp.start < 1 || sp.end < sp.start)
+			out.errors.Add(where + ": lines must read start >= 1 and end >= start");
+		else if(sp.start <= prev_end)
+			out.errors.Add(where + ": overlaps or precedes the span before it; spans are ordered and disjoint");
+		else
+			prev_end = sp.end;
+	}
+
+	int prev_index = -1;
+	for(const AtlasFileEdit& e : f.edits) {
+		String where = "file " + f.id + " edit of " + e.vid;
+		int vi = fam.Find(e.vid);
+		if(vi < 0)
+			out.errors.Add(where + ": version " + e.vid + " is not in the family");
+		else if(vi < prev_index)
+			out.errors.Add(where + ": edits must follow version order");
+		else
+			prev_index = vi;
+		if(head.FindElement(e.element) < 0)
+			out.errors.Add(where + ": element " + e.element + " is not in the goal map");
+		if(!IsMarker(e) && (e.start < 1 || e.end < e.start - 1))
+			out.errors.Add(where + ": lines must read start >= 1 and end >= start - 1");
+	}
+
+	if(has_base && f.kind == "code") {
+		Vector<String> text;
+		String err;
+		if(!AtlasApplyEdits(base, f.edits, text, err))
+			out.errors.Add("file " + f.id + ": " + err);
+	}
+	return out.errors.GetCount() == before;
 }
 
 END_UPP_NAMESPACE

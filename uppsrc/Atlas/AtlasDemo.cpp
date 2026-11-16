@@ -159,7 +159,7 @@ static void DemoRules(AtlasRules& r)
 // The version list. Codes: major*1000000 + minor*1000 + patch.
 static void DemoVersions(AtlasFamily& f)
 {
-	f.head_key = "xr-inspect-v1.0.0";
+	f.head_key = "xr-inspect";
 	const char *vids[] = { "v1", "v2", "v3", "v4", "v5", "v6" };
 	int codes[] = { 1, 2, 3, 4, 1000, 1000000 };
 	for(int i = 0; i < 6; i++) {

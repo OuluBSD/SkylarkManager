@@ -3793,9 +3793,9 @@ CONSOLE_APP_MAIN
 
 		// Creating a map version: fenced, admin-only, one document per version.
 		VectorMap<String, String> cf;
-		cf.Add("map", "pkr");
+		cf.Add("map", "demo");
 		cf.Add("version", "v0.0.1");
-		cf.Add("title", "PKR <v0.0.1>");
+		cf.Add("title", "DEMO <v0.0.1>");
 		cf.Add("__wf_csrf__", adm_csrf);
 		HttpReply rcreate = HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(cf));
 		Check(rcreate.status == 302, "the admin creates a map version");
@@ -3811,44 +3811,44 @@ CONSOLE_APP_MAIN
 		atlas_grant.kind = "user";
 		atlas_grant.value = "aview";
 		private_map.grants.Add(pick(atlas_grant));
-		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		atlas_policy.SetRecord("demo", private_map);
 		String atlas_policy_error;
 		Check(atlas_policy.Save(atlas_policy_error), "atlas private map policy is persisted");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 404,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo", anon_h, "").status == 404,
 		      "atlas anonymous reads hide a private map");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 200,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo", vw_h, "").status == 200,
 		      "atlas named-user policy grant preserves authenticated map access");
 		HttpReply hidden_index = HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "");
 		Check(hidden_index.status == 200, "atlas hidden-map index remains readable");
-		Check(hidden_index.body.Find("pkr-v0.0.1") < 0, "atlas hidden-map index omits hidden map identity");
+		Check(hidden_index.body.Find("demo") < 0, "atlas hidden-map index omits hidden map identity");
 		Check(hidden_index.body.Find("No maps yet.") >= 0,
 		      "atlas all-hidden map index uses the no-maps state");
 		Check(hidden_index.body.Find("<table>") < 0,
 		      "atlas all-hidden map index does not reveal collection existence through an empty table");
 		private_map.grants.Clear();
 		private_map.level = CONTENT_PUBLIC;
-		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		atlas_policy.SetRecord("demo", private_map);
 		all_maps_hidden.level = CONTENT_PUBLIC;
 		atlas_policy.Site() = all_maps_hidden;
 		Check(atlas_policy.Save(atlas_policy_error), "atlas public map policy is restored");
 		private_map.level = CONTENT_PUBLIC_ONLY;
-		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		atlas_policy.SetRecord("demo", private_map);
 		Check(atlas_policy.Save(atlas_policy_error) &&
-		      HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 200 &&
-		      HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 404,
+		      HttpCall("GET", ATLAS_PORT, "/atlas/demo", anon_h, "").status == 200 &&
+		      HttpCall("GET", ATLAS_PORT, "/atlas/demo", vw_h, "").status == 404,
 		      "atlas public-only policy narrows authenticated reads while preserving anonymous reads");
 		private_map.level = CONTENT_PUBLIC;
-		atlas_policy.SetRecord("pkr-v0.0.1", private_map);
+		atlas_policy.SetRecord("demo", private_map);
 		atlas_policy.Site() = all_maps_hidden;
 		Check(atlas_policy.Save(atlas_policy_error), "atlas map policy restored after public-only test");
 		VectorMap<String, String> nocsrf;
-		nocsrf.Add("map", "pkr2");
+		nocsrf.Add("map", "demo2");
 		nocsrf.Add("version", "v1");
 		nocsrf.Add("title", "No token");
 		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", adm_h, FormEncode(nocsrf)).status == 403,
 		      "a mutation without the CSRF token is refused by the fence");
 		VectorMap<String, String> cross_f;
-		cross_f.Add("map", "pkr");
+		cross_f.Add("map", "demo");
 		cross_f.Add("version", "v0.0.1");
 		cross_f.Add("title", "x");
 		cross_f.Add("__wf_csrf__", "not-the-token");
@@ -3858,19 +3858,19 @@ CONSOLE_APP_MAIN
 		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", evil_h, FormEncode(cross_f)).status == 403,
 		      "a mutation from a foreign origin is refused by the fence");
 		VectorMap<String, String> vcreate;
-		vcreate.Add("map", "pkr3");
+		vcreate.Add("map", "demo3");
 		vcreate.Add("version", "v1");
 		vcreate.Add("title", "Viewer");
 		vcreate.Add("__wf_csrf__", vw_csrf);
 		Check(HttpCall("POST", ATLAS_PORT, "/atlas/create", vw_h, FormEncode(vcreate)).status == 403,
 		      "a viewer cannot create a map");
 
-		HttpReply rmap = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		HttpReply rmap = HttpCall("GET", ATLAS_PORT, "/atlas/demo", adm_h, "");
 		String rev1 = AtlasRevisionOf(rmap.body);
 		Check(rmap.status == 200 && rmap.body.Find("atlas-canvas") >= 0 && rmap.body.Find("Edit (admin)") >= 0
 		      && rmap.body.Find("data-editable=\"1\"") >= 0, "the admin sees the canvas and the edit panel");
 		Check(rev1.GetCount() > 0, "the map page embeds its revision");
-		Check(rmap.body.Find("PKR &lt;v0.0.1&gt;") >= 0 && rmap.body.Find("PKR <v0.0.1>") < 0,
+		Check(rmap.body.Find("DEMO &lt;v0.0.1&gt;") >= 0 && rmap.body.Find("DEMO <v0.0.1>") < 0,
 		      "the map title is escaped");
 		Check(rmap.body.Find("id=\"atlas-maximize\"") >= 0 && rmap.body.Find("id=\"atlas-contents\"") >= 0 &&
 		      rmap.body.Find("id=\"atlas-fit\"") >= 0 && rmap.body.Find("id=\"atlas-actual\"") >= 0 &&
@@ -3885,54 +3885,54 @@ CONSOLE_APP_MAIN
 		sf.Add("seed", "Main | block | active\n  Child | place | hot\n  Other\nChild -> Other: feeds\n");
 		sf.Add("expected_revision", rev1);
 		sf.Add("__wf_csrf__", adm_csrf);
-		HttpReply rseed = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf));
+		HttpReply rseed = HttpCall("POST", ATLAS_PORT, "/atlas/demo/seed", adm_h, FormEncode(sf));
 		Check(rseed.status == 302, "the admin seeds the empty map");
 		ContentPolicy hidden_element;
 		hidden_element.level = CONTENT_PRIVATE;
-		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		atlas_policy.SetRecord("demo:element:e_child", hidden_element);
 		Check(atlas_policy.Save(atlas_policy_error), "atlas element policy is persisted");
-		HttpReply element_filtered_map = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "");
+		HttpReply element_filtered_map = HttpCall("GET", ATLAS_PORT, "/atlas/demo", anon_h, "");
 		Check(element_filtered_map.status == 200, "atlas policy-filtered map remains viewable");
 		Check(element_filtered_map.body.Find("e_child") < 0 && element_filtered_map.body.Find(">Child<") < 0,
 		      "atlas map view filters hidden element ids and names from its HTML and embedded map");
 		HttpReply element_filtered_index = HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "");
 		Check(element_filtered_index.body.Find("<td>2</td><td>0</td>") >= 0,
 		      "atlas map index counts only visible elements and roads");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", anon_h, "").status == 404,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_child", anon_h, "").status == 404,
 		      "atlas element detail hides a policy-restricted element");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "").status == 404,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_child", vw_h, "").status == 404,
 		      "atlas element policy does not grant access to an authenticated stranger");
 		ContentGrant element_grant;
 		element_grant.kind = "user";
 		element_grant.value = "aview";
 		hidden_element.grants.Add(pick(element_grant));
-		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		atlas_policy.SetRecord("demo:element:e_child", hidden_element);
 		bool element_grant_saved = atlas_policy.Save(atlas_policy_error);
 		ContentPrincipal element_principal;
 		element_principal.authenticated = true;
 		element_principal.username = "aview";
-		ContentPolicy stored_element_policy = atlas_policy.Record("pkr-v0.0.1:element:e_child");
+		ContentPolicy stored_element_policy = atlas_policy.Record("demo:element:e_child");
 		Check(element_grant_saved && ContentVisible(stored_element_policy, element_principal),
 		      "atlas element policy stores the named-user grant");
-		HttpReply element_granted = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "");
+		HttpReply element_granted = HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_child", vw_h, "");
 		Check(element_granted.status == 200,
 		      "atlas per-element named-user grant allows the element after map visibility");
 		hidden_element.grants.Clear();
 		hidden_element.level = CONTENT_PUBLIC;
-		atlas_policy.SetRecord("pkr-v0.0.1:element:e_child", hidden_element);
+		atlas_policy.SetRecord("demo:element:e_child", hidden_element);
 		Check(atlas_policy.Save(atlas_policy_error), "atlas public element policy is restored");
-		HttpReply rmap2 = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		HttpReply rmap2 = HttpCall("GET", ATLAS_PORT, "/atlas/demo", adm_h, "");
 		String rev2 = AtlasRevisionOf(rmap2.body);
 		Check(rmap2.body.Find("3 elements") >= 0 && rmap2.body.Find("1 roads") >= 0,
 		      "the seed creates its elements and road");
 		Check(rev2 != rev1, "a write advances the revision");
-		HttpReply rseed_stale = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf));
+		HttpReply rseed_stale = HttpCall("POST", ATLAS_PORT, "/atlas/demo/seed", adm_h, FormEncode(sf));
 		Check(rseed_stale.status == 409, "a stale revision is refused as a conflict");
 		VectorMap<String, String> sf2;
 		sf2.Add("seed", "Again\n");
 		sf2.Add("expected_revision", rev2);
 		sf2.Add("__wf_csrf__", adm_csrf);
-		HttpReply rseed_again = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/seed", adm_h, FormEncode(sf2));
+		HttpReply rseed_again = HttpCall("POST", ATLAS_PORT, "/atlas/demo/seed", adm_h, FormEncode(sf2));
 		Check(rseed_again.status == 400, "a seed never fills a map that already has elements");
 
 		// Adding an element with markup in its name: escaped on the page and in the embedded JSON.
@@ -3947,9 +3947,9 @@ CONSOLE_APP_MAIN
 		af.Add("h", "100");
 		af.Add("expected_revision", rev2);
 		af.Add("__wf_csrf__", adm_csrf);
-		HttpReply radd = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/add", adm_h, FormEncode(af));
+		HttpReply radd = HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/add", adm_h, FormEncode(af));
 		Check(radd.status == 302, "the admin adds an element");
-		HttpReply rmap3 = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "");
+		HttpReply rmap3 = HttpCall("GET", ATLAS_PORT, "/atlas/demo", adm_h, "");
 		String rev3 = AtlasRevisionOf(rmap3.body);
 		Check(rmap3.body.Find("&lt;img src=x") >= 0 && rmap3.body.Find("<img src=x") < 0,
 		      "an element name with markup is escaped in the page");
@@ -3962,12 +3962,12 @@ CONSOLE_APP_MAIN
 		mf.Add("y", "60");
 		mf.Add("expected_revision", rev3);
 		mf.Add("__wf_csrf__", adm_csrf);
-		HttpReply rmove = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mf));
+		HttpReply rmove = HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/move", adm_h, FormEncode(mf));
 		ValueMap mj = ParseJSON(rmove.body);
 		Check(rmove.status == 200 && (bool)mj["ok"], "a move saves and answers ok");
-		String rev4 = AtlasRevisionOf(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", adm_h, "").body);
+		String rev4 = AtlasRevisionOf(HttpCall("GET", ATLAS_PORT, "/atlas/demo", adm_h, "").body);
 		Check(rev4 != rev3 && (String)mj["revision"] == rev4, "a move advances the revision it returns");
-		HttpReply rmove_stale = HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mf));
+		HttpReply rmove_stale = HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/move", adm_h, FormEncode(mf));
 		Check(rmove_stale.status == 409, "a move from a stale page is refused");
 		VectorMap<String, String> mv;
 		mv.Add("id", "e_child");
@@ -3975,7 +3975,7 @@ CONSOLE_APP_MAIN
 		mv.Add("y", "60");
 		mv.Add("expected_revision", rev4);
 		mv.Add("__wf_csrf__", adm_csrf);
-		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", adm_h, FormEncode(mv)).status == 400,
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/move", adm_h, FormEncode(mv)).status == 400,
 		      "a move to a negative position is refused by validation");
 		VectorMap<String, String> vmove;
 		vmove.Add("id", "e_child");
@@ -3983,7 +3983,7 @@ CONSOLE_APP_MAIN
 		vmove.Add("y", "60");
 		vmove.Add("expected_revision", rev4);
 		vmove.Add("__wf_csrf__", vw_csrf);
-		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/move", vw_h, FormEncode(vmove)).status == 403,
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/move", vw_h, FormEncode(vmove)).status == 403,
 		      "a viewer cannot move an element");
 
 		// Roads: one plane only; a road from a child to its own block is refused.
@@ -3994,7 +3994,7 @@ CONSOLE_APP_MAIN
 		rf.Add("label", "cross");
 		rf.Add("expected_revision", rev4);
 		rf.Add("__wf_csrf__", adm_csrf);
-		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/road/add", adm_h, FormEncode(rf)).status == 400,
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/demo/road/add", adm_h, FormEncode(rf)).status == 400,
 		      "a road across planes is refused");
 
 		// Deleting a block that still has children is refused.
@@ -4002,19 +4002,19 @@ CONSOLE_APP_MAIN
 		df.Add("id", "e_main");
 		df.Add("expected_revision", rev4);
 		df.Add("__wf_csrf__", adm_csrf);
-		Check(HttpCall("POST", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/delete", adm_h, FormEncode(df)).status == 400,
+		Check(HttpCall("POST", ATLAS_PORT, "/atlas/demo/element/delete", adm_h, FormEncode(df)).status == 400,
 		      "a block with children cannot be deleted");
 
 		// Reads: the viewer sees the map read-only; the element detail shows its path.
-		HttpReply rvm = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "");
+		HttpReply rvm = HttpCall("GET", ATLAS_PORT, "/atlas/demo", vw_h, "");
 		Check(rvm.status == 200 && rvm.body.Find("data-editable=\"0\"") >= 0 && rvm.body.Find("Edit (admin)") < 0,
 		      "the viewer reads the map with no edit panel");
-		HttpReply rve = HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", vw_h, "");
+		HttpReply rve = HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_child", vw_h, "");
 		Check(rve.status == 200 && rve.body.Find("Containment path") >= 0 && rve.body.Find("Main") >= 0,
 		      "the element detail shows its containment path");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_nope", vw_h, "").status == 404,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_nope", vw_h, "").status == 404,
 		      "an unknown element is not found");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", vw_h, "").status == 200
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo", vw_h, "").status == 200
 		      && HttpCall("GET", ATLAS_PORT, "/atlas/no-such-map", vw_h, "").status == 404,
 		      "an unknown map is not found");
 		String atlas_policy_root = AppendFileName(s_root, "atlas");
@@ -4025,9 +4025,9 @@ CONSOLE_APP_MAIN
 		      "atlas corrupt policy fails to load");
 		Check(HttpCall("GET", ATLAS_PORT, "/atlas", anon_h, "").status == 503,
 		      "atlas corrupt policy fails closed on the map index");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1", anon_h, "").status == 503,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo", anon_h, "").status == 503,
 		      "atlas corrupt policy fails closed on map detail");
-		Check(HttpCall("GET", ATLAS_PORT, "/atlas/pkr-v0.0.1/element/e_child", anon_h, "").status == 503,
+		Check(HttpCall("GET", ATLAS_PORT, "/atlas/demo/element/e_child", anon_h, "").status == 503,
 		      "atlas corrupt policy fails closed on element detail");
 		FileDelete(atlas_policy_path);
 		Check(atlas_policy.Load(atlas_policy_root, atlas_load_error), "atlas policy store recovers after corrupt fixture removal");

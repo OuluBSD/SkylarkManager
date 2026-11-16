@@ -575,6 +575,178 @@ static void TaskReopen(WebRequest& r)  { TaskEvent(r, "reopened"); }
 static void TaskAssign(WebRequest& r)  { TaskEvent(r, "assigned"); }
 static void TaskNote(WebRequest& r)    { TaskEvent(r, "note"); }
 
+// A warning id is the 16 hex digits AtlasWarningId makes.
+static bool WarningIdValid(const String& id)
+{
+	if(id.GetCount() != 16)
+		return false;
+	for(int i = 0; i < id.GetCount(); i++)
+		if(String("0123456789abcdef").Find(id[i]) < 0)
+			return false;
+	return true;
+}
+
+// The warnings of the roadmap, each with its comment if it has one, and the comments that no longer match a
+// finding. Every finding is listed here, whatever the cut-off of the checks.
+static void WarningsGet(WebRequest& r)
+{
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	if(!AtlasMapReadable(r, f.head_key)) {
+		ApiFail(r, 404, "map not found");
+		return;
+	}
+	AtlasMap head;
+	String hrev, err;
+	if(!LoadHead(r, f, head, hrev))
+		return;
+	AtlasRules rules;
+	String rrev;
+	if(!LoadRules(r, rules, rrev))
+		return;
+	Vector<AtlasEvent> events;
+	if(!AtlasLoadEvents(r.Site().data_root, r.PathArg(0), events, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	Vector<AtlasWarningAck> acks;
+	if(!AtlasLoadAcks(r.Site().data_root, r.PathArg(0), acks, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	Vector<AtlasRoadmapMessage> findings;
+	Vector<Vector<String>> worlds;
+	AtlasRoadmapFindings(head, f, rules, events, findings, worlds);
+
+	int errors = 0, acknowledged = 0;
+	ValueArray items;
+	for(const AtlasRoadmapMessage& m : findings) {
+		if(m.severity == "error") {
+			errors++;
+			continue;
+		}
+		String id = AtlasWarningId(m);
+		const AtlasWarningAck *ack = nullptr;
+		for(const AtlasWarningAck& a : acks)
+			if(a.warning_id == id)
+				ack = &a;
+		ValueMap item;
+		item.Add("id", id);
+		item.Add("rule", m.rule);
+		item.Add("subject_kind", m.subject_kind);
+		item.Add("subject_id", m.subject_id);
+		item.Add("vid", m.vid);
+		item.Add("text", m.text);
+		item.Add("acknowledged", ack != nullptr);
+		item.Add("comment", ack ? ack->comment : String());
+		item.Add("actor", ack ? ack->actor : String());
+		item.Add("at", ack ? ack->at : String());
+		if(ack)
+			acknowledged++;
+		items.Add(item);
+	}
+	ValueArray stale;
+	for(const AtlasWarningAck& a : AtlasStaleAcks(findings, acks))
+		stale.Add(ParseJSON(StoreAsJson(a)));
+
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("errors", errors);
+	out.Add("warnings", items.GetCount());
+	out.Add("acknowledged", acknowledged);
+	out.Add("open", items.GetCount() - acknowledged);
+	out.Add("items", items);
+	out.Add("stale", stale);
+	r.Json(out);
+}
+
+// POST api/atlas/<family>/warning/ack (editor): a comment on one current warning, by its id. The comment is required.
+static void WarningAck(WebRequest& r)
+{
+	if(!ApiAuthFamily(r, r.PathArg(0)))
+		return;
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	AtlasMap head;
+	String hrev, err;
+	if(!LoadHead(r, f, head, hrev))
+		return;
+	AtlasRules rules;
+	String rrev;
+	if(!LoadRules(r, rules, rrev))
+		return;
+	Vector<AtlasEvent> events;
+	if(!AtlasLoadEvents(r.Site().data_root, r.PathArg(0), events, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	String id = TrimBoth(P(r, "id"));
+	String comment = TrimBoth(P(r, "comment"));
+	if(!WarningIdValid(id)) {
+		ApiFail(r, 400, "id must be the warning id from the warnings list");
+		return;
+	}
+	if(comment.IsEmpty()) {
+		ApiFail(r, 400, "a warning needs a comment: say why it is acceptable, or what will change");
+		return;
+	}
+	Vector<AtlasRoadmapMessage> findings;
+	Vector<Vector<String>> worlds;
+	AtlasRoadmapFindings(head, f, rules, events, findings, worlds);
+	int pos = -1;
+	for(int i = 0; i < findings.GetCount() && pos < 0; i++)
+		if(findings[i].severity == "warning" && AtlasWarningId(findings[i]) == id)
+			pos = i;
+	if(pos < 0) {
+		ApiFail(r, 404, "no current warning has that id");
+		return;
+	}
+	const AtlasRoadmapMessage& m = findings[pos];
+	AtlasWarningAck a;
+	a.warning_id = id;
+	a.rule = m.rule;
+	a.subject_kind = m.subject_kind;
+	a.subject_id = m.subject_id;
+	a.vid = m.vid;
+	a.text = m.text;
+	a.comment = comment;
+	a.actor = r.User().username;
+	a.at = AtlasNowIso();
+	if(!AtlasSaveAck(r.Site().data_root, r.PathArg(0), a, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", id);
+	r.Json(out);
+}
+
+// POST api/atlas/<family>/warning/unack (editor): removes the comment on one warning, current or stale.
+static void WarningUnack(WebRequest& r)
+{
+	if(!ApiAuthFamily(r, r.PathArg(0)))
+		return;
+	String id = TrimBoth(P(r, "id"));
+	if(!WarningIdValid(id)) {
+		ApiFail(r, 400, "id must be the warning id from the warnings list");
+		return;
+	}
+	String err;
+	if(!AtlasDeleteAck(r.Site().data_root, r.PathArg(0), id, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", id);
+	r.Json(out);
+}
+
 // The replay's messages. ?vid= keeps the ones at one version. Never refuses anything: findings only.
 static void CheckGet(WebRequest& r)
 {
@@ -601,7 +773,10 @@ static void CheckGet(WebRequest& r)
 	}
 	Vector<AtlasRoadmapMessage> messages;
 	Vector<Vector<String>> worlds;
-	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	Vector<AtlasWarningAck> acks;
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, r.PathArg(0), acks, ack_err);
+	AtlasRoadmapReport(head, f, rules, events, acks, messages, worlds);
 	String only = P(r, "vid");
 	ValueArray list;
 	int errors = 0, warnings = 0;
@@ -796,7 +971,10 @@ static void StateGet(WebRequest& r)
 		return;
 	Vector<AtlasRoadmapMessage> messages;
 	Vector<Vector<String>> worlds;
-	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	Vector<AtlasWarningAck> acks;
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, r.PathArg(0), acks, ack_err);
+	AtlasRoadmapReport(head, f, rules, events, acks, messages, worlds);
 	ValueArray list;
 	for(const AtlasSubjectState& s : states)
 		if(s.present && SubjectVisible(r, f.head_key, s.kind, s.id, s.from, s.to))
@@ -1169,7 +1347,7 @@ static void MapSeed(WebRequest& r)
 {
 	if(!ApiAuth(r, true))
 		return;
-	AtlasImportResult res = AtlasSeedMap(r.Site().data_root, AtlasDocKey(P(r, "map"), P(r, "version")), P(r, "seed"));
+	AtlasImportResult res = AtlasSeedMap(r.Site().data_root, AtlasMapKey(P(r, "map")), P(r, "seed"));
 	if(!res.Ok()) {
 		ApiFail(r, res.status, res.error);
 		return;
@@ -1183,6 +1361,202 @@ static void MapSeed(WebRequest& r)
 	r.Json(out);
 }
 
+// ---------------------------------------------------------------------------
+// File records: the repository files a roadmap refers to. The text of an edit is code, so a reader who is not an
+// editor of the family gets the record without it.
+// ---------------------------------------------------------------------------
+
+static bool FamilyEditor(WebRequest& r, const String& family)
+{
+	return r.HasUser() && AtlasCanEditFamily(r, family);
+}
+
+static Value FileValue(const AtlasFile& f, bool editor)
+{
+	return ParseJSON(StoreAsJson(AtlasFileForViewer(f, editor)));
+}
+
+// GET api/atlas/<family>/files: the family's file records, for every reader of its head map.
+static void FilesGet(WebRequest& r)
+{
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	if(!AtlasMapReadable(r, f.head_key)) {
+		ApiFail(r, 404, "map not found");
+		return;
+	}
+	bool editor = FamilyEditor(r, r.PathArg(0));
+	Vector<AtlasFile> files;
+	String err;
+	if(!AtlasListFiles(r.Site().data_root, r.PathArg(0), files, err)) {
+		ApiFail(r, 500, err);
+		return;
+	}
+	ValueArray list;
+	for(const AtlasFile& x : files)
+		list.Add(FileValue(x, editor));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("files", list);
+	r.Json(out);
+}
+
+// The text of a code file at a version (the head when vid is empty), read live from its source root. Editors only.
+static bool FileLinesAt(WebRequest& r, const AtlasFile& file, const AtlasFamily& f, const String& vid,
+                        Vector<String>& lines)
+{
+	String root = AtlasSourceRoot(r.Site().data_root, r.PathArg(0), file.source);
+	String err;
+	Vector<String> base;
+	if(!AtlasReadSourceLines(root, file.path, base, err)) {
+		ApiFail(r, 409, "the source of " + file.id + " cannot be read: " + err);
+		return false;
+	}
+	String at = vid.IsEmpty() ? f.versions[f.Head()].vid : vid;
+	if(!AtlasFileTextAt(file, base, f, at, lines, err)) {
+		ApiFail(r, 400, err);
+		return false;
+	}
+	return true;
+}
+
+// GET api/atlas/<family>/file/<id>[?vid=]: one record; for an editor of a code file, its text at the version.
+static void FileGet(WebRequest& r)
+{
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	if(!AtlasMapReadable(r, f.head_key)) {
+		ApiFail(r, 404, "map not found");
+		return;
+	}
+	AtlasFile file;
+	String rev, err;
+	if(!AtlasLoadFile(r.Site().data_root, r.PathArg(0), r.PathArg(1), file, rev, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	bool editor = FamilyEditor(r, r.PathArg(0));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("revision", rev);
+	out.Add("file", FileValue(file, editor));
+	if(editor && file.kind == "code") {
+		Vector<String> lines;
+		if(!FileLinesAt(r, file, f, P(r, "vid"), lines))
+			return;
+		ValueArray text;
+		for(const String& l : lines)
+			text.Add(l);
+		out.Add("lines", text);
+	}
+	r.Json(out);
+}
+
+// Checks a file record against the head map, the family and, for a code file, its source text.
+static bool CheckFile(WebRequest& r, const AtlasFile& file, const AtlasFamily& f, const AtlasMap& head)
+{
+	Vector<String> base;
+	bool has_base = false;
+	if(file.kind == "code") {
+		String root = AtlasSourceRoot(r.Site().data_root, r.PathArg(0), file.source);
+		String err;
+		if(!AtlasReadSourceLines(root, file.path, base, err)) {
+			ApiFail(r, 400, "file " + file.id + ": the source cannot be read: " + err);
+			return false;
+		}
+		has_base = true;
+	}
+	AtlasCheck c;
+	AtlasValidateFile(file, head, f, base, has_base, c);
+	if(!c.Ok()) {
+		ApiFail(r, 400, ApiJoin(c.errors));
+		return false;
+	}
+	return true;
+}
+
+// POST api/atlas/<family>/file/put (editor): the whole record, as JSON in "file", checked before it is saved.
+static void FilePut(WebRequest& r)
+{
+	if(!ApiAuthFamily(r, r.PathArg(0)))
+		return;
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	AtlasMap head;
+	String hrev, err;
+	if(!AtlasLoadMap(r.Site().data_root, f.head_key, head, hrev, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	AtlasFile file;
+	if(!LoadFromJson(file, P(r, "file"))) {
+		ApiFail(r, 400, "file must be a file record in JSON");
+		return;
+	}
+	if(!CheckFile(r, file, f, head))
+		return;
+	String nrev;
+	if(!AtlasSaveFile(r.Site().data_root, r.PathArg(0), file, P(r, "expected_revision"), nrev, err)) {
+		ApiFail(r, err.Find("revision conflict") >= 0 ? 409 : 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", file.id);
+	out.Add("revision", nrev);
+	r.Json(out);
+}
+
+// POST api/atlas/<family>/file/edit (editor): appends one edit to a file: file, vid, element, start, end, text, note.
+static void FileEdit(WebRequest& r)
+{
+	if(!ApiAuthFamily(r, r.PathArg(0)))
+		return;
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	AtlasMap head;
+	String hrev, err;
+	if(!AtlasLoadMap(r.Site().data_root, f.head_key, head, hrev, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	AtlasFile file;
+	String rev;
+	if(!AtlasLoadFile(r.Site().data_root, r.PathArg(0), P(r, "file"), file, rev, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	AtlasFileEdit e;
+	e.vid = P(r, "vid");
+	e.element = P(r, "element");
+	e.start = IntP(r, "start");
+	e.end = IntP(r, "end");
+	e.text = P(r, "text");
+	e.note = P(r, "note");
+	file.edits.Add(pick(e));
+	if(!CheckFile(r, file, f, head))
+		return;
+	String nrev;
+	if(!AtlasSaveFile(r.Site().data_root, r.PathArg(0), file, rev, nrev, err)) {
+		ApiFail(r, err.Find("revision conflict") >= 0 ? 409 : 500, err);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", file.id);
+	out.Add("revision", nrev);
+	out.Add("edits", file.edits.GetCount());
+	r.Json(out);
+}
+
 void InstallAtlasApi(EngineSite& site)
 {
 	SiteRouter& rt = site.Router();
@@ -1190,6 +1564,10 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/init", VersionsInit);
 	rt.Add("POST", "api/atlas/create", MapCreate);
 	rt.Add("POST", "api/atlas/seed", MapSeed);
+	rt.Add("api/atlas/*/files", FilesGet);
+	rt.Add("api/atlas/*/file/*", FileGet);
+	rt.Add("POST", "api/atlas/*/file/put", FilePut);
+	rt.Add("POST", "api/atlas/*/file/edit", FileEdit);
 	rt.Add("POST", "api/atlas/*/versions/insert", VersionsInsert);
 	rt.Add("POST", "api/atlas/*/versions/rename", VersionsRename);
 	rt.Add("POST", "api/atlas/*/versions/delete", VersionsDelete);
@@ -1218,10 +1596,26 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/task/assign", TaskAssign);
 	rt.Add("POST", "api/atlas/*/task/note", TaskNote);
 	rt.Add("api/atlas/*/check", CheckGet);
+	rt.Add("api/atlas/*/warnings", WarningsGet);
+	rt.Add("POST", "api/atlas/*/warning/ack", WarningAck);
+	rt.Add("POST", "api/atlas/*/warning/unack", WarningUnack);
 
 	CommandManifest& cm = TheWebEngine().Manifest();
 	const char *read = "session account";
 	const char *write = "admin";
+	cm.Add(site.id, site.title, HttpCommand("atlas-files", "GET", "api/atlas/*/files", read,
+	        "json", "The file records of a family: the repository files its roadmap refers to, with spans and edits",
+	        { "map:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-file", "GET", "api/atlas/*/file/*", read,
+	        "json", "One file record; an editor also gets its text at a version (vid, default the head)",
+	        { "map:string:required", "id:string:required", "vid:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-file-put", "POST", "api/atlas/*/file/put", write,
+	        "json", "Save a whole file record (editor), checked against the head map and the source text",
+	        { "map:string:required", "file:text:required", "expected_revision:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-file-edit", "POST", "api/atlas/*/file/edit", write,
+	        "json", "Append one edit to a file (editor): the lines start..end of the text become text at version vid",
+	        { "map:string:required", "file:string:required", "vid:string:required", "element:string:required",
+	          "start:int:required", "end:int:required", "text:text", "note:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-versions", "GET", "api/atlas/*/versions", read,
 	        "json", "The version list of a map family and its head", { "map:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-init", "POST", "api/atlas/*/init", write,
@@ -1311,6 +1705,14 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-check", "GET", "api/atlas/*/check", read,
 	        "json", "The roadmap findings: contract, requires, constraint, stage and dependency messages (never refuses)",
 	        { "map:string:required", "vid:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-warnings", "GET", "api/atlas/*/warnings", read,
+	        "json", "The warnings of a map with their comments, the open count, and comments that no longer match a finding",
+	        { "map:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-warning-ack", "POST", "api/atlas/*/warning/ack", write,
+	        "json", "Comment on one current warning (editor): the comment is required",
+	        { "map:string:required", "id:string:required", "comment:text:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-warning-unack", "POST", "api/atlas/*/warning/unack", write,
+	        "json", "Remove the comment on one warning (editor)", { "map:string:required", "id:string:required" }));
 }
 
 END_UPP_NAMESPACE

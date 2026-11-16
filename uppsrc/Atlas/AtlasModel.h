@@ -11,6 +11,8 @@ NAMESPACE_UPP
 
 bool AtlasIdValid(const String& id);          // [A-Za-z0-9_-], 1..64
 bool AtlasKindValid(const String& kind);      // continent | block | place | sea
+// A package name in U++ style: CapitalCase letters and digits, starting with a capital. "" is allowed (no package).
+bool AtlasPkgValid(const String& pkg);
 bool AtlasStatusValid(const String& status);  // hot | active | planned | not-ready | future | settled | trouble
 bool AtlasRoadKindValid(const String& kind);  // progress | communication | dependency
 
@@ -31,10 +33,11 @@ struct AtlasElement : Moveable<AtlasElement> {
 	AtlasGoal goal;
 	String    notes;
 	String    updated_at;
+	String    pkg;         // the U++ package the element implements (CapitalCase); a virtual group for data; "" for structure
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("kind", kind)("name", name)("parent", parent)("status", status)
-		  ("x", x)("y", y)("w", w)("h", h)("goal", goal)("notes", notes)("updated_at", updated_at);
+		  ("x", x)("y", y)("w", w)("h", h)("goal", goal)("notes", notes)("updated_at", updated_at)("pkg", pkg);
 	}
 };
 
@@ -121,10 +124,10 @@ struct AtlasVersion : Moveable<AtlasVersion> {
 	void Jsonize(JsonIO& io) { io("vid", vid)("code", code)("requires", requires); }
 };
 
-// The version list of one map family ("pkr"). versions are ascending by code. The last one is the
+// The version list of one map family ("demo"). versions are ascending by code. The last one is the
 // head: the head document holds its topology, and every earlier version is rebuilt by replaying events.
 struct AtlasFamily : Moveable<AtlasFamily> {
-	String               head_key;   // document key of the head map, e.g. "pkr-v0.0.1"
+	String               head_key;   // key of the head map, the family name, e.g. "demo"
 	Vector<AtlasVersion> versions;
 
 	void Jsonize(JsonIO& io) { io("head", head_key)("versions", versions); }
@@ -193,13 +196,19 @@ struct AtlasAtomDef : Moveable<AtlasAtomDef> {
 	void Jsonize(JsonIO& io) { io("name", name)("text", text)("gate", gate); }
 };
 
+// A unit of work. Its entry is requires, or entry_none when it truly needs nothing; its outcome is effects.
 struct AtlasAction : Moveable<AtlasAction> {
 	String         name;
 	String         text;
 	Vector<String> requires;
 	Vector<String> effects;
+	bool           entry_none = false;
+	bool           processing = false;   // a machine run (dataset processing, training, evaluation), not coding work
 
-	void Jsonize(JsonIO& io) { io("name", name)("text", text)("requires", requires)("effects", effects); }
+	void Jsonize(JsonIO& io) {
+		io("name", name)("text", text)("requires", requires)("effects", effects)("entry_none", entry_none)
+		  ("processing", processing);
+	}
 };
 
 // When every "when" literal holds, every "must" literal must hold. from_vid and to_vid bound the
@@ -217,20 +226,110 @@ struct AtlasConstraint : Moveable<AtlasConstraint> {
 	}
 };
 
+// Thresholds of the strictness pass (AtlasStrictness). The owner sets them in the rules data, not in code.
+//   max_outcomes           most effects one action may have before "work-too-broad"
+//   max_entry_none_share   share of actions allowed to declare entry_none before "entry-none-heavy"
+//   max_errors             errors after which the playback stops reporting ("too-many-errors")
+//   max_step_elements      how many elements one version may move to merge_to_master before "big-bang"
+//   min_delta              the smallest gain a measure series must show to count as improved
+struct AtlasStrict : Moveable<AtlasStrict> {
+	int    max_outcomes          = 3;
+	double max_entry_none_share  = 0.2;
+	int    max_errors            = 20;
+	int    max_step_elements     = 5;
+	double min_delta             = 0.01;
+
+	void Jsonize(JsonIO& io) {
+		io("max_outcomes", max_outcomes)("max_entry_none_share", max_entry_none_share)("max_errors", max_errors)
+		  ("max_step_elements", max_step_elements)("min_delta", min_delta);
+	}
+};
+
 struct AtlasRules : Moveable<AtlasRules> {
 	Vector<String>          initial;      // atoms true at the start
 	Vector<AtlasAtomDef>    atoms;
 	Vector<AtlasAction>     actions;
 	Vector<AtlasConstraint> constraints;
+	AtlasStrict             strict;
 
 	void Jsonize(JsonIO& io) {
-		io("initial", initial)("atoms", atoms)("actions", actions)("constraints", constraints);
+		io("initial", initial)("atoms", atoms)("actions", actions)("constraints", constraints)("strict", strict);
 	}
 
 	int FindAtom(const String& name) const;
 	int FindAction(const String& name) const;
 	int FindConstraint(const String& id) const;
 };
+
+// A file of the project's repository that the roadmap refers to. Its text is read live from the source root
+// (see AtlasFiles.cpp); the record keeps what the roadmap says about it. spans say which lines of the baseline text
+// evidence an element, or which lines the element will write (role destination). edits are a patch series: each
+// one replaces lines start..end of the text as it stands at its version, and an insert has end = start - 1. A
+// marker edit (start 0, end -1, no text) only says that the version writes the file.
+struct AtlasFileSpan : Moveable<AtlasFileSpan> {
+	String id;
+	String element;   // the element the lines evidence or implement
+	String role;      // "evidence" or "destination"
+	int    start = 0; // 1-based, inclusive; 0 for a file with no text
+	int    end = 0;
+	String symbol;    // the definition the lines belong to, when known
+	String kind;      // "" for lines of text, "class" or "function" for a declaration
+	String signature; // one declaration line, names and types only; needs a class or function kind
+
+	void Jsonize(JsonIO& io) {
+		io("id", id)("element", element)("role", role)("start", start)("end", end)("symbol", symbol)
+		  ("kind", kind)("signature", signature);
+	}
+};
+
+// The span kinds: "" (lines of text), "class" and "function". They are kept apart from element kinds.
+bool AtlasSpanKindValid(const String& kind);
+// A signature is one declaration line: no body, so no braces.
+bool AtlasSignatureValid(const String& signature);
+
+struct AtlasFileEdit : Moveable<AtlasFileEdit> {
+	String vid;
+	String element;
+	int    start = 0;
+	int    end = -1;
+	String text;      // the new lines, joined by '\n'
+	String note;
+
+	void Jsonize(JsonIO& io) { io("vid", vid)("element", element)("start", start)("end", end)("text", text)("note", note); }
+};
+
+struct AtlasFile : Moveable<AtlasFile> {
+	String                id;      // the file's id within its family, a store id
+	String                source;  // alias of a source root in the project's registry
+	String                path;    // relative to the source root
+	String                kind;    // "code" (text read from the source) or "artifact" (a file with no text)
+	String                commit;  // the source commit the spans were derived at; "" when not known
+	Vector<AtlasFileSpan> spans;
+	Vector<AtlasFileEdit> edits;
+
+	void Jsonize(JsonIO& io) {
+		io("id", id)("source", source)("path", path)("kind", kind)("commit", commit)("spans", spans)("edits", edits);
+	}
+};
+
+// A relative path inside a source root: not empty, not absolute, no "..", no backslash, no control character.
+bool AtlasSafeSourcePath(const String& path);
+
+// Splits text into lines on '\n'; "" is no lines, and a trailing newline adds no line.
+Vector<String> AtlasSplitLines(const String& text);
+
+// Applies one edit to lines, in place. Refused, and lines untouched, when the range does not fit the text as it
+// stands. A marker edit changes nothing.
+bool AtlasApplyEdit(Vector<String>& lines, const AtlasFileEdit& e, String& err);
+
+// The text of a file at its last edit: base with every edit applied in order.
+bool AtlasApplyEdits(const Vector<String>& base, const Vector<AtlasFileEdit>& edits, Vector<String>& out, String& err);
+
+// Checks a file record against the head map and the family: safe id, source and path; ordered spans with an
+// existing element; edits of known versions in version order, with existing elements; and a series that applies to
+// base, when base is given. An artifact or a planned file (no base) is checked without the series.
+bool AtlasValidateFile(const AtlasFile& f, const AtlasMap& head, const AtlasFamily& fam,
+                       const Vector<String>& base, bool has_base, AtlasCheck& out);
 
 // One finding of the replay. Errors and warnings are advisory: nothing is refused for them.
 struct AtlasRoadmapMessage : Moveable<AtlasRoadmapMessage> {
@@ -239,6 +338,9 @@ struct AtlasRoadmapMessage : Moveable<AtlasRoadmapMessage> {
 	String subject_kind;
 	String subject_id;
 	String rule;          // contract-gate | contract-task | requires | constraint | stage-order | dependency-order | dependency-cycle | unscheduled | undeclared-atom | orphan | task-state
+	                      // strictness: entry-undeclared | entry-conflict | outcome-missing | work-too-broad | entry-none-heavy |
+	                      //             outcome-never-used | vacuous-version | atom-never-required | atom-never-set | big-bang | task-done-no-note
+	                      // report: too-many-errors | unacknowledged-warning
 	String text;
 
 	void Jsonize(JsonIO& io) {
@@ -247,11 +349,48 @@ struct AtlasRoadmapMessage : Moveable<AtlasRoadmapMessage> {
 	}
 };
 
+// A comment from a person on one warning. The id is the warning's stable id (AtlasWarningId), so the comment
+// stays attached to the same finding across re-checks, and goes stale when the finding changes or goes away.
+struct AtlasWarningAck : Moveable<AtlasWarningAck> {
+	String warning_id;
+	String rule;
+	String subject_kind;
+	String subject_id;
+	String vid;
+	String text;
+	String comment;
+	String actor;
+	String at;
+
+	void Jsonize(JsonIO& io) {
+		io("warning_id", warning_id)("rule", rule)("subject_kind", subject_kind)("subject_id", subject_id)
+		  ("vid", vid)("text", text)("comment", comment)("actor", actor)("at", at);
+	}
+};
+
 // Replays the roadmap: versions in order, each one's contract on entry, then its events, then its constraints.
 // worlds[i] holds the true atoms after version i. Messages are appended to out; nothing is refused.
+// The result is cut off after rules.strict.max_errors errors.
 void AtlasReplayRoadmap(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
                         const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
                         Vector<Vector<String>>& worlds);
+// The replay and the strictness pass, with every finding and no cut-off. The warnings page reads this.
+void AtlasRoadmapFindings(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                          const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out,
+                          Vector<Vector<String>>& worlds);
+// The one report that pages and the API show: the findings, then the ledger (a warning without a comment is an
+// unacknowledged-warning error at the head), then the cut-off.
+void AtlasRoadmapReport(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                        const Vector<AtlasEvent>& events, const Vector<AtlasWarningAck>& acks,
+                        Vector<AtlasRoadmapMessage>& out, Vector<Vector<String>>& worlds);
+// The stable id of a finding: FNV-1a over its rule, subject, version and text, as 16 hex digits.
+String AtlasWarningId(const AtlasRoadmapMessage& m);
+// Comments whose warning is no longer among the findings: the plan changed, or the finding was fixed.
+Vector<AtlasWarningAck> AtlasStaleAcks(const Vector<AtlasRoadmapMessage>& findings, const Vector<AtlasWarningAck>& acks);
+// The strictness pass: appends messages about the rules themselves: unit-of-work shape, unread outcomes, and
+// decoration. The replay calls it after itself, so it is never called from inside the replay.
+void AtlasStrictness(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
+                     const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out);
 void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMap& head, AtlasCheck& out);
 
 // The state of one subject at one version.

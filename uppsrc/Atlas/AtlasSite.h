@@ -20,8 +20,8 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 String AtlasEsc(const String& value);
 bool AtlasFamilyReadable(WebRequest& r, const String& family);
 
-// Document key of a map version: "pkr" + "v0.0.1" -> "pkr-v0.0.1".
-String AtlasDocKey(const String& map, const String& version);
+// Key of a family's map record: the family name. The version is data in the record, not part of the key.
+String AtlasMapKey(const String& map);
 // The family of a map key (name-vX.Y.Z): the part before the last "-v".
 String AtlasFamilyOfKey(const String& key);
 // The keys of every map in the data root and in each registered project's store.
@@ -34,7 +34,7 @@ bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, Strin
 bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
                   const String& expected_revision, String& new_revision, String& error);
 
-// Version lists and events, per map family ("pkr"). The head document is named by the list.
+// Version lists and events, per map family ("demo"). The head document is named by the list.
 String AtlasNowIso();
 bool AtlasLoadFamily(const String& data_root, const String& family, AtlasFamily& f, String& revision, String& error);
 bool AtlasSaveFamily(const String& data_root, const String& family, const AtlasFamily& f,
@@ -56,6 +56,16 @@ bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& 
 bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& rules, String& revision, String& error);
 bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRules& rules,
                     const String& expected_revision, String& new_revision, String& error);
+// The roadmap's file records of a family, one per file, stored with the family's other records.
+bool AtlasLoadFile(const String& data_root, const String& family, const String& file_id, AtlasFile& f,
+                   String& revision, String& error);
+bool AtlasSaveFile(const String& data_root, const String& family, const AtlasFile& f,
+                   const String& expected_revision, String& new_revision, String& error);
+bool AtlasListFiles(const String& data_root, const String& family, Vector<AtlasFile>& out, String& error);
+// The warning comments of a family, stored with its other records. Saving replaces the comment on that warning.
+bool AtlasLoadAcks(const String& data_root, const String& family, Vector<AtlasWarningAck>& out, String& error);
+bool AtlasSaveAck(const String& data_root, const String& family, const AtlasWarningAck& a, String& error);
+bool AtlasDeleteAck(const String& data_root, const String& family, const String& warning_id, String& error);
 
 // The JSON API of the roadmap (AtlasApi.cpp); called by InstallAtlasSite.
 void InstallAtlasApi(EngineSite& site);

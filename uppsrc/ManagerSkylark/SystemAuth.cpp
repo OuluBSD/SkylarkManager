@@ -81,6 +81,11 @@ void SystemAuthService::ConfigureSite(const String& site_dir, bool demo_site)
 {
 	ConfiguredSiteDir() = site_dir;
 	ConfiguredDemoSite() = demo_site;
+	// A request thread can still be recording into the previous log after its response was sent, so the previous
+	// log is kept alive rather than deleted. Reconfiguring is rare (startup and tests), so the cost is small.
+	static Vector<WebAuditLog *> retired;
+	if(PortalAudit())
+		retired.Add(PortalAudit().Detach());
 	PortalAudit().Create("portal", AppendFileName(site_dir, "portal-audit"));
 }
 

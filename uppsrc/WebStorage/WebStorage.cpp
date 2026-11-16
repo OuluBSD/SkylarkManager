@@ -1,5 +1,9 @@
 #include "WebStorage.h"
 
+#ifndef PLATFORM_WIN32
+#include <sys/stat.h>
+#endif
+
 #ifdef PLATFORM_WIN32
 #include <windows.h>
 #else
@@ -81,8 +85,63 @@ void JsonFileStore::FileLock::Release()
 	locked = false;
 }
 
+// Parsed records, kept while the file's modification time and size are unchanged. A write or delete through this
+// process drops its entry when the write returns; a change by another process shows as a new time or size.
+// The stamp is the modification time in nanoseconds where the system gives it (Time has whole seconds only).
+static bool RecordStamp(const String& path, int64& stamp, int64& size)
+{
+#ifdef PLATFORM_WIN32
+	Time t = FileGetTime(path);
+	stamp = (int64)(t - Time(1970, 1, 1)) * 1000000000LL;
+	size = GetFileLength(path);
+	return true;
+#else
+	struct stat st;
+	if(stat(~path, &st) != 0)
+		return false;
+	stamp = (int64)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+	size = (int64)st.st_size;
+	return true;
+#endif
+}
+
+struct RecordCacheEntry : Moveable<RecordCacheEntry> {
+	int64   stamp = -1;
+	int64   size = -1;
+	ValueMap envelope;
+	ValueMap data;
+};
+
+static Mutex& RecordCacheMutex()
+{
+	static Mutex m;
+	return m;
+}
+
+static VectorMap<String, RecordCacheEntry>& RecordCache()
+{
+	static VectorMap<String, RecordCacheEntry> cache;
+	return cache;
+}
+
+static void DropCachedRecord(const String& path)
+{
+	Mutex::Lock lock(RecordCacheMutex());
+	int i = RecordCache().Find(path);
+	if(i >= 0)
+		RecordCache().Remove(i);
+}
+
+// Drops the cached record at path when the enclosing write or delete leaves the function, on every exit.
+struct CachedRecordGuard {
+	String path;
+	explicit CachedRecordGuard(const String& p) : path(p) {}
+	~CachedRecordGuard() { DropCachedRecord(path); }
+};
+
 bool JsonFileStore::WriteAtomic(const String& final_path, const String& data, String& error)
 {
+	CachedRecordGuard drop(final_path);
 #ifdef PLATFORM_WIN32
 	HANDLE h = CreateFileW(ToSystemCharsetW(final_path + ".tmp"), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 	                       FILE_ATTRIBUTE_NORMAL, NULL);
@@ -206,6 +265,20 @@ StoreResult JsonFileStore::ReadRecord(const String& id, ValueMap& envelope, Valu
 		error = "record not found";
 		return false;
 	}
+	int64 stamp = -1, size = -1;
+	if(!RecordStamp(path, stamp, size)) {
+		error = "record not readable: " + id;
+		return false;
+	}
+	{
+		Mutex::Lock lock(RecordCacheMutex());
+		int i = RecordCache().Find(path);
+		if(i >= 0 && RecordCache()[i].stamp == stamp && RecordCache()[i].size == size) {
+			envelope = RecordCache()[i].envelope;
+			data = RecordCache()[i].data;
+			return true;
+		}
+	}
 	String raw = LoadFile(path);
 	Value v;
 	try {
@@ -230,6 +303,14 @@ StoreResult JsonFileStore::ReadRecord(const String& id, ValueMap& envelope, Valu
 	envelope = (ValueMap)m["envelope"];
 	if(m["data"].Is<ValueMap>())
 		data = (ValueMap)m["data"];
+	{
+		Mutex::Lock lock(RecordCacheMutex());
+		RecordCacheEntry& e = RecordCache().GetAdd(path);
+		e.stamp = stamp;
+		e.size = size;
+		e.envelope = envelope;
+		e.data = data;
+	}
 	return true;
 }
 
@@ -365,6 +446,7 @@ StoreResult JsonFileStore::DeleteRecord(const String& id, const String& expected
 	String ignore_rev;
 	return Locked(id, expected_revision, "delete", [&](const ValueMap& current, String&) -> StoreResult {
 		String path = RecordPath(id);
+		CachedRecordGuard drop(path);
 		if(FileExists(path) && !FileDelete(path))
 			return StoreResult("cannot delete record file " + path);
 		return StoreResult(true);

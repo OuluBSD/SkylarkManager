@@ -76,15 +76,22 @@ static IRecordCollection& Maps(const String& data_root)
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_COLLECTION);
 }
 
-String AtlasDocKey(const String& map, const String& version)
+// One map record per family: its key is the family name. The version is data inside the record, never part of the key.
+String AtlasMapKey(const String& map)
 {
-	return map + "-" + version;
+	return map;
 }
 
+// The family a key names. Keys made before the version left the name ("demo-v1.0.0") still resolve to their family.
 String AtlasFamilyOfKey(const String& key)
 {
 	int i = key.ReverseFind("-v");
-	return i < 0 ? key : key.Left(i);
+	if(i < 0 || i + 2 >= key.GetCount())
+		return key;
+	for(int j = i + 2; j < key.GetCount(); j++)
+		if(!(IsDigit(key[j]) || key[j] == '.'))
+			return key;
+	return key.Left(i);
 }
 
 bool AtlasLoadMap(const String& data_root, const String& key, AtlasMap& m, String& revision, String& error)
@@ -119,6 +126,8 @@ bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
 static const char *ATLAS_FAMILY_COLLECTION = "families";
 static const char *ATLAS_EVENT_COLLECTION = "events";
 static const char *ATLAS_RULES_COLLECTION = "rules";
+static const char *ATLAS_FILE_COLLECTION = "files";
+static const char *ATLAS_ACK_COLLECTION = "acks";
 
 String AtlasNowIso()
 {
@@ -156,6 +165,139 @@ static IRecordCollection& Events(const String& data_root)
 static IRecordCollection& Rules(const String& data_root)
 {
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_RULES_COLLECTION);
+}
+
+static IRecordCollection& Files(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_FILE_COLLECTION);
+}
+
+// A file record is keyed by its family and its id ("family.fileid"); family names have no dot, so the prefix is exact.
+static String FileKey(const String& family, const String& file_id)
+{
+	return family + "." + file_id;
+}
+
+bool AtlasLoadFile(const String& data_root, const String& family, const String& file_id, AtlasFile& f,
+                   String& revision, String& error)
+{
+	f = AtlasFile();
+	revision.Clear();
+	String json;
+	StoreResult g = Files(AtlasStoreRoot(data_root, family)).Get(FileKey(family, file_id), json, revision);
+	if(!g.ok) {
+		error = "file not found: " + file_id;
+		return false;
+	}
+	if(!LoadFromJson(f, json)) {
+		error = "file record is unreadable: " + file_id;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasSaveFile(const String& data_root, const String& family, const AtlasFile& f,
+                   const String& expected_revision, String& new_revision, String& error)
+{
+	StoreResult p = Files(AtlasStoreRoot(data_root, family)).Put(FileKey(family, f.id), StoreAsJson(f),
+	                                                             expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+static IRecordCollection& Acks(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_ACK_COLLECTION);
+}
+
+// An acknowledgement is keyed by its family and its warning id, like a file record.
+static String AckKey(const String& family, const String& warning_id)
+{
+	return family + "." + warning_id;
+}
+
+bool AtlasLoadAcks(const String& data_root, const String& family, Vector<AtlasWarningAck>& out, String& error)
+{
+	out.Clear();
+	String root = AtlasStoreRoot(data_root, family);
+	Vector<String> ids;
+	StoreResult l = Acks(root).List(ids);
+	if(!l.ok) {
+		error = l.error;
+		return false;
+	}
+	String prefix = family + ".";
+	for(const String& id : ids) {
+		if(!id.StartsWith(prefix))
+			continue;
+		String json, rev;
+		StoreResult g = Acks(root).Get(id, json, rev);
+		if(!g.ok) {
+			error = g.error;
+			return false;
+		}
+		AtlasWarningAck a;
+		if(!LoadFromJson(a, json)) {
+			error = "acknowledgement record is unreadable: " + id;
+			return false;
+		}
+		out.Add(pick(a));
+	}
+	return true;
+}
+
+bool AtlasSaveAck(const String& data_root, const String& family, const AtlasWarningAck& a, String& error)
+{
+	String rev;
+	StoreResult p = Acks(AtlasStoreRoot(data_root, family)).Put(AckKey(family, a.warning_id), StoreAsJson(a), String(), rev);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasDeleteAck(const String& data_root, const String& family, const String& warning_id, String& error)
+{
+	StoreResult d = Acks(AtlasStoreRoot(data_root, family)).Delete(AckKey(family, warning_id), String());
+	if(!d.ok) {
+		error = d.error;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasListFiles(const String& data_root, const String& family, Vector<AtlasFile>& out, String& error)
+{
+	out.Clear();
+	String root = AtlasStoreRoot(data_root, family);
+	Vector<String> ids;
+	StoreResult l = Files(root).List(ids);
+	if(!l.ok) {
+		error = l.error;
+		return false;
+	}
+	String prefix = family + ".";
+	for(const String& id : ids) {
+		if(!id.StartsWith(prefix))
+			continue;
+		String json, rev;
+		StoreResult g = Files(root).Get(id, json, rev);
+		if(!g.ok) {
+			error = g.error;
+			return false;
+		}
+		AtlasFile f;
+		if(!LoadFromJson(f, json)) {
+			error = "file record is unreadable: " + id;
+			return false;
+		}
+		out.Add(pick(f));
+	}
+	return true;
 }
 
 // A family without stored rules has none: an empty rule set, with no revision yet.
@@ -368,10 +510,10 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	s.crumbs.Add(pick(crumb_maps));
 
 	if(family.GetCount()) {
-		const char *ids[] = { "versions", "timeline", "rules", "tasks", "checks", "next" };
-		const char *labels[] = { "Versions", "Timeline", "Rules", "Tasks", "Checks", "What's next" };
-		const char *icons[] = { "list", "clock", "sliders", "check", "alert", "flag" };
-		for(int i = 0; i < 6; i++) {
+		const char *ids[] = { "versions", "diagram", "timeline", "rules", "tasks", "checks", "warnings", "next" };
+		const char *labels[] = { "Versions", "Diagram", "Timeline", "Rules", "Tasks", "Checks", "Warnings", "What's next" };
+		const char *icons[] = { "list", "list", "clock", "sliders", "check", "alert", "alert", "flag" };
+		for(int i = 0; i < 8; i++) {
 			WebsiteShellLink l;
 			l.label = labels[i];
 			l.href = r.Site().Url("atlas/roadmap/" + family + (i == 0 ? String() : String("/") + ids[i]));
@@ -392,7 +534,7 @@ void AtlasPage(WebRequest& r, const String& title, const String& body, const Str
 	// Editing is for the admin role and the editors of the project. Say why the forms are missing, and how it is granted.
 	String hint;
 	bool editable = section == "map" || section == "versions" || section == "timeline" || section == "rules"
-	             || section == "tasks" || section == "checks" || section == "next";
+	             || section == "tasks" || section == "checks" || section == "warnings" || section == "next";
 	if(editable && !AtlasCanEditFamily(r, family)) {
 		if(r.HasUser())
 			hint = "<div class=\"ad-hint\" role=\"note\">You are signed in as <strong>" + Esc(r.User().username)
@@ -666,7 +808,10 @@ static String SubjectsSection(WebRequest& r, const AtlasMap& head, const String&
 	AtlasLoadEvents(r.Site().data_root, head.map, events, err);
 	Vector<AtlasRoadmapMessage> messages;
 	Vector<Vector<String>> worlds;
-	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	Vector<AtlasWarningAck> acks;
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, head.map, acks, ack_err);
+	AtlasRoadmapReport(head, f, rules, events, acks, messages, worlds);
 	String use = vid.IsEmpty() ? f.versions[f.Head()].vid : vid;
 	Vector<AtlasSubjectState> states;
 	if(!AtlasStateAt(head, f, events, use, states, err))
@@ -689,7 +834,10 @@ static String RoadmapPanel(WebRequest& r, const AtlasMap& m, const String& key)
 	AtlasLoadEvents(r.Site().data_root, m.map, events, err);
 	Vector<AtlasRoadmapMessage> messages;
 	Vector<Vector<String>> worlds;
-	AtlasReplayRoadmap(m, f, rules, events, messages, worlds);
+	Vector<AtlasWarningAck> acks;
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, m.map, acks, ack_err);
+	AtlasRoadmapReport(m, f, rules, events, acks, messages, worlds);
 	int errors = 0, warnings = 0;
 	for(const AtlasRoadmapMessage& x : messages)
 		if(x.severity == "error") errors++; else warnings++;
@@ -850,7 +998,10 @@ static String FramesJson(WebRequest& r, const AtlasMap& head, const String& at, 
 	AtlasLoadEvents(r.Site().data_root, head.map, events, err);
 	Vector<AtlasRoadmapMessage> messages;
 	Vector<Vector<String>> worlds;
-	AtlasReplayRoadmap(head, f, rules, events, messages, worlds);
+	Vector<AtlasWarningAck> acks;
+	String ack_err;
+	AtlasLoadAcks(r.Site().data_root, head.map, acks, ack_err);
+	AtlasRoadmapReport(head, f, rules, events, acks, messages, worlds);
 
 	count = f.versions.GetCount();
 	start = at.IsEmpty() ? f.Head() : f.Find(at);
@@ -906,6 +1057,11 @@ static void MapView(WebRequest& r)
 	String key = r.PathArg(0);
 	if(AtlasPolicyStatus(r, "maps", String()) == 503) {
 		r.Status(503, "content policy is unavailable");
+		return;
+	}
+	// A link made before the version left the key ("project-v1.0.0") goes to the family's map.
+	if(key != AtlasFamilyOfKey(key)) {
+		r.Redirect(r.Site().Url("atlas/" + AtlasFamilyOfKey(key)));
 		return;
 	}
 	AtlasMap m;
@@ -1261,9 +1417,9 @@ static void CreateMap(WebRequest& r)
 	m.world.height = r.IntParam("height") > 0 ? r.IntParam("height") : 1600;
 	AtlasCheck check;
 	AtlasValidate(m, check);
-	String key = AtlasDocKey(m.map, m.version);
+	String key = AtlasMapKey(m.map);
 	if(!JsonFileStore::ValidId(key))
-		check.errors.Add("map version has characters the store does not allow: " + m.version);
+		check.errors.Add("map name has characters the store does not allow: " + m.map);
 	if(!check.Ok()) {
 		Refuse(r, 400, JoinLines(check.errors));
 		return;
@@ -1271,7 +1427,7 @@ static void CreateMap(WebRequest& r)
 	AtlasMap existing;
 	String rev, err;
 	if(AtlasLoadMap(r.Site().data_root, key, existing, rev, err)) {
-		Refuse(r, 409, "a map with that id and version already exists");
+		Refuse(r, 409, "a map for that family already exists");
 		return;
 	}
 	if(!AtlasSaveMap(r.Site().data_root, key, m, String(), rev, err)) {

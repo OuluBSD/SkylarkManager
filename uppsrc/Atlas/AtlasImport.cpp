@@ -49,6 +49,34 @@ static bool ProjectFromJson(const ValueMap& v, AtlasProject& p, String& error)
 		error = "project " + p.name + ": level must be public, protected or private";
 		return false;
 	}
+	Value sources = v["sources"];
+	if(sources.Is<ValueArray>()) {
+		ValueArray a = sources;
+		for(int i = 0; i < a.GetCount(); i++) {
+			Value x = a[i];
+			if(!x.Is<ValueMap>()) {
+				error = "project " + p.name + ": source " + AsString(i + 1) + " is not an object";
+				return false;
+			}
+			AtlasSource src;
+			src.alias = JsonString(ValueMap(x), "alias");
+			src.path = JsonString(ValueMap(x), "path");
+			if(!AtlasIdValid(src.alias)) {
+				error = "project " + p.name + ": source alias must be a valid id: " + src.alias;
+				return false;
+			}
+			if(!IsFullPath(src.path)) {
+				error = "project " + p.name + ": source " + src.alias + " path must be an absolute path";
+				return false;
+			}
+			for(const AtlasSource& other : p.sources)
+				if(other.alias == src.alias) {
+					error = "project " + p.name + ": source " + src.alias + " is listed twice";
+					return false;
+				}
+			p.sources.Add(pick(src));
+		}
+	}
 	Value list = v["editors"];
 	if(list.Is<ValueArray>()) {
 		ValueArray a = list;
@@ -94,6 +122,21 @@ bool AtlasLoadProjects(const String& data_root, Vector<AtlasProject>& out, Strin
 		out.Add(pick(p));
 	}
 	return true;
+}
+
+String AtlasSourceRoot(const String& data_root, const String& family, const String& alias)
+{
+	Vector<AtlasProject> all;
+	String error;
+	if(!AtlasLoadProjects(data_root, all, error))
+		return String();
+	int i = AtlasFindProject(all, family);
+	if(i < 0)
+		return String();
+	for(const AtlasSource& src : all[i].sources)
+		if(src.alias == alias)
+			return src.path;
+	return String();
 }
 
 int AtlasFindProject(const Vector<AtlasProject>& all, const String& name)
@@ -145,16 +188,16 @@ AtlasImportResult AtlasCreateMap(const String& data_root, const AtlasMap& m, con
 {
 	AtlasCheck check;
 	AtlasValidate(m, check);
-	String key = AtlasDocKey(m.map, m.version);
+	String key = AtlasMapKey(m.map);
 	if(!JsonFileStore::ValidId(key))
-		check.errors.Add("map version has characters the store does not allow: " + m.version);
+		check.errors.Add("map name has characters the store does not allow: " + m.map);
 	if(!check.Ok())
 		return Fail(400, Join(check.errors, "\n"));
 
 	AtlasMap existing;
 	String rev, err;
 	if(AtlasLoadMap(data_root, key, existing, rev, err))
-		return Fail(409, "a map with that id and version already exists");
+		return Fail(409, "a map for that family already exists");
 
 	if(level.GetCount()) {
 		ContentLevel parsed;
