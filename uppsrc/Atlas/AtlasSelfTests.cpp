@@ -410,7 +410,7 @@ static void VersionChecks()
 	      && AtlasVersionCode("1000.0.0") == ATLAS_VERSION_UNSET && AtlasVersionCode("1.x.0") == ATLAS_VERSION_UNSET,
 	      "a label needs three parts, each 0..999");
 	Check(!AtlasVersionValid(ATLAS_VERSION_UNSET) && AtlasVersionCode("0.0.0") == 0,
-	      "-1 is no version, and 0.0.0 is a code but not an insertable version");
+	      "-1 is no version, and 0.0.0 is a code");
 
 	AtlasFamily f;
 	f.head_key = "t-v0.0.1";
@@ -428,6 +428,13 @@ static void VersionChecks()
 
 	Check(AtlasInsertVersion(f, "0.1.0", "v5", err) && LabelOf(f, "v5") == "0.1.0" && LabelOf(f, "v2") == "0.0.4",
 	      "inserting 0.1.0 leaves the 0.0.x versions alone");
+
+	// 0.0.0 is inserted first and bumps none of the versions after it.
+	AtlasFamily z;
+	z.head_key = "t-v0.0.0";
+	Check(AtlasInsertVersion(z, "0.0.1", "v1", err) && AtlasInsertVersion(z, "0.0.0", "v0", err)
+	      && LabelOf(z, "v0") == "0.0.0" && LabelOf(z, "v1") == "0.0.1" && z.versions[0].vid == "v0",
+	      "0.0.0 is inserted before 0.0.1 and bumps nothing");
 	Check(AtlasInsertVersion(f, "0.1.0", "v6", err) && LabelOf(f, "v6") == "0.1.0" && LabelOf(f, "v5") == "0.2.0",
 	      "inserting 0.1.0 again moves 0.1.x to 0.2.x");
 	Check(AtlasInsertVersion(f, "1.0.0", "v7", err) && f.Head() == 6 && f.versions[6].vid == "v7",
@@ -437,8 +444,8 @@ static void VersionChecks()
 	full.versions.Add(pick(Ver("top", "0.0.999")));
 	Check(!AtlasInsertVersion(full, "0.0.999", "x", err) && err.Find("past 999") >= 0 && LabelOf(full, "top") == "0.0.999",
 	      "a bump past 999 is refused and changes nothing");
-	Check(!AtlasInsertVersion(f, "0.0.0", "z1", err) && !AtlasInsertVersion(f, "1.2", "z2", err)
-	      && !AtlasInsertVersion(f, "0.0.2", "v2", err), "0.0.0, a short label and a repeated vid are refused");
+	Check(!AtlasInsertVersion(f, "1.2", "z2", err) && !AtlasInsertVersion(f, "0.0.2", "v2", err),
+	      "a short label and a repeated vid are refused");
 
 	AtlasFamily r;
 	r.versions.Add(pick(Ver("a", "0.0.1")));
@@ -838,7 +845,133 @@ static bool StrictRule(const String& rule)
 	return rule == "vacuous-version" || rule == "atom-never-required" || rule == "atom-never-set"
 	    || rule == "big-bang" || rule == "task-done-no-note" || rule == "entry-undeclared"
 	    || rule == "entry-conflict" || rule == "outcome-missing" || rule == "work-too-broad"
-	    || rule == "entry-none-heavy" || rule == "outcome-never-used" || rule == "too-many-errors";
+	    || rule == "entry-none-heavy" || rule == "outcome-never-used" || rule == "too-many-errors"
+	    || rule == "gate-misplaced" || rule == "group-no-gate" || rule == "feature-without-task"
+	    || rule == "gate-version-work" || rule == "ui-without-task" || rule == "ui-invalid" || rule == "ui-feature-unknown";
+}
+
+// The gate, zero-version and task rules: a map that breaks each one, then the repaired map.
+static void GateAndTaskChecks()
+{
+	AtlasMap head;
+	AtlasElement el;
+	el.id = "e_test00";
+	el.name = "Test00";
+	head.elements.Add(pick(el));
+	AtlasElement feat;
+	feat.id = "e_feat";
+	feat.name = "Feat";
+	head.elements.Add(pick(feat));
+
+	AtlasFamily f;
+	f.head_key = "t-gates";
+	Vector<AtlasEvent> events;
+	String err;
+	Check(AtlasInsertVersion(f, "0.0.0", "v0", err) && AtlasInsertVersion(f, "0.0.1", "v1", err)
+	      && AtlasInsertVersion(f, "0.0.999", "v9", err), "a family with 0.0.0, 0.0.1 and the gate version 0.0.999");
+
+	AtlasRules rules;
+	AtlasAction gate;
+	gate.name = "Test00";
+	gate.requires.Add("done:Feat");
+	gate.effects.Add("tested:0.0");
+	rules.actions.Add(pick(gate));
+	AtlasAction work;
+	work.name = "Feat";
+	work.entry_none = true;
+	work.effects.Add("done:Feat");
+	rules.actions.Add(pick(work));
+
+	// Without any gate staged at 0.0.999, the group has no test gate.
+	Vector<AtlasRoadmapMessage> out;
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "group-no-gate"), "a group whose x.999 version has no gate is an error");
+
+	// The gate staged at 0.0.999 repairs it; staged in 0.0.1 it is misplaced.
+	events.Add(pick(Ev("g1", "v9", "element", "e_test00", "stage")));
+	events.Top().stage = "planned";
+	events.Top().action = "Test00";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasMessage(out, "error", "group-no-gate") && !HasMessage(out, "error", "gate-misplaced"),
+	      "a gate at 0.0.999 satisfies its group");
+	events.Add(pick(Ev("g2", "v1", "element", "e_test00", "stage")));
+	events.Top().stage = "planned";
+	events.Top().action = "Test00";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "gate-misplaced"), "a gate staged outside its x.999 version is misplaced");
+	events.Trim(events.GetCount() - 1);
+
+	// A feature with no task is an error; a task requirement, or work in 0.0.0, is not.
+	f.versions[1].requires.Add("done:Feat");
+	events.Add(pick(Ev("f1", "v1", "element", "e_feat", "stage")));
+	events.Top().stage = "planned";
+	events.Top().action = "Feat";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasRuleOn(out, "feature-without-task", "Feat"), "a feature whose action has no task is an error");
+	rules.actions[1].requires.Add("task:t:done");
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasRuleOn(out, "feature-without-task", "Feat"), "a feature with a task requirement is not reported");
+	rules.actions[1].requires.Clear();
+	rules.actions[1].requires.Add("done:Other");  // a meta-feature: it needs other features only
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasRuleOn(out, "feature-without-task", "Feat"), "a meta-feature needs no task");
+	rules.actions[1].requires.Clear();
+	rules.actions[1].entry_none = true;
+	events.Top().vid = "v0";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasRuleOn(out, "feature-without-task", "Feat"), "a feature whose work is in 0.0.0 needs no task");
+	events.Top().vid = "v1";
+
+	// A task may be logged in 0.0.0: the tasks of the features that 0.0.0 prepares live there.
+	AtlasEvent t = Ev("t1", "v0", "task", "t_x", "proposed");
+	events.Add(pick(t));
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasMessage(out, "error", "task-in-zero"), "a task logged in 0.0.0 is allowed");
+
+	// The user-interface block: a user action has a known medium and exposes a feature a contract declares. Its element
+	// is a work element, so its action needs a task.
+	AtlasUiAction u;
+	u.name = "run";
+	u.text = "runs the gate";
+	u.medium = "tty";
+	u.feature = "Feat";
+	head.elements[0].ui.Add(pick(u));
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "ui-invalid"), "a user action with an unknown medium is an error");
+	head.elements[0].ui[0].medium = "cli";
+	head.elements[0].ui[0].feature = "Nope";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "ui-feature-unknown"), "a user action that exposes an undeclared feature is an error");
+	Check(HasMessage(out, "error", "ui-without-task"), "a user-interface block whose action names no task is an error");
+	rules.actions[0].requires.Add("task:t_ui:done");
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(!HasMessage(out, "error", "ui-without-task"), "a user-interface block with a task requirement is not reported");
+	rules.actions[0].requires.Trim(rules.actions[0].requires.GetCount() - 1);
+	head.elements[0].ui.Clear();
+
+	// x.999 holds tests only: a task logged there, or work that sets no tested: literal, is an error.
+	events.Add(pick(Ev("t9", "v9", "task", "t_x", "proposed")));
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "gate-version-work"), "a task logged in a x.999 version is an error");
+	events.Trim(events.GetCount() - 1);
+	events.Add(pick(Ev("w9", "v9", "element", "e_feat", "stage")));
+	events.Top().stage = "planned";
+	events.Top().action = "Feat";
+	out.Clear();
+	AtlasStrictness(head, f, rules, events, out);
+	Check(HasMessage(out, "error", "gate-version-work"), "work that is not a test gate is an error at x.999");
+	events.Trim(events.GetCount() - 1);
 }
 
 // The strictness rules: each fires on a map built to break it, and stays quiet on the map that repairs it.
@@ -1571,6 +1704,70 @@ static AtlasEvent TaskEv(const char *id, const char *vid, const char *task, cons
 	return e;
 }
 
+// Multi-element tasks and the interface bubble: one task links several elements; it is hidden only when all are.
+static void MultiLinkChecks()
+{
+	AtlasFamily f;
+	AtlasVersion v1, v2;
+	v1.vid = "v1"; v1.code = 1;
+	v2.vid = "v2"; v2.code = 2;
+	f.versions.Add(pick(v1));
+	f.versions.Add(pick(v2));
+
+	AtlasMap head = SmallMap();
+	AtlasUiAction ui;
+	ui.name = "run-alpha";
+	ui.text = "runs alpha";
+	ui.medium = "cli";
+	ui.feature = "Alpha";
+	head.elements[0].ui.Add(pick(ui));
+
+	AtlasRules rules;
+	AtlasAction a1, b1;
+	a1.name = "Alpha"; a1.entry_none = true; a1.effects.Add("done:Alpha");
+	b1.name = "Beta"; b1.requires.Add("task:m1:done"); b1.effects.Add("done:Beta");
+	rules.actions.Add(pick(a1));
+	rules.actions.Add(pick(b1));
+
+	Vector<AtlasEvent> events;
+	AtlasEvent s1 = Ev("s1", "v1", "element", "a", "stage"); s1.stage = "planned";
+	AtlasEvent s2 = Ev("s2", "v2", "element", "b", "stage"); s2.stage = "planned";
+	events.Add(pick(s1));
+	events.Add(pick(s2));
+	AtlasEvent p = TaskEv("p1", "v1", "m1", "proposed");
+	p.name = "Make both"; p.target = "v2"; p.link = "element:a,element:b";
+	events.Add(pick(p));
+
+	Vector<String> none, hide_a, hide_both;
+	hide_a.Add("a");
+	hide_both.Add("a");
+	hide_both.Add("b");
+	Vector<AtlasFile> no_files;
+	AtlasVersionDiagram d;
+	AtlasBuildDiagram(f, head, rules, events, no_files, none, d);
+	int task = -1, iface = -1;
+	for(int i = 0; i < d.bubbles.GetCount(); i++) {
+		if(d.bubbles[i].kind == "task") task = i;
+		if(d.bubbles[i].kind == "interface") iface = i;
+	}
+	Check(task >= 0 && d.bubbles[task].detail.Find("Alpha") >= 0 && d.bubbles[task].detail.Find("Beta") >= 0,
+	      "a task linked to two elements names both in its detail");
+	Check(iface >= 0 && d.bubbles[iface].row == 0 && d.bubbles[iface].declares.GetCount() == 1
+	      && d.bubbles[iface].declares[0].StartsWith("cli: run-alpha"),
+	      "an element with user actions draws an interface bubble in its row, one line per action");
+
+	AtlasVersionDiagram h1, h2;
+	AtlasBuildDiagram(f, head, rules, events, no_files, hide_a, h1);
+	AtlasBuildDiagram(f, head, rules, events, no_files, hide_both, h2);
+	int shown_a = 0, shown_both = 0;
+	for(const AtlasDiagramBubble& b : h1.bubbles)
+		shown_a += b.kind == "task";
+	for(const AtlasDiagramBubble& b : h2.bubbles)
+		shown_both += b.kind == "task";
+	Check(shown_a == 1, "a task stays visible while one of its linked elements is visible");
+	Check(shown_both == 0, "a task is hidden only when every linked element is hidden");
+}
+
 static void TaskChecks()
 {
 	AtlasFamily f;
@@ -1833,9 +2030,11 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	RoadmapStoreChecks(scratch_dir);
 	RoadmapChecks();
 	StrictnessChecks();
+	GateAndTaskChecks();
 	LedgerChecks();
 	DiagramChecks();
 	TaskChecks();
+	MultiLinkChecks();
 	ProcessingFlagCheck();
 	PlannedTaskChecks();
 	DemoChecks();

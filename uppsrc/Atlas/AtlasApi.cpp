@@ -829,7 +829,7 @@ static void VersionsInit(WebRequest& r)
 		return;
 	}
 	int code = AtlasVersionCode(doc.version);
-	if(code == ATLAS_VERSION_UNSET || code == 0) {
+	if(code == ATLAS_VERSION_UNSET) {
 		ApiFail(r, 400, "the head document's version must read v<a.b.c> with parts 0..999: " + doc.version);
 		return;
 	}
@@ -1131,7 +1131,7 @@ static void ElementCreate(WebRequest& r)
 	el.w = P(r, "w").GetCount() ? IntP(r, "w") : 180;
 	el.h = P(r, "h").GetCount() ? IntP(r, "h") : 100;
 	el.updated_at = AtlasNowIso();
-	head.elements.Add(el);  // a copy: the event below still reads the element's id and name
+	head.elements.Add(AtlasCopyElement(el));  // a copy: the event below still reads the element's id and name
 	AtlasEvent e = NewEvent(r, vid, "element", el.id, "created");
 	e.name = el.name;
 	e.text = P(r, "text");

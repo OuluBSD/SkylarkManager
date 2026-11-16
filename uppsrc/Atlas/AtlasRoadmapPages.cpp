@@ -757,7 +757,7 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 				int i = row.bubbles[first + k];
 				const AtlasDiagramBubble& b = g.bubbles[i];
 				int lines = WrapText(BubbleText(b), chars).GetCount();
-				if(b.kind == "declaration" || b.kind == "taskgroup") {
+				if(b.kind == "declaration" || b.kind == "taskgroup" || b.kind == "interface") {
 					// Three columns share the signature lines of a full-width bubble.
 					int col_chars = max(12, chars / 3), n_lines = 0;
 					for(const String& line : b.declares)
@@ -810,6 +810,7 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 	     ".dg-declaration{border:1.5px solid var(--st-future)}"
 	     ".dg-task{border:2px solid var(--st-trouble)}"
 	     ".dg-taskgroup{border:2px solid var(--st-trouble)}"
+	     ".dg-interface{border:2px solid var(--st-hot)}"
 	     ".dg-unmet{border-style:dashed;border-color:var(--st-trouble) !important}"
 	     ".dg-row{position:absolute;left:0;font:12px monospace;color:var(--muted)}"
 	     ".dg-arrows{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}"
@@ -824,12 +825,15 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 	     "<span class=\"dg-k\" style=\"color:var(--st-planned)\">processing</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-settled)\">feature</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-notready)\">test gate</span>, "
-	     "<span class=\"dg-k\" style=\"color:var(--st-trouble)\">task</span>. "
+	     "<span class=\"dg-k\" style=\"color:var(--st-trouble)\">task</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-hot)\">user actions</span>. "
 	     "The diagram is the plan: nothing here shows progress.</p>"
 	  << "<div class=\"dg-wrap\" style=\"height:" << H << "px\">";
 
 	for(int ri = 0; ri < g.rows.GetCount(); ri++)
-		s << "<div class=\"dg-row\" style=\"top:" << row_top[ri] + 12 << "px\">" << AtlasEsc(g.rows[ri].label) << "</div>";
+		s << "<div class=\"dg-row\" style=\"top:" << row_top[ri] + 12 << "px\">" << AtlasEsc(g.rows[ri].label)
+		  << (g.rows[ri].beta ? "<div class=\"dg-k\" title=\"A beta of the next minor group, never a release\">beta</div>" : String())
+		  << "</div>";
 
 	s << "<svg class=\"dg-arrows\" viewBox=\"0 0 " << UNITS << " " << H << "\" preserveAspectRatio=\"none\" aria-hidden=\"true\">"
 	     "<defs><marker id=\"dg-arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" "
@@ -866,6 +870,8 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 			style << "background:color-mix(in srgb, var(--st-trouble) 14%, var(--panel));";
 		else if(b.kind == "declaration")
 			style << "background:color-mix(in srgb, var(--st-future) 12%, var(--panel));";
+		else if(b.kind == "interface")
+			style << "background:color-mix(in srgb, var(--st-hot) 12%, var(--panel));";
 		s << "<div class=\"" << cls << "\" data-bubble=\"" << i << "\" style=\"" << style << "\">";
 		if(b.kind == "work") {
 			s << "<strong>" << BreakableName(b.text) << "</strong>";
@@ -888,10 +894,12 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 			if(b.assignee.GetCount())
 				s << "<div>assignee: " << AtlasEsc(b.assignee) << "</div>";
 		}
-		else if(b.kind == "declaration" || b.kind == "taskgroup") {
+		else if(b.kind == "declaration" || b.kind == "taskgroup" || b.kind == "interface") {
 			s << "<strong>" << BreakableName(b.text) << "</strong>";
 			if(b.kind == "declaration")
 				s << " <span class=\"dg-k\">declares</span>";
+			if(b.kind == "interface")
+				s << " <span class=\"dg-k\">user actions: medium, name, text (feature)</span>";
 			s << "<div style=\"column-count:3;column-gap:18px\">";
 			for(const String& line : b.declares)
 				s << "<div class=\"ad-mono\" style=\"white-space:pre-wrap\">" << BreakableName(line) << "</div>";

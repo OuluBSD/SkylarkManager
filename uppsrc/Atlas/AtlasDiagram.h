@@ -14,10 +14,11 @@ NAMESPACE_UPP
 //   declaration  the files and signatures (names and types, no bodies) that a work unit declares, under the work
 //   task         a planned task a person or worker must finish; its literal task:<id>:done is what work waits for
 //   taskgroup    the tasks logged in one version, as one block, when there are more than a few
+//   interface    the user actions (cli, gui, api, overlay) an element exposes, under its work bubble
 // Arrows join a producer to what it feeds: an effect to the contract literal or entry it satisfies.
 
 struct AtlasDiagramBubble : Moveable<AtlasDiagramBubble> {
-	String         kind;          // work | gate | accomplished | banner | declaration | task | taskgroup
+	String         kind;          // work | gate | accomplished | banner | declaration | task | taskgroup | interface
 	int            row = -1;
 	String         text;          // a work bubble: the element name; others: the literal or the banner text
 	String         literal;       // gate and accomplished: the contract literal; empty otherwise
@@ -28,7 +29,7 @@ struct AtlasDiagramBubble : Moveable<AtlasDiagramBubble> {
 	Vector<String> requires;      // work: entry literals
 	Vector<String> effects;       // work: outcome literals
 	Vector<String> waits;         // work: task:<id>:done entry literals, shown as waiting, not as unmet
-	Vector<String> declares;      // declaration: the file path, then one signature line per class or function; taskgroup: one line per task
+	Vector<String> declares;      // declaration: the file path, then one signature line per class or function; taskgroup: one line per task; interface: one line per user action
 	Vector<String> literals;      // taskgroup: the task:<id>:done literal of each task in the group
 	String         assignee;      // task: who is responsible, when the log names one
 	bool           processing = false; // work: a machine run (dataset processing, training, evaluation), not coding work
@@ -44,6 +45,7 @@ struct AtlasDiagramRow : Moveable<AtlasDiagramRow> {
 	String         vid;
 	String         label;
 	bool           group_start = false;
+	bool           beta = false;  // a x.999 row: a beta of the next minor group, never a release
 	Vector<int>    bubbles;
 };
 

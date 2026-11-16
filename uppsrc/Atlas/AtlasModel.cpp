@@ -620,10 +620,6 @@ bool AtlasInsertVersion(AtlasFamily& f, const String& label, const String& vid, 
 		err = "version label must be a.b.c with each part 0..999: " + label;
 		return false;
 	}
-	if(code == 0) {
-		err = "0.0.0 is not a version";
-		return false;
-	}
 	if(!AtlasIdValid(vid)) {
 		err = "version id is not valid: " + vid;
 		return false;
@@ -637,11 +633,12 @@ bool AtlasInsertVersion(AtlasFamily& f, const String& label, const String& vid, 
 	int unit = StepOf(level) * 1000;  // the codes that share the higher parts
 	// Bump into a copy first, so a refusal leaves f untouched.
 	Vector<AtlasVersion> next;
+	// 0.0.0 comes before every version, so it bumps none of them.
 	for(const AtlasVersion& v : f.versions) {
 		AtlasVersion copy;
 		copy.vid = v.vid;
 		copy.code = v.code;
-		bool same_prefix = v.code / unit == code / unit;
+		bool same_prefix = code != 0 && v.code / unit == code / unit;
 		if(same_prefix && PartOf(v.code, level) >= PartOf(code, level)) {
 			if(PartOf(v.code, level) + 1 > VERSION_PART_MAX) {
 				err = "inserting " + label + " would move " + AtlasVersionLabel(v.code) + " past 999";
@@ -1335,6 +1332,33 @@ static bool SameList(const Vector<String>& a, const Vector<String>& b)
 	return true;
 }
 
+// A copy of an element. Its ui vector is copied action by action, as a Vector is not copied by assignment.
+AtlasElement AtlasCopyElement(const AtlasElement& e)
+{
+	AtlasElement x;
+	x.id = e.id;
+	x.kind = e.kind;
+	x.name = e.name;
+	x.parent = e.parent;
+	x.status = e.status;
+	x.x = e.x;
+	x.y = e.y;
+	x.w = e.w;
+	x.h = e.h;
+	x.goal = e.goal;
+	x.notes = e.notes;
+	x.updated_at = e.updated_at;
+	x.pkg = e.pkg;
+	for(const AtlasUiAction& u : e.ui) {
+		AtlasUiAction c;
+		c.name = u.name;
+		c.text = u.text;
+		c.medium = u.medium;
+		c.feature = u.feature;
+		x.ui.Add(pick(c));
+	}
+	return x;
+}
 void AtlasStrictness(const AtlasMap& head, const AtlasFamily& f, const AtlasRules& rules,
                      const Vector<AtlasEvent>& events, Vector<AtlasRoadmapMessage>& out)
 {
@@ -1456,6 +1480,147 @@ void AtlasStrictness(const AtlasMap& head, const AtlasFamily& f, const AtlasRule
 		if(e.subject_kind == "task" && e.type == "done" && e.text.IsEmpty())
 			Report(out, "warning", e.vid, "task", e.subject_id, "task-done-no-note",
 			       "task " + e.subject_id + " is done with no result note");
+
+	// Version helpers for the rules below: the label of a vid, and the element an event's subject names.
+	auto labelOf = [&](const String& vid) -> String {
+		int i = f.Find(vid);
+		return i < 0 ? String() : AtlasVersionLabel(f.versions[i].code);
+	};
+	auto stagedElement = [&](const AtlasEvent& e) -> const AtlasElement * {
+		if(e.subject_kind != "element" || e.type != "stage")
+			return nullptr;
+		for(const AtlasElement& el : head.elements)
+			if(el.id == e.subject_id)
+				return &el;
+		return nullptr;
+	};
+
+	// A test gate: an action that sets tested:<group>.
+	auto IsTestGate = [&](const AtlasRules& r, const String& name, const String& group) {
+		for(const AtlasAction& a : r.actions)
+			if(a.name == name && IndexOf(a.effects, "tested:" + group) >= 0)
+				return true;
+		return false;
+	};
+
+	// The user-interface actions name a feature a version contract declares, and their medium is one the page can show.
+	Vector<String> contracted;
+	for(const AtlasVersion& v : f.versions)
+		for(const String& lit : v.requires)
+			if(lit.StartsWith("done:"))
+				contracted.Add(lit.Mid(5));
+	for(const AtlasElement& el : head.elements)
+		for(const AtlasUiAction& u : el.ui) {
+			if(u.medium != "cli" && u.medium != "gui" && u.medium != "api" && u.medium != "overlay")
+				Report(out, "error", String(), "element", el.id, "ui-invalid",
+				       "user action " + u.name + " of " + el.id + " has medium '" + u.medium + "'; use cli, gui, api or overlay");
+			if(u.name.IsEmpty() || u.text.IsEmpty())
+				Report(out, "error", String(), "element", el.id, "ui-invalid",
+				       "a user action of " + el.id + " needs a name and a text");
+			if(u.feature.GetCount() && IndexOf(contracted, u.feature) < 0)
+				Report(out, "error", String(), "element", el.id, "ui-feature-unknown",
+				       "user action " + u.name + " exposes " + u.feature + ", which no version contract declares");
+		}
+
+	// Every minor group ends with a test gate at its x.999 version, an action that sets tested:<group>.
+	Vector<int> groups;
+	for(const AtlasVersion& v : f.versions) {
+		bool known = false;
+		for(int g : groups)
+			known = known || g == v.code / 1000;
+		if(!known)
+			groups.Add(v.code / 1000);
+	}
+	for(int key : groups) {
+		String glabel = Format("%d.%d", key / 1000, key % 1000);
+		String gate_vid;
+		for(const AtlasVersion& v : f.versions)
+			if(v.code == key * 1000 + 999)
+				gate_vid = v.vid;
+		bool gated = false;
+		for(const AtlasAction& a : rules.actions) {
+			if(IndexOf(a.effects, "tested:" + glabel) < 0)
+				continue;
+			for(const AtlasEvent& e : events) {
+				const AtlasElement *el = stagedElement(e);
+				if(!el || el->name != a.name)
+					continue;
+				if(gate_vid.GetCount() && e.vid == gate_vid)
+					gated = true;
+				else
+					Report(out, "error", e.vid, "action", a.name, "gate-misplaced",
+					       "test gate " + a.name + " is staged in " + labelOf(e.vid) + "; it belongs at " + glabel + ".999");
+			}
+		}
+		// A x.999 version is a beta of the next minor and holds tests only: no task, and no work that is not a test gate.
+		if(gate_vid.GetCount())
+			for(const AtlasEvent& e : events) {
+				if(e.vid != gate_vid || e.type == "created")
+					continue;
+				if(e.subject_kind == "task")
+					Report(out, "error", e.vid, "task", e.subject_id, "gate-version-work",
+					       "task " + e.subject_id + " is logged in " + glabel + ".999; that version holds tests only");
+				else if(const AtlasElement *el = stagedElement(e); el && !IsTestGate(rules, el->name, glabel))
+					Report(out, "error", e.vid, "element", el->id, "gate-version-work",
+					       el->name + " is staged in " + glabel + ".999; that version holds tests only");
+			}
+		if(!gated)
+			Report(out, "error", gate_vid, "version", glabel, "group-no-gate",
+			       gate_vid.GetCount() ? "group " + glabel + " has no test gate at " + glabel + ".999"
+			                           : "group " + glabel + " has no " + glabel + ".999 version for its test gate");
+	}
+
+	// A user-interface block is a work element like a feature: its action requires a task, so the block has a person or
+	// worker behind it.
+	for(const AtlasEvent& e : events) {
+		const AtlasElement *el = stagedElement(e);
+		if(!el || !el->ui.GetCount())
+			continue;
+		bool has_task = false;
+		for(const AtlasAction& a : rules.actions)
+			if(a.name == el->name)
+				for(const String& r : a.requires)
+					has_task |= r.StartsWith("task:");
+		if(!has_task)
+			Report(out, "error", e.vid, "element", el->id, "ui-without-task",
+			       "user-interface block " + el->name + " requires no task; give its action a task:<id>:done requirement");
+	}
+
+	// A feature is a done: literal in a contract. Unless it is a meta-feature (its action only needs other features) or
+	// its work is in 0.0.0, it needs a task, so the work it waits for has a person or worker behind it.
+	Vector<String> features;
+	for(const AtlasVersion& v : f.versions)
+		for(const String& lit : v.requires) {
+			if(!lit.StartsWith("done:") || IndexOf(features, lit.Mid(5)) >= 0)
+				continue;
+			String name = lit.Mid(5);
+			features.Add(name);
+			const AtlasAction *act = nullptr;
+			for(const AtlasAction& a : rules.actions)
+				if(a.name == name)
+					act = &a;
+			if(!act)
+				continue;
+			bool meta = !act->requires.IsEmpty(), has_task = false;
+			for(const String& r : act->requires) {
+				if(!r.StartsWith("done:"))
+					meta = false;
+				if(r.StartsWith("task:"))
+					has_task = true;
+			}
+			if(meta || has_task)
+				continue;
+			bool staged = false, in_zero = false;
+			for(const AtlasEvent& e : events)
+				if(const AtlasElement *el = stagedElement(e); el && el->name == name) {
+					staged = true;
+					if(labelOf(e.vid) == "0.0.0")
+						in_zero = true;
+				}
+			if(staged && !in_zero)
+				Report(out, "error", v.vid, "action", name, "feature-without-task",
+				       "feature " + name + " has no task: give its action a task:<id>:done requirement, or make it a meta-feature");
+		}
 }
 
 // ---------------------------------------------------------------------------

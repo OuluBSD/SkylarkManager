@@ -934,7 +934,7 @@ static bool AtlasViewAt(WebRequest& r, const AtlasMap& head, const String& vid, 
 		const AtlasSubjectState *st = StateOf(states, "element", e.id);
 		if(!st || !st->present)
 			continue;
-		AtlasElement x = e;
+		AtlasElement x = AtlasCopyElement(e);
 		if(st->status.GetCount())
 			x.status = st->status;
 		view.elements.Add(pick(x));

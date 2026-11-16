@@ -36,12 +36,13 @@ static bool IsHidden(const Vector<String>& hidden, const String& id)
 	return !id.IsEmpty() && FindIndex(hidden, id) >= 0;
 }
 
-// The delivered features of one minor group, in version order.
+// The delivered features of one minor group, in version order. A x.999 gate version repeats the group's features as its
+// contract, so it is left out.
 static String GroupDelivers(const AtlasFamily& f, const String& group)
 {
 	String out;
 	for(const AtlasVersion& v : f.versions) {
-		if(AtlasMinorGroup(AtlasVersionLabel(v.code)) != group)
+		if(AtlasMinorGroup(AtlasVersionLabel(v.code)) != group || v.code % 1000 == 999)
 			continue;
 		for(const String& lit : v.requires)
 			if(lit.StartsWith("done:"))
@@ -164,10 +165,39 @@ static Vector<AtlasDiagramTask> CollectTasks(const Vector<AtlasEvent>& events)
     return out;
 }
 
-// The element id a task links to; empty for a road or no link.
-static String TaskElement(const String& link)
+// The element ids a task links to: "element:<id>" items, comma separated (one task can serve several features).
+static Vector<String> TaskElements(const String& link)
 {
-    return link.StartsWith("element:") ? link.Mid(8) : String();
+    Vector<String> out;
+    for(const String& item : Split(link, ',')) {
+        String t = TrimBoth(item);
+        if(t.StartsWith("element:"))
+            out.Add(t.Mid(8));
+    }
+    return out;
+}
+
+// True when every element a task links to is hidden from the viewer. A task with no element link is never hidden.
+static bool TaskHidden(const Vector<String>& hidden, const Vector<String>& elements)
+{
+    if(elements.IsEmpty())
+        return false;
+    for(const String& id : elements)
+        if(!IsHidden(hidden, id))
+            return false;
+    return true;
+}
+
+// The element names a task links to, joined: "Omaha4Trainer, Omaha5Trainer".
+static String TaskNames(const AtlasMap& head, const Vector<String>& elements)
+{
+    String out;
+    for(const String& id : elements) {
+        const AtlasElement *el = FindElement(head, id);
+        if(el)
+            out << (out.IsEmpty() ? "" : ", ") << el->name;
+    }
+    return out;
 }
 
 // The task bubble (or task group) that holds an entry literal task:<id>:done; -1 when no visible task has it.
@@ -220,6 +250,7 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 		AtlasDiagramRow row;
 		row.vid = ver.vid;
 		row.label = AtlasVersionLabel(ver.code);
+		row.beta = ver.code % 1000 == 999;
 		String group = AtlasMinorGroup(row.label);
 		row.group_start = group != group_prev;
 		group_prev = group;
@@ -259,7 +290,7 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 		Vector<int> here;
 		for(int k = 0; k < tasks.GetCount(); k++) {
 			const AtlasDiagramTask& t = tasks[k];
-			if(t.dropped || IsHidden(hidden, TaskElement(t.link)))
+			if(t.dropped || TaskHidden(hidden, TaskElements(t.link)))
 				continue;
 			bool logged_here = f.Find(t.vid) >= 0 ? t.vid == ver.vid : t.target == ver.vid;
 			if(logged_here)
@@ -272,9 +303,9 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 			g.text = "Tasks (" + AsString(here.GetCount()) + ")";
 			for(int k : here) {
 				const AtlasDiagramTask& t = tasks[k];
-				const AtlasElement *el = FindElement(head, TaskElement(t.link));
+				String names = TaskNames(head, TaskElements(t.link));
 				g.literals.Add("task:" + t.id + ":done");
-				g.declares.Add((t.title.IsEmpty() ? t.id : t.title) + (el ? " (" + el->name + ")" : String()));
+				g.declares.Add((t.title.IsEmpty() ? t.id : t.title) + (names.IsEmpty() ? String() : " (" + names + ")"));
 			}
 			out.rows[r].bubbles.Add(out.bubbles.GetCount());
 			out.bubbles.Add(pick(g));
@@ -282,16 +313,17 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 		else
 			for(int k : here) {
 				const AtlasDiagramTask& t = tasks[k];
-				const AtlasElement *el = FindElement(head, TaskElement(t.link));
+				Vector<String> linked = TaskElements(t.link);
+				String names = TaskNames(head, linked);
 				AtlasDiagramBubble b;
 				b.kind = "task";
 				b.row = r;
 				b.literal = "task:" + t.id + ":done";
 				b.text = t.title.IsEmpty() ? t.id : t.title;
-				b.element = TaskElement(t.link);
+				b.element = linked.IsEmpty() ? String() : linked[0];
 				String needed = LabelOfVid(f, t.target);
 				b.detail = (needed.IsEmpty() ? String("no version") : "needed by " + needed)
-						+ (el ? ", for " + el->name : String());
+						+ (names.IsEmpty() ? String() : ", for " + names);
 				b.assignee = t.assignee;
 				out.rows[r].bubbles.Add(out.bubbles.GetCount());
 				out.bubbles.Add(pick(b));
@@ -319,6 +351,19 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 			}
 			out.rows[r].bubbles.Add(out.bubbles.GetCount());
 			out.bubbles.Add(pick(b));
+
+			// The user-interface block: the user actions the element exposes, one line each.
+			if(el && el->ui.GetCount()) {
+				AtlasDiagramBubble ui;
+				ui.kind = "interface";
+				ui.row = r;
+				ui.element = units[u].element;
+				ui.text = el->name;
+				for(const AtlasUiAction& a : el->ui)
+					ui.declares.Add(a.medium + ": " + a.name + " - " + a.text + (a.feature.GetCount() ? " (" + a.feature + ")" : String()));
+				out.rows[r].bubbles.Add(out.bubbles.GetCount());
+				out.bubbles.Add(pick(ui));
+			}
 
 			Vector<String> decl = DeclLines(files, units[u].element);
 			if(decl.GetCount()) {

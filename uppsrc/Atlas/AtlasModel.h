@@ -23,6 +23,17 @@ struct AtlasGoal : Moveable<AtlasGoal> {
 	void Jsonize(JsonIO& io) { io("picked", picked)("note", note); }
 };
 
+// One thing a user can do with the features a minor group delivers: a CLI command, a GUI control, an API call or an
+// overlay action. Carried by the element that is the group's user-interface block.
+struct AtlasUiAction : Moveable<AtlasUiAction> {
+	String name;      // the action as the user knows it, an id such as train-omaha4
+	String text;      // what it does, one line
+	String medium;    // cli | gui | api | overlay
+	String feature;   // the contract feature (its element name) the action exposes
+
+	void Jsonize(JsonIO& io) { io("name", name)("text", text)("medium", medium)("feature", feature); }
+};
+
 struct AtlasElement : Moveable<AtlasElement> {
 	String    id;
 	String    kind;
@@ -34,12 +45,16 @@ struct AtlasElement : Moveable<AtlasElement> {
 	String    notes;
 	String    updated_at;
 	String    pkg;         // the U++ package the element implements (CapitalCase); a virtual group for data; "" for structure
+	Vector<AtlasUiAction> ui; // the user-interface block: what a user can do with the features this element delivers
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("kind", kind)("name", name)("parent", parent)("status", status)
-		  ("x", x)("y", y)("w", w)("h", h)("goal", goal)("notes", notes)("updated_at", updated_at)("pkg", pkg);
+		  ("x", x)("y", y)("w", w)("h", h)("goal", goal)("notes", notes)("updated_at", updated_at)("pkg", pkg)("ui", ui);
 	}
 };
+
+// A copy of an element; a Vector is not copied by assignment, so the ui actions are copied one by one.
+AtlasElement AtlasCopyElement(const AtlasElement& e);
 
 struct AtlasRoad : Moveable<AtlasRoad> {
 	String id;
