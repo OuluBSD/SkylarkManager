@@ -129,6 +129,7 @@ struct AtlasDiagramTask : Moveable<AtlasDiagramTask> {
     String link;      // "element:<id>" or "road:<id>"
     String vid;       // the version the task was logged in
     String assignee;
+    bool   processing = false;
     bool   dropped = false;
 };
 
@@ -153,6 +154,7 @@ static Vector<AtlasDiagramTask> CollectTasks(const Vector<AtlasEvent>& events)
             out[i].target = ev.target;
             out[i].link = ev.link;
             out[i].vid = ev.vid;
+            out[i].processing = ev.processing;
             out[i].dropped = false;
         }
         else if(i >= 0 && ev.type == "assigned")
@@ -296,12 +298,19 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 			if(logged_here)
 				here.Add(k);
 		}
-		if(here.GetCount() > 4) {
+		// Worker tasks and processing tasks are grouped apart, so a group never mixes their colours.
+		for(bool processing : { false, true }) {
+		Vector<int> kind;
+		for(int k : here)
+			if(tasks[k].processing == processing)
+				kind.Add(k);
+		if(kind.GetCount() > 4) {
 			AtlasDiagramBubble g;
 			g.kind = "taskgroup";
 			g.row = r;
-			g.text = "Tasks (" + AsString(here.GetCount()) + ")";
-			for(int k : here) {
+			g.processing = processing;
+			g.text = String(processing ? "Processing tasks (" : "Worker tasks (") + AsString(kind.GetCount()) + ")";
+			for(int k : kind) {
 				const AtlasDiagramTask& t = tasks[k];
 				String names = TaskNames(head, TaskElements(t.link));
 				g.literals.Add("task:" + t.id + ":done");
@@ -311,7 +320,7 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 			out.bubbles.Add(pick(g));
 		}
 		else
-			for(int k : here) {
+			for(int k : kind) {
 				const AtlasDiagramTask& t = tasks[k];
 				Vector<String> linked = TaskElements(t.link);
 				String names = TaskNames(head, linked);
@@ -325,9 +334,11 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 				b.detail = (needed.IsEmpty() ? String("no version") : "needed by " + needed)
 						+ (names.IsEmpty() ? String() : ", for " + names);
 				b.assignee = t.assignee;
+				b.processing = t.processing;
 				out.rows[r].bubbles.Add(out.bubbles.GetCount());
 				out.bubbles.Add(pick(b));
 			}
+		}
 		for(int u = 0; u < units.GetCount(); u++) {
 			if(units[u].vid != ver.vid || IsHidden(hidden, units[u].element))
 				continue;

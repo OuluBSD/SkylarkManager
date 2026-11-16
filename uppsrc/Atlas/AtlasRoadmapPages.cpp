@@ -809,6 +809,7 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 	     ".dg-banner{border:2px solid var(--accent);background:var(--control);font-weight:600}"
 	     ".dg-declaration{border:1.5px solid var(--st-future)}"
 	     ".dg-task{border:2px solid var(--st-trouble)}"
+	     ".dg-task-processing{border:2px solid var(--st-planned)}"
 	     ".dg-taskgroup{border:2px solid var(--st-trouble)}"
 	     ".dg-interface{border:2px solid var(--st-hot)}"
 	     ".dg-unmet{border-style:dashed;border-color:var(--st-trouble) !important}"
@@ -818,14 +819,15 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 	s << "<div class=\"ad-panel\"><div class=\"ad-panel-header\">Version diagram</div>"
 	  << "<p class=\"ad-hint\">Down is later. Coloured bubbles are work: in is what must hold first, out is what it sets. "
 	     "Dashed bubbles are gates the version needs, settled-colour bubbles are features the version declares. Hover a bubble "
-	     "to see its arrows. A red bubble is a task still to be done; an arrow runs from it to the work that needs it. A dashed red bubble needs something no version above produces; an amber line names a task that is not drawn. "
+	     "to see its arrows. A red bubble is a worker task still to be done, a blue one a processing task (a machine run); an arrow runs from it to the work that needs it. A dashed red bubble needs something no version above produces; an amber line names a task that is not drawn. "
 	     "A declaration bubble lists the files and the class and function signatures its work declares, with no bodies.</p>"
 	  << "<p class=\"ad-hint\">Colour says what the work produces: <span class=\"dg-k\" style=\"color:var(--accent)\">package</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-active)\">data</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-planned)\">processing</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-settled)\">feature</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-notready)\">test gate</span>, "
-	     "<span class=\"dg-k\" style=\"color:var(--st-trouble)\">task</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-trouble)\">worker task</span>, "
+	     "<span class=\"dg-k\" style=\"color:var(--st-planned)\">processing task</span>, "
 	     "<span class=\"dg-k\" style=\"color:var(--st-hot)\">user actions</span>. "
 	     "The diagram is the plan: nothing here shows progress.</p>"
 	  << "<div class=\"dg-wrap\" style=\"height:" << H << "px\">";
@@ -857,7 +859,8 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 
 	for(int i = 0; i < nb; i++) {
 		const AtlasDiagramBubble& b = g.bubbles[i];
-		String cls = "dg-b dg-" + b.kind + (b.unmet ? " dg-unmet" : String());
+		String cls = "dg-b dg-" + b.kind + (b.unmet ? " dg-unmet" : String())
+		           + ((b.kind == "task" || b.kind == "taskgroup") && b.processing ? " dg-task-processing" : String());
 		String style = "left:" + Tenths(bx[i]) + "%;top:" + AsString(by[i]) + "px;width:"
 		             + Tenths(bw[i]) + "%;height:" + AsString(bh[i]) + "px;";
 		if(b.kind == "work") {
@@ -866,6 +869,8 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 		}
 		else if(b.kind == "accomplished")
 			style << "background:color-mix(in srgb, var(--st-settled) 18%, var(--panel));";
+		else if((b.kind == "task" || b.kind == "taskgroup") && b.processing)
+			style << "background:color-mix(in srgb, var(--st-planned) 14%, var(--panel));";
 		else if(b.kind == "task" || b.kind == "taskgroup")
 			style << "background:color-mix(in srgb, var(--st-trouble) 14%, var(--panel));";
 		else if(b.kind == "declaration")

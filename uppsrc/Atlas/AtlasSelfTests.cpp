@@ -1884,6 +1884,53 @@ static void ProcessingFlagCheck()
 }
 
 // A planned task (proposed, not dropped) meets the entry of the work that waits for it; a dropped task does not.
+// A task that is a machine run is drawn as a processing task; a worker task is not.
+static void ProcessingTaskChecks()
+{
+	AtlasFamily f;
+	AtlasVersion v1, v2;
+	v1.vid = "v1"; v1.code = 1;
+	v2.vid = "v2"; v2.code = 1000;
+	f.versions.Add(pick(v1));
+	f.versions.Add(pick(v2));
+	AtlasMap head = SmallMap();
+	AtlasRules rules;
+	AtlasAction a;
+	a.name = "Train"; a.text = "train"; a.requires.Add("task:tp:done"); a.effects.Add("done:Train"); a.processing = true;
+	rules.actions.Add(pick(a));
+	Vector<AtlasEvent> events;
+	AtlasEvent s = Ev("s1", "v2", "element", "c", "stage"); s.stage = "planned";
+	events.Add(pick(s));
+	AtlasEvent p = TaskEv("p1", "v1", "tp", "proposed"); p.name = "Train the model"; p.target = "v2"; p.link = "element:c";
+	p.processing = true;
+	events.Add(pick(p));
+	Vector<AtlasFile> no_files;
+	Vector<String> none;
+	AtlasVersionDiagram d;
+	AtlasBuildDiagram(f, head, rules, events, no_files, none, d);
+	int bubble = -1;
+	for(int i = 0; i < d.bubbles.GetCount(); i++)
+		if(d.bubbles[i].kind == "task")
+			bubble = i;
+	Check(bubble >= 0 && d.bubbles[bubble].processing, "a processing task is drawn as a processing task");
+
+	events.Top().processing = false;
+	events.Top().name = "Write the dataset";
+	AtlasVersionDiagram worker;
+	AtlasBuildDiagram(f, head, rules, events, no_files, none, worker);
+	bubble = -1;
+	for(int i = 0; i < worker.bubbles.GetCount(); i++)
+		if(worker.bubbles[i].kind == "task")
+			bubble = i;
+	Check(bubble >= 0 && !worker.bubbles[bubble].processing, "a worker task is not drawn as a processing task");
+
+	// The flag survives a save and load of the event.
+	AtlasEvent back;
+	AtlasEvent saved = Ev("s2", "v1", "task", "tq", "proposed");
+	saved.processing = true;
+	Check(LoadFromJson(back, StoreAsJson(saved)) && back.processing, "the processing flag of a task survives a save and load");
+}
+
 static void PlannedTaskChecks()
 {
 	AtlasFamily f;
@@ -2034,6 +2081,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	LedgerChecks();
 	DiagramChecks();
 	TaskChecks();
+	ProcessingTaskChecks();
 	MultiLinkChecks();
 	ProcessingFlagCheck();
 	PlannedTaskChecks();

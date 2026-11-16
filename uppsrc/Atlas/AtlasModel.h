@@ -181,13 +181,14 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 	String target;            // task: the version the task must be done for
 	String link;              // task: "element:<id>" or "road:<id>"
 	String assignee;          // task: who is responsible (a username or a bot session); free text
+	bool processing = false;  // task: a machine run (dataset processing, training, evaluation), not worker work
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("at", at)("actor", actor)("vid", vid)("subject_kind", subject_kind)
 		  ("subject_id", subject_id)("type", type)("stage", stage)("status", status)("text", text)
 		  ("name", name)("from", from)("to", to)("road_kind", road_kind)("label", label)
 		  ("requires", requires)("effects", effects)("action", action)("target", target)("link", link)
-		  ("assignee", assignee);
+		  ("assignee", assignee)("processing", processing);
 	}
 };
 
