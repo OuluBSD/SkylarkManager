@@ -1,0 +1,10 @@
+description "atlasver: reads an Atlas store and prints the versions a worker implements: work, entry, outcome, user actions and tasks\377";
+
+uses
+	Core;
+
+file
+	AtlasVersion.cpp;
+
+mainconfig
+	"" = "";
