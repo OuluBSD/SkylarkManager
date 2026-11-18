@@ -19,6 +19,7 @@ uses
 	Channels,
 	Financials,
 	Atlas,
+	MultiAtlas,
 	YouTubePlanner,
 	WebEngine,
 	DataStore,

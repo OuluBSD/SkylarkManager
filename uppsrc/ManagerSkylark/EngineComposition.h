@@ -5,6 +5,7 @@
 #include <WebEngine/Host.h>
 #include <WebEngine/CommandConsole.h>
 #include <Atlas/AtlasSite.h>
+#include <MultiAtlas/MultiAtlasSite.h>
 #include <Channels/ChannelsSite.h>
 #include <Financials/FinancialsSite.h>
 #include <MetaAccount/MetaAccountSite.h>
@@ -30,6 +31,7 @@ struct EngineComposition {
 	int    atlas_port = 18217;
 	int    youtubeplanner_port = 18218;
 	int    company_port = 18219;
+	int    multiatlas_port = 18219;
 	String public_host;               // address clients use for site links; never loopback (see ResolvePublicHost)
 	bool   enable_meta_sso = false;   // --enable-meta-sso: opt-in MetaAccount SSO (task 039)
 	// The read-only AgentIPC bridge (Channels). Empty strings keep the

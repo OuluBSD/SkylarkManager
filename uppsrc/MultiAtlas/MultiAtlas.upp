@@ -1,0 +1,13 @@
+description "Multi-map roadmap and simulation application";
+
+uses
+	Core,
+	WebEngine,
+	WebFramework;
+
+file
+	MultiAtlasSite.h,
+	MultiAtlasSite.cpp;
+
+mainconfig
+	"" = "MT";

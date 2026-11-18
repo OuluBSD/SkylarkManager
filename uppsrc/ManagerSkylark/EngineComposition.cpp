@@ -116,11 +116,11 @@ static bool ResolveExternalOrigins(VectorMap<String, String>& origins, const Eng
 	struct SiteOriginName { const char *id; };
 	static const SiteOriginName sites[] = {
 		{ "privatehub" }, { "meta" }, { "science" }, { "taskfoundry" },
-		{ "channels" }, { "financials" }, { "atlas" }, { "youtubeplanner" }, { "company" },
+		{ "channels" }, { "financials" }, { "atlas" }, { "youtubeplanner" }, { "company" }, { "multiatlas" },
 	};
 	const int ports[] = { cfg.privatehub_port, cfg.meta_port, cfg.science_port, cfg.taskfoundry_port,
 	                      cfg.channels_port, cfg.financials_port, cfg.atlas_port, cfg.youtubeplanner_port,
-	                      cfg.company_port };
+	                      cfg.company_port, cfg.multiatlas_port };
 	for(int i = 0; i < __countof(sites); i++) {
 		String id = sites[i].id;
 		String env = "MANAGERSKYLARK_ORIGIN_" + ToUpper(id);
@@ -388,6 +388,16 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallSessionRoutes(co);
 	InstallCommandConsole(co);
 	host.BindSite(cfg.company_port, "company");
+	String multiatlas_root = AppendFileName(engine_root, "multiatlas");
+	RealizeDirectory(multiatlas_root);
+	EngineSite& matl = TheWebEngine().AddSite("multiatlas", "MultiAtlas",
+		origins.Get("multiatlas"), multiatlas_root);
+	matl.trusted_proxy_peers <<= trusted_proxy_peers;
+	InstallMultiAtlasSite(matl);
+	InstallSessionRoutes(matl);
+	InstallContentPolicyRoutes(matl, true);
+	InstallCommandConsole(matl);
+	host.BindSite(cfg.multiatlas_port, "multiatlas");
 	RegisterComposedBrokerCommands();
 	return true;
 }

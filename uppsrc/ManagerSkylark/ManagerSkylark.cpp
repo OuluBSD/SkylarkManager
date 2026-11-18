@@ -116,6 +116,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("financials-role", 0, "Role for --set-financials-user (default viewer; finance sees ledger rows and contracts)", true, "role");
 	cla.AddArg("public-host", 0, "Address other machines use for site links (default: detected LAN IPv4, or MANAGERSKYLARK_PUBLIC_HOST); never loopback", true, "host");
 	cla.AddArg("company-port", 0, "Company engine site port (default 18219)", true, "port");
+	cla.AddArg("multiatlas-port", 0, "MultiAtlas engine site port (default 18219; uses 18220 when Company resolves to 18219)", true, "port");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
 	cla.AddArg("company-role", 0, "Role for --set-company-user (default admin; the first admin is provisioned this way)", true, "role");
@@ -269,6 +270,23 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			cfg.youtubeplanner_port = ScanInt(cla.GetArg("youtubeplanner-port"));
 		if(!cla.GetArg("company-port").IsEmpty())
 			cfg.company_port = ScanInt(cla.GetArg("company-port"));
+		if(!cla.GetArg("multiatlas-port").IsEmpty())
+			cfg.multiatlas_port = ScanInt(cla.GetArg("multiatlas-port"));
+		else if(cfg.multiatlas_port == cfg.company_port)
+			cfg.multiatlas_port = 18220;
+		if(cfg.multiatlas_port < 1 || cfg.multiatlas_port > 65535) {
+			Cerr() << "Invalid --multiatlas-port " << cfg.multiatlas_port << "; expected a port from 1 to 65535.\n";
+			return false;
+		}
+		const int configured_ports[] = { port, cfg.privatehub_port, cfg.science_port, cfg.taskfoundry_port,
+			cfg.meta_port, cfg.channels_port, cfg.financials_port, cfg.atlas_port,
+			cfg.youtubeplanner_port, cfg.company_port };
+		for(int configured_port : configured_ports)
+			if(cfg.multiatlas_port == configured_port) {
+				Cerr() << "Port collision: --multiatlas-port " << cfg.multiatlas_port
+				       << " is already assigned to the stock listener or another configured site. Choose a distinct port.\n";
+				return false;
+			}
 		cfg.enable_meta_sso = cla.IsArg("enable-meta-sso");
 		TheWebEngine().SetHostPort(port);
 		if(!cla.GetArg("agentipc-direct").IsEmpty())
