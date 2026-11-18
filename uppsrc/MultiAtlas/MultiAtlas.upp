@@ -3,7 +3,8 @@ description "Multi-map roadmap and simulation application";
 uses
 	Core,
 	WebEngine,
-	WebFramework;
+	WebFramework,
+	WebStorage;
 
 file
 	MultiAtlasSite.h,
@@ -17,7 +18,9 @@ file
 	MultiAtlasScheduler.h,
 	MultiAtlasScheduler.cpp,
 	MultiAtlasReplay.h,
-	MultiAtlasReplay.cpp;
+	MultiAtlasReplay.cpp,
+	MultiAtlasWarningLedger.h,
+	MultiAtlasWarningLedger.cpp;
 
 mainconfig
 	"" = "MT";
