@@ -33,9 +33,20 @@ static bool Run(const String& program, const Vector<String>& args, const String&
 	LocalProcess p;
 	if(!p.Start2(program, args, NULL, cwd.IsEmpty() ? NULL : ~cwd)) return false;
 	p.CloseWrite();
-	String out, err;
-	while(p.Read2(out, err)) {}
-	return p.GetExitCode() == 0;
+	String stdout_text, stderr_text;
+	for(;;) { String out, err; bool more = p.Read2(out, err); stdout_text << out; stderr_text << err; if(!more) break; }
+	int exit_code = p.GetExitCode();
+	if(exit_code != 0) Cout() << "command failed (" << exit_code << "): " << program << "\n" << stderr_text;
+	return exit_code == 0;
+}
+
+static String Capture(const String& program, const Vector<String>& args, const String& cwd = String())
+{
+	LocalProcess p; String output;
+	if(!p.Start2(program, args, NULL, cwd.IsEmpty() ? NULL : ~cwd)) return String();
+	p.CloseWrite();
+	for(;;) { String out, err; bool more = p.Read2(out, err); output << out; if(!more) break; }
+	return p.GetExitCode() == 0 ? TrimBoth(output) : String();
 }
 
 static bool InitRepo(const String& repo)
@@ -185,6 +196,9 @@ static void HttpTest()
 	String private_agent = AppendFileName(base, "private-agent");
 	for(const String& repo : {public_meta, public_vision, public_agent, private_meta, private_vision, private_agent})
 		Check(InitRepo(repo), "fixture git repository initialized");
+	Check(Run("git", {"checkout", "-qb", "track/vision"}, public_vision) &&
+	      Run("git", {"checkout", "-qb", "track/vision"}, private_vision),
+	      "child fixtures use their configured worker branches");
 	Check(SeedTrack(public_vision, "vision", "family-vision-public"), "public vision store seeded");
 	Check(SeedTrack(public_agent, "agent", "family-agent-public", "vision:tested:v1"), "public dependent agent store seeded");
 	Check(SeedMeta(public_meta, "family-meta-public"), "public meta store seeded");
@@ -339,6 +353,14 @@ static void HttpTest()
 	ValueMap cyclic_data = ValueMap(Json(cyclic_status).Get("data"));
 	Check(cyclic_status.status == 200 && !AsString(cyclic_data.Get("replay_error")).IsEmpty(),
 	      "status handles a fatal cyclic DAG without missing-export access");
+	if(cycle_seeded) {
+		cycle_seeded = MultiAtlasLoadTrackFamily(vision_root, "family-vision-public", cyclic_family,
+		                                        cyclic_revision, cyclic_error);
+		if(cycle_seeded) cyclic_family.versions[0].requires.Clear();
+		cycle_seeded = cycle_seeded && MultiAtlasSaveTrackFamily(vision_root, "family-vision-public", cyclic_family,
+		                                        cyclic_revision, cyclic_error);
+	}
+	Check(cycle_seeded, "temporary replay cycle is removed for gate proof checks");
 	HttpReply missing = Request("GET", "/api/multiatlas/public/track/nope/map", String(), cookie, csrf);
 	Check(missing.status == 404, "unknown track map returns not found");
 
@@ -360,7 +382,89 @@ static void HttpTest()
 	Check(denied_meta.status == 403, "non-admin track editor cannot write meta-map");
 	HttpReply meta_write = Request("POST", "/api/multiatlas/public/meta/event",	                               "{\"expected_revision\":\"1\",\"vid\":\"m1\",\"type\":\"milestone\"}", admin_cookie, admin_csrf);
 	Check(meta_write.status == 201, "admin can append a meta-map milestone");
-
+	Check(Run("git", {"add", "-f", "multiatlas/family-vision-public/store/data/events/family-vision-public.ev-gate-1.json", "multiatlas/family-vision-public/store/data/events/family-vision-public.ev-warning-1.json"}, public_vision) &&
+	      Run("git", {"commit", "--only", "-q", "-m", "fixture-gate-state", "--", "multiatlas/family-vision-public/store/data/events/family-vision-public.ev-gate-1.json", "multiatlas/family-vision-public/store/data/events/family-vision-public.ev-warning-1.json"}, public_vision),
+	      "fixture child events committed before bridge dispatch");
+	String source_head = Capture("git", {"rev-parse", "--verify", "HEAD"}, public_vision);
+	Check(source_head.GetCount() == 40, "fixture child branch commit resolves");
+	MultiAtlasMetaFamily gate_meta; String gate_meta_revision, gate_meta_error;
+	bool configured = MultiAtlasLoadMetaFamily(
+		AppendFileName(public_meta, "multiatlas/family-meta-public/store/data"),
+		"family-meta-public", gate_meta, gate_meta_revision, gate_meta_error);
+	if(configured) {
+		gate_meta.versions[0].requires.Add("vision:tested:v1");
+		configured = MultiAtlasSaveMetaFamily(
+			AppendFileName(public_meta, "multiatlas/family-meta-public/store/data"),
+			"family-meta-public", gate_meta, gate_meta_revision, gate_meta_error);
+	}
+	Check(configured, "meta release requirement uses the normalized child gate contract");
+	String forged_body = "{\"vid\":\"m1\",\"subject_kind\":\"element\",\"subject_id\":\"e_track_vision\","
+	                    "\"type\":\"stage\",\"action\":\"RecordGatePass\","
+	                    "\"effects\":[\"track:vision:tested:v1\"],\"text\":\"Track vision passed gate v1 at commit " + source_head + "\","
+	                    "\"gate_track_id\":\"vision\",\"gate_version\":\"v1\",\"gate_event_id\":\"uncommitted\","
+	                    "\"gate_child_vid\":\"v1\",\"git_commit_hash\":\"" + source_head + "\"}";
+	HttpReply forged_gate = Request("POST", "/api/multiatlas/public/meta/event", forged_body,
+	                                admin_cookie, admin_csrf);
+	Check(forged_gate.status == 409, "authorized request without committed gate proof is rejected");
+	String bridge_root = AppendFileName(s_root, "bridge-queue"); RealizeDirectory(bridge_root);
+	String tester = AppendFileName(s_root, "gate-verifier.sh");
+	Check(SaveFile(tester, "#!/bin/sh\n[ -d \"$1\" ] && [ \"$2\" = v1 ]\n") &&
+	      Run("chmod", {"+x", tester}), "isolated gate tester fixture installed");
+	String task_path = AppendFileName(bridge_root, "verified-gate.task.txt");
+	Check(SaveFile(task_path, "ensemble=public\ntrack_id=vision\ngate_version=v1\ngit_commit_hash=" + source_head + "\n"),
+	      "isolated bridge task written");
+	String api_base = "http://127.0.0.1:18473";
+	String manager_root = GetCurrentDirectory();
+	String gate_script = AppendFileName(manager_root, "uppsrc/MultiAtlas/tools/record-gate-pass.sh");
+	String adapter_script = AppendFileName(manager_root, "uppsrc/MultiAtlas/tools/worker-bridge/multiatlas-gate-adapter.sh");
+	SetEnv("MA_API_BASE", api_base); SetEnv("MA_API_ORIGIN", api_base); SetEnv("MA_META_VID", "m1");
+	SetEnv("MA_COOKIE", admin_cookie); SetEnv("MA_CSRF", admin_csrf); SetEnv("MA_GATE_QUEUE_DIR", bridge_root);
+	SetEnv("MA_ENSEMBLE", "public"); SetEnv("MA_TRACK_ID", "vision"); SetEnv("MA_TRACK_REPO", public_vision);
+	SetEnv("MA_TRACK_BRANCH", "track/vision"); SetEnv("MA_TRACK_FAMILY", "family-vision-public");
+	SetEnv("MA_TRACK_STORE", "multiatlas/family-vision-public/store"); SetEnv("MA_GATE_TESTER", tester);
+	SetEnv("MA_RECORD_GATE_SCRIPT", gate_script);
+	bool bridge_pipeline = Run("sh", {adapter_script, "--once"}, manager_root);
+	Check(bridge_pipeline && FileExists(task_path + ".done"),
+	      "restricted worker bridge verifies, commits scoped evidence and synchronizes over HTTP");
+	String gate_commit = Capture("git", {"rev-parse", "--verify", "HEAD"}, public_vision);
+	String evidence_path = AppendFileName(public_vision, ".multiatlas/gates/v1.json");
+	ValueMap evidence;
+	try { evidence = ValueMap(ParseJSON(LoadFile(evidence_path))); } catch(...) {}
+	String gate_event_id = AsString(evidence.Get("event_id"));
+	String child_vid = AsString(evidence.Get("child_vid"));
+	String changed = Capture("git", {"diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"}, public_vision);
+	Check(gate_commit.GetCount() == 40 && gate_event_id.GetCount() > 0 && child_vid == "v1" &&
+	      changed.Find(".multiatlas/gates/v1.json") >= 0 && changed.Find("family-vision-public.ev-gate-v1-" + source_head + ".json") >= 0 &&
+	      changed.Find('\n') >= 0,
+	      "adapter commit contains only its event and gate evidence marker");
+	String proof_body = "{\"vid\":\"m1\",\"subject_kind\":\"element\",\"subject_id\":\"e_track_vision\","
+	                    "\"type\":\"stage\",\"action\":\"RecordGatePass\","
+	                    "\"effects\":[\"track:vision:tested:v1\"],\"text\":\"Track vision passed gate v1 at commit " + gate_commit + "\","
+	                    "\"gate_track_id\":\"vision\",\"gate_version\":\"v1\",\"gate_event_id\":\"" + gate_event_id + "\","
+	                    "\"gate_child_vid\":\"" + child_vid + "\",\"git_commit_hash\":\"" + gate_commit + "\"}";
+	HttpReply recorded_gate = Request("POST", "/api/multiatlas/public/meta/event", proof_body,
+	                                  admin_cookie, admin_csrf);
+	ValueMap recorded_data = ValueMap(Json(recorded_gate).Get("data"));
+	ValueMap recorded_event = recorded_data.Get("event");
+	ValueArray normalized_requires = recorded_event.Get("requires");
+	Check(recorded_gate.status == 200 && (bool)recorded_data.Get("idempotent") &&
+	      ValueArray(recorded_event.Get("effects")).IsEmpty() && normalized_requires.GetCount() == 1 &&
+	      AsString(normalized_requires[0]) == "vision:tested:v1",
+	      "repeat proof is an idempotent requirement and cannot mint a child fact");
+	String first_evidence_head = gate_commit;
+	Check(Run("mv", {task_path + ".done", task_path}) &&
+	      Run("sh", {adapter_script, "--once"}, manager_root) && FileExists(task_path + ".done") &&
+	      Capture("git", {"rev-parse", "--verify", "HEAD"}, public_vision) == first_evidence_head,
+	      "retry after commit resends the matching proof without another child commit");
+	HttpReply gate_check = Request("GET", "/api/multiatlas/public/check", String(), admin_cookie, admin_csrf);
+	ValueMap gate_check_data = ValueMap(Json(gate_check).Get("data"));
+	Check(gate_check.status == 200 && (bool)gate_check_data.Get("ok"),
+	      "verified gate satisfies meta replay immediately");
+	SetEnv("MA_API_BASE", ""); SetEnv("MA_API_ORIGIN", ""); SetEnv("MA_META_VID", "");
+	SetEnv("MA_COOKIE", ""); SetEnv("MA_CSRF", ""); SetEnv("MA_GATE_QUEUE_DIR", "");
+	SetEnv("MA_ENSEMBLE", ""); SetEnv("MA_TRACK_ID", ""); SetEnv("MA_TRACK_REPO", "");
+	SetEnv("MA_TRACK_BRANCH", ""); SetEnv("MA_TRACK_FAMILY", ""); SetEnv("MA_TRACK_STORE", "");
+	SetEnv("MA_GATE_TESTER", ""); SetEnv("MA_RECORD_GATE_SCRIPT", "");
 	host.StopEngines(); host.Quit(); host_thread.Wait();
 }
 

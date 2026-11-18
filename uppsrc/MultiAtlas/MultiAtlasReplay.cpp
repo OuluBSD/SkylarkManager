@@ -10,7 +10,7 @@ static bool Has(const Vector<String>& values, const String& value)
 	return false;
 }
 
-static void AddUnique(Vector<String>& values, const String& value)
+static void AddReplayUnique(Vector<String>& values, const String& value)
 {
 	if(!Has(values, value))
 		values.Add(value);
@@ -38,7 +38,7 @@ static void Apply(Vector<String>& state, const String& literal)
 	if(negated)
 		Remove(state, atom);
 	else
-		AddUnique(state, atom);
+		AddReplayUnique(state, atom);
 }
 
 static bool PublicAtom(const String& atom, bool explicitly_exported,
@@ -284,7 +284,7 @@ bool MultiAtlasReplayEnsemble(const MultiAtlasReplayInput& input, MultiAtlasRepl
 			int source_index = sources.final_exports.Find(edge.from_track);
 			if(source_index < 0) continue;
 			for(const String& atom : sources.final_exports[source_index])
-				AddUnique(imported, edge.from_track + ":" + atom);
+				AddReplayUnique(imported, edge.from_track + ":" + atom);
 		}
 		VectorMap<String, Vector<String>> track_worlds;
 		Vector<bool> version_passed;

@@ -45,6 +45,107 @@ String Timestamp()
 	              now.year, now.month, now.day, now.hour, now.minute, now.second);
 }
 
+bool GitOutput(const String& repo, const Vector<String>& args, String& output);
+
+bool SafeGateVersion(const String& value)
+{
+	if(value.IsEmpty() || value.GetCount() > 64) return false;
+	for(int i = 0; i < value.GetCount(); i++) {
+		int c = value[i];
+		if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		     (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_')) return false;
+	}
+	return true;
+}
+
+String GateVersionLabel(int code)
+{
+	if(code < 0) return String();
+	return Format("%d.%d.%d", code / 1000000, (code / 1000) % 1000, code % 1000);
+}
+
+bool VerifyGatePass(const MultiAtlasEnsembleDef& ensemble, const String& track_id,
+	                const String& gate, const String& child_vid, const String& commit,
+	                const String& event_id, String& error)
+{
+	const MultiAtlasTrackDef *track = NULL;
+	for(const MultiAtlasTrackDef& candidate : ensemble.tracks)
+		if(candidate.track_id == track_id) { track = &candidate; break; }
+	if(!track || !SafeGateVersion(gate) || child_vid.IsEmpty() || commit.GetCount() != 40 || event_id.IsEmpty()) {
+		error = "gate proof fields are invalid"; return false;
+	}
+	for(int i = 0; i < commit.GetCount(); i++)
+		if(!IsXDigit(commit[i])) { error = "git_commit_hash must be a full commit hash"; return false; }
+	String head, branch;
+	Vector<String> args;
+	args.Add("rev-parse"); args.Add("--verify"); args.Add("HEAD");
+	if(!GitOutput(track->repo, args, head)) { error = "configured track worktree is unavailable"; return false; }
+	args.Clear(); args.Add("symbolic-ref"); args.Add("--short"); args.Add("-q"); args.Add("HEAD");
+	if(!GitOutput(track->repo, args, branch) || TrimBoth(branch) != track->branch) {
+		error = "configured track branch does not match its worktree"; return false;
+	}
+	if(TrimBoth(head) != ToLower(commit)) { error = "git_commit_hash is not the current track commit"; return false; }
+	String evidence_path = ".multiatlas/gates/" + gate + ".json";
+	args.Clear(); args.Add("show"); args.Add(commit + ":" + evidence_path);
+	String evidence;
+	if(!GitOutput(track->repo, args, evidence)) { error = "committed gate evidence is missing"; return false; }
+	Value parsed;
+	try { parsed = ParseJSON(evidence); } catch(...) { error = "committed gate evidence is invalid"; return false; }
+	if(!parsed.Is<ValueMap>()) { error = "committed gate evidence is invalid"; return false; }
+	ValueMap proof(parsed);
+	String evidence_event = BodyString(proof, "event_id");
+	String source_commit = BodyString(proof, "source_commit");
+	if(evidence_event != event_id) { error = "committed evidence event id does not match request"; return false; }
+	if(BodyString(proof, "track_id") != track_id || BodyString(proof, "gate_version") != gate ||
+	   BodyString(proof, "child_vid") != child_vid ||
+	   BodyString(proof, "result") != "passed" || evidence_event.IsEmpty() || source_commit.GetCount() != 40) {
+		error = "committed gate evidence does not match the requested gate"; return false;
+	}
+	for(int i = 0; i < source_commit.GetCount(); i++)
+		if(!IsXDigit(source_commit[i])) { error = "gate evidence source commit is invalid"; return false; }
+	args.Clear(); args.Add("merge-base"); args.Add("--is-ancestor"); args.Add(ToLower(source_commit)); args.Add(ToLower(commit));
+	if(!GitOutput(track->repo, args, evidence)) { error = "tested source commit is not an ancestor of gate evidence"; return false; }
+	MultiAtlasReplayInput input; MultiAtlasReplayContext context; Vector<MultiAtlasWarningAck> acks;
+	if(!MultiAtlasLoadReplayInput(ensemble, input, acks, error)) return false;
+	MultiAtlasReplayEnsemble(input, context);
+	if(!context.fatal_error.IsEmpty() ||
+	   context.exported_atoms_by_track.Find(track_id) < 0 ||
+	   FindIndex(context.exported_atoms_by_track.Get(track_id), "tested:" + gate) < 0) {
+		error = "child track replay has not exported the requested tested gate"; return false;
+	}
+	bool event_found = false, version_found = false, child_errors = false;
+	for(const MultiAtlasTrackReplayInput& child : input.tracks) if(child.track_id == track_id) {
+		for(const MultiAtlasVersion& version : child.versions)
+			if(version.vid == child_vid && (version.vid == gate || GateVersionLabel(version.code) == gate)) version_found = true;
+		for(const MultiAtlasEvent& event : child.events)
+			if(event.id == evidence_event && event.vid == child_vid &&
+			   event.type == "gate-pass" && event.action == "GatePass" &&
+			   event.text == "Local gate verified at source commit " + ToLower(source_commit) &&
+			   FindIndex(event.effects, "tested:" + gate) >= 0) event_found = true;
+	}
+	for(const MultiAtlasRoadmapMessage& message : context.messages)
+		if(message.track_id == track_id && message.severity == "error") child_errors = true;
+	if(child_errors) { error = "child track replay reports gate-blocking errors"; return false; }
+	if(!version_found) { error = "gate does not resolve to the committed child version"; return false; }
+	if(!event_found) { error = "committed evidence does not name the replayed child gate event"; return false; }
+	String committed_event_path = track->store + "/data/events/" + track->family + ".ev-" + evidence_event + ".json";
+	args.Clear(); args.Add("show"); args.Add(commit + ":" + committed_event_path);
+	String committed_event_json;
+	if(!GitOutput(track->repo, args, committed_event_json)) {
+		error = "replayed child gate event is not committed at the requested Git commit"; return false;
+	}
+	MultiAtlasEvent committed_event; String event_revision;
+	if(!MultiAtlasLoadRecord(committed_event, committed_event_json, event_revision) ||
+	   committed_event.id != evidence_event || committed_event.track_id != track_id ||
+	   committed_event.vid != child_vid || committed_event.type != "gate-pass" ||
+	   committed_event.action != "GatePass" ||
+	   committed_event.text != "Local gate verified at source commit " + ToLower(source_commit) ||
+	   FindIndex(committed_event.effects, "tested:" + gate) < 0) {
+		error = "committed Git event does not match the replayed child gate"; return false;
+	}
+	return true;
+}
+
 ValueArray StringArray(const Vector<String>& items)
 {
 	ValueArray out;
@@ -288,7 +389,11 @@ void Status(WebRequest& r)
 	for(const MultiAtlasTrackDef& track : ensemble.tracks) {
 		ValueMap row; row.Add("track_id", track.track_id); row.Add("family", track.family);
 		row.Add("git", GitFacts(track.repo));
-		ValueArray versions, gates;
+		MultiAtlasTrack family; String family_revision, family_error;
+		if(MultiAtlasLoadTrackFamily(StoreRoot(ensemble, track.track_id), track.family,
+		                            family, family_revision, family_error))
+			row.Add("family_revision", family_revision);
+		ValueArray versions, gates, gate_evidence;
 		for(const MultiAtlasTrackReplayInput& replay_track : replay_input.tracks) {
 			if(replay_track.track_id != track.track_id) continue;
 			for(const MultiAtlasVersion& version : replay_track.versions) {
@@ -300,7 +405,21 @@ void Status(WebRequest& r)
 		if(exported >= 0)
 			for(const String& atom : replay_context.exported_atoms_by_track[exported])
 				if(atom.StartsWith("tested:")) gates.Add(atom.Mid(7));
-		row.Add("versions", versions); row.Add("passed_gates", gates);
+		for(const MultiAtlasTrackReplayInput& replay_track : replay_input.tracks)
+			if(replay_track.track_id == track.track_id)
+				for(const MultiAtlasEvent& event : replay_track.events)
+					for(const String& atom : event.effects)
+						if(atom.StartsWith("tested:")) {
+							String gate = atom.Mid(7); bool version_matches = false;
+							for(const MultiAtlasVersion& version : replay_track.versions)
+								if(version.vid == event.vid && (version.vid == gate || GateVersionLabel(version.code) == gate))
+									version_matches = true;
+							if(!version_matches) continue;
+							ValueMap proof; proof.Add("gate_version", atom.Mid(7)); proof.Add("event_id", event.id);
+							proof.Add("child_vid", event.vid);
+							gate_evidence.Add(proof);
+						}
+		row.Add("versions", versions); row.Add("passed_gates", gates); row.Add("gate_evidence", gate_evidence);
 		tracks.Add(row);
 	}
 	ValueMap meta; meta.Add("family", ensemble.meta_family); meta.Add("git", GitFacts(ensemble.meta_repo));
@@ -412,7 +531,8 @@ void AppendEvent(WebRequest& r, bool meta)
 		for(const MultiAtlasVersion& version : family.versions) known_vid |= version.vid == BodyString(body, "vid");
 		if(!known_vid) { Fail(r, 400, "vid is not present in the track family"); return; }
 	}
-	if(!ExpectedRevision(r, revision)) return;
+	bool gate_request = meta && BodyString(body, "action") == "RecordGatePass";
+	if(!gate_request && !ExpectedRevision(r, revision)) return;
 	MultiAtlasEvent event;
 	event.id = BodyString(body, "id");
 	if(event.id.IsEmpty()) event.id = "ev-" + Format64Hex((int64)(Random64() & 0x7fffffffffffffffULL));
@@ -420,10 +540,43 @@ void AppendEvent(WebRequest& r, bool meta)
 	event.vid = BodyString(body, "vid"); event.subject_kind = BodyString(body, "subject_kind");
 	event.subject_id = BodyString(body, "subject_id"); event.type = BodyString(body, "type");
 	event.action = BodyString(body, "action"); event.text = BodyString(body, "text");
+	bool gate_pass = meta && event.action == "RecordGatePass";
+	String gate_track, gate_version, gate_commit;
+	String gate_event_id, gate_child_vid;
+	if(gate_pass) {
+		gate_track = BodyString(body, "gate_track_id");
+		gate_version = BodyString(body, "gate_version");
+		gate_commit = BodyString(body, "git_commit_hash");
+		gate_event_id = BodyString(body, "gate_event_id");
+		gate_child_vid = BodyString(body, "gate_child_vid");
+		String proof_error;
+		if(!VerifyGatePass(ensemble, gate_track, gate_version, gate_child_vid,
+		                   gate_commit, gate_event_id, proof_error)) {
+			Fail(r, 409, proof_error); return;
+		}
+		String deterministic_id = "gate-" + gate_track + "-" + gate_version + "-" + ToLower(gate_commit);
+		String requested_id = BodyString(body, "id");
+		if(!requested_id.IsEmpty() && requested_id != deterministic_id) {
+			Fail(r, 400, "RecordGatePass event id must be deterministic"); return;
+		}
+		event.id = deterministic_id;
+		String expected_text = "Track " + gate_track + " passed gate " + gate_version + " at commit " + gate_commit;
+		if(event.type != "stage" || event.subject_kind != "element" ||
+		   event.subject_id != "e_track_" + gate_track || event.text != expected_text) {
+			Fail(r, 400, "RecordGatePass fields do not match verified gate provenance"); return;
+		}
+		event.requires.Add(gate_track + ":tested:" + gate_version);
+	}
 	if(event.vid.IsEmpty() || event.type.IsEmpty()) { Fail(r, 400, "vid and type are required"); return; }
 	Value req_value = body.Get("requires"), effects_value = body.Get("effects");
+	if(gate_pass && (!effects_value.Is<ValueArray>() || ValueArray(effects_value).GetCount() != 1)) {
+		Fail(r, 400, "RecordGatePass accepts exactly one gate proof effect"); return;
+	}
 	if(!req_value.IsNull()) {
 		if(!req_value.Is<ValueArray>()) { Fail(r, 400, "requires must be an array of strings"); return; }
+		if(gate_pass && !ValueArray(req_value).IsEmpty()) {
+			Fail(r, 400, "RecordGatePass requirements are derived from verified gate proof"); return;
+		}
 		for(const Value& item : ValueArray(req_value)) {
 			if(!item.Is<String>()) { Fail(r, 400, "requires must be an array of strings"); return; }
 			event.requires.Add((String)item);
@@ -431,15 +584,22 @@ void AppendEvent(WebRequest& r, bool meta)
 	}
 	if(!effects_value.IsNull()) {
 		if(!effects_value.Is<ValueArray>()) { Fail(r, 400, "effects must be an array of strings"); return; }
+		if(gate_pass && (ValueArray(effects_value).GetCount() != 1 ||
+		   !ValueArray(effects_value)[0].Is<String>() ||
+		   (String)ValueArray(effects_value)[0] != "track:" + gate_track + ":tested:" + gate_version)) {
+			Fail(r, 400, "RecordGatePass accepts only its gate proof input"); return;
+		}
 		for(const Value& item : ValueArray(effects_value)) {
 			if(!item.Is<String>()) { Fail(r, 400, "effects must be an array of strings"); return; }
 			MultiAtlasContractRef effect; String parse_error;
+			if(gate_pass && (String)item == "track:" + gate_track + ":tested:" + gate_version) continue;
 			if(!MultiAtlasParseContract((String)item, effect, parse_error) || !effect.track_id.IsEmpty() || effect.negated) {
 				Fail(r, 400, "effects must be valid local positive atoms"); return;
 			}
 			event.effects.Add((String)item);
 		}
 	}
+	if(gate_pass) event.effects.Clear();
 	for(const String& requirement : event.requires) {
 		MultiAtlasContractRef ref; String parse_error;
 		if(!MultiAtlasParseContract(requirement, ref, parse_error)) {
@@ -447,6 +607,22 @@ void AppendEvent(WebRequest& r, bool meta)
 		}
 		if(!ref.track_id.IsEmpty() && ref.track_id != "meta" && !FindTrack(ensemble, ref.track_id)) {
 			Fail(r, 400, "requires references an unregistered track: " + ref.track_id); return;
+		}
+	}
+	if(gate_pass) {
+		Vector<MultiAtlasEvent> existing; String read_error;
+		if(!MultiAtlasLoadTrackEvents(root, key, track_id, existing, read_error)) {
+			FailStore(r, read_error); return;
+		}
+		for(const MultiAtlasEvent& old : existing) if(old.id == event.id) {
+			if(old.action == event.action && old.type == event.type && old.vid == event.vid &&
+			   old.subject_kind == event.subject_kind && old.subject_id == event.subject_id &&
+			   old.text == event.text && old.requires.GetCount() == 1 &&
+			   old.requires[0] == event.requires[0] && old.effects.IsEmpty()) {
+				ValueMap data; data.Add("event", StoreAsJsonValue(old)); data.Add("idempotent", true);
+				Reply(r, data); return;
+			}
+			Fail(r, 409, "deterministic gate event id is already used"); return;
 		}
 	}
 	if(!MultiAtlasPutTrackEvent(root, key, track_id, event, error)) {
