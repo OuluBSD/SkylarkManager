@@ -29,6 +29,7 @@ static Value TrackValue(const String& repo, const String& id = "vision",
 	ValueMap track;
 	track.Add("track_id", id); track.Add("family", "brownbear-" + id);
 	track.Add("repo", repo); track.Add("branch", "track/" + id); track.Add("store", store);
+	ValueArray editors; editors.Add("editor-" + id); track.Add("editors", editors);
 	return track;
 }
 
@@ -42,6 +43,7 @@ static Value EnsembleValue(const String& repo, const String& name = "brownbear-s
 	ValueArray tracks; tracks.Add(TrackValue(repo, track, store));
 	ValueMap ensemble;
 	ensemble.Add("name", name); ensemble.Add("title", "BrownBear");
+	ensemble.Add("public_read", false);
 	ensemble.Add("meta", meta); ensemble.Add("tracks", tracks);
 	return ensemble;
 }
@@ -80,13 +82,16 @@ void RunMultiAtlasReplayTests()
 	ValueArray list; list.Add(EnsembleValue(repo)); WriteRegistry(site, RootValue(list));
 	RegistryCheck(MultiAtlasLoadRegistry(site, ensembles, error) && ensembles.GetCount() == 1 &&
 	              ensembles[0].name == "brownbear-suite" && ensembles[0].title == "BrownBear" &&
+	              !ensembles[0].public_read && ensembles[0].tracks[0].editors.GetCount() == 1 &&
+	              ensembles[0].tracks[0].editors[0] == "editor-vision" &&
 	              ensembles[0].meta_family == "brownbear-meta" && ensembles[0].tracks.GetCount() == 1 &&
 	              ensembles[0].tracks[0].track_id == "vision" &&
 	              ensembles[0].tracks[0].store == "multiatlas/brownbear-vision/store",
 	              "registry parses meta and complete track configuration");
 	RegistryCheck(MultiAtlasFindEnsemble(site, "brownbear-suite", found, error) &&
-	              found.tracks.GetCount() == 1 && found.meta_repo == repo,
-	              "named lookup returns matching ensemble");
+	              found.tracks.GetCount() == 1 && found.meta_repo == repo && !found.public_read &&
+	              found.tracks[0].editors.GetCount() == 1 && found.tracks[0].editors[0] == "editor-vision",
+	              "named lookup preserves private visibility and scoped editor configuration");
 
 	list.Clear(); list.Add(EnsembleValue(repo)); list.Add(EnsembleValue(repo));
 	WriteRegistry(site, RootValue(list));

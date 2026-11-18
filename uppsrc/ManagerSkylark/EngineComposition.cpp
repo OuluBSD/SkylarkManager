@@ -476,6 +476,13 @@ bool SetAtlasPassword(const String& username, const String& role, const String& 
 	return SetEngineUser("atlas", username, password, roles, error);
 }
 
+bool SetMultiAtlasPassword(const String& username, const String& role, const String& password, String& error)
+{
+	Vector<String> roles;
+	if(!role.IsEmpty()) roles.Add(role);
+	return SetEngineUser("multiatlas", username, password, roles, error);
+}
+
 bool SetCompanyPassword(EngineSiteBackends& owned, const String& username, const String& role,
                         const String& password, String& error)
 {

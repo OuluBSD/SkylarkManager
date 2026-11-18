@@ -106,6 +106,11 @@ bool SetFinancialsPassword(const String& username, const String& role,
 // "admin" may edit maps; any other role reads only. Requires ComposeEngineSites.
 bool SetAtlasPassword(const String& username, const String& role, const String& password, String& error);
 
+// Creates or updates a MultiAtlas account. The "admin" role may administer
+// every ensemble; registry editor names continue to scope non-admin writes.
+bool SetMultiAtlasPassword(const String& username, const String& role,
+                           const String& password, String& error);
+
 // Creates or updates a Company user (the Company record and its WebAccounts
 // login) with one role, through the store ComposeEngineSites opened. Requires
 // ComposeEngineSites to have run; owned is the same backends object.

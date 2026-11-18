@@ -85,11 +85,13 @@ struct MultiAtlasMetaFamily : Moveable<MultiAtlasMetaFamily> {
 
 struct MultiAtlasTrackDef : Moveable<MultiAtlasTrackDef> {
 	String track_id, family, repo, branch, store;
+	Vector<String> editors;
 };
 
 struct MultiAtlasEnsembleDef : Moveable<MultiAtlasEnsembleDef> {
 	String name, title;
 	String meta_family, meta_repo, meta_store;
+	bool public_read = true;
 	Vector<MultiAtlasTrackDef> tracks;
 };
 

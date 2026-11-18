@@ -1,0 +1,13 @@
+description "MultiAtlas REST API real HTTP and authorization tests";
+
+uses
+	Core,
+	Core/SSL,
+	WebEngine,
+	MultiAtlas;
+
+file
+	MultiAtlasApiTests.cpp;
+
+mainconfig
+	"" = "";

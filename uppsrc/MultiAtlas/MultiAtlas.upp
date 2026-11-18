@@ -9,6 +9,8 @@ uses
 file
 	MultiAtlasSite.h,
 	MultiAtlasSite.cpp,
+	MultiAtlasApi.h,
+	MultiAtlasApi.cpp,
 	MultiAtlasModel.h,
 	MultiAtlasModel.cpp,
 	MultiAtlasContract.h,
@@ -19,6 +21,8 @@ file
 	MultiAtlasScheduler.cpp,
 	MultiAtlasReplay.h,
 	MultiAtlasReplay.cpp,
+	MultiAtlasReplayLoader.h,
+	MultiAtlasReplayLoader.cpp,
 	MultiAtlasWarningLedger.h,
 	MultiAtlasWarningLedger.cpp,
 	MultiAtlasStore.h,

@@ -117,6 +117,8 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 	cla.AddArg("public-host", 0, "Address other machines use for site links (default: detected LAN IPv4, or MANAGERSKYLARK_PUBLIC_HOST); never loopback", true, "host");
 	cla.AddArg("company-port", 0, "Company engine site port (default 18219)", true, "port");
 	cla.AddArg("multiatlas-port", 0, "MultiAtlas engine site port (default 18219; uses 18220 when Company resolves to 18219)", true, "port");
+	cla.AddArg("multiatlas-role", 0, "Role for --set-multiatlas-user (default admin; required for meta-map writes)", true, "role");
+	cla.AddArg("set-multiatlas-user", 0, "Create/update a MultiAtlas account with hidden prompt (or MANAGERSKYLARK_MULTIATLAS_PASSWORD)", true, "username");
 	cla.AddArg("company-root", 0, "Composed Company store root (default <site-dir>/engine/company)", true, "directory");
 	cla.AddArg("company-repos", 0, "Comma-separated repositories Company may propose against (default none)", true, "owner/repo,...");
 	cla.AddArg("company-role", 0, "Role for --set-company-user (default admin; the first admin is provisioned this way)", true, "role");
@@ -311,6 +313,22 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			return false;
 		}
 		engine_composed = true;
+
+		String ma_user = cla.GetArg("set-multiatlas-user");
+		if(!ma_user.IsEmpty()) {
+			String password;
+			if(!ReadEnginePassword("MANAGERSKYLARK_MULTIATLAS_PASSWORD", "New MultiAtlas password: ", password))
+				return false;
+			String error;
+			String ma_role = cla.GetArg("multiatlas-role").IsEmpty() ? String("admin") : cla.GetArg("multiatlas-role");
+			if(!SetMultiAtlasPassword(ma_user, ma_role, password, error)) {
+				Cerr() << "Failed to write MultiAtlas credentials: " << error << "\n";
+				return false;
+			}
+			Cout() << "Configured MultiAtlas account '" << ma_user << "'\n";
+			fflush(stdout);
+			_exit(0);
+		}
 
 		String tf_user = cla.GetArg("set-taskfoundry-user");
 		if(!tf_user.IsEmpty()) {

@@ -159,6 +159,23 @@ static bool ParseTrack(const ValueMap& value, const String& ensemble, MultiAtlas
 		error = "ensemble " + ensemble + " track " + track.track_id + ": " + error;
 		return false;
 	}
+	Value editors = value.Get("editors");
+	if(!editors.IsNull()) {
+		if(!editors.Is<ValueArray>()) {
+			error = "ensemble " + ensemble + " track " + track.track_id + ": editors must be an array";
+			return false;
+		}
+		ValueArray list = editors;
+		for(const Value& item : list) {
+			if(!item.Is<String>() || TrimBoth((String)item).IsEmpty()) {
+				error = "ensemble " + ensemble + " track " + track.track_id + ": editor names must be non-empty strings";
+				return false;
+			}
+			String name = TrimBoth((String)item);
+			if(FindIndex(track.editors, name) < 0)
+				track.editors.Add(name);
+		}
+	}
 	return true;
 }
 
@@ -172,6 +189,14 @@ static bool ParseEnsemble(const ValueMap& value, MultiAtlasEnsembleDef& ensemble
 	if(!meta_value.Is<ValueMap>()) {
 		error = "ensemble " + ensemble.name + ": meta must be an object";
 		return false;
+	}
+	Value public_read = value.Get("public_read");
+	if(!public_read.IsNull()) {
+		if(!public_read.Is<bool>()) {
+			error = "ensemble " + ensemble.name + ": public_read must be boolean";
+			return false;
+		}
+		ensemble.public_read = (bool)public_read;
 	}
 	ValueMap meta = meta_value;
 	ensemble.meta_family = JsonString(meta, "family");
@@ -308,11 +333,13 @@ bool MultiAtlasFindEnsemble(const String& site_dir, const String& name,
 			out.meta_family = ensemble.meta_family;
 			out.meta_repo = ensemble.meta_repo;
 			out.meta_store = ensemble.meta_store;
+			out.public_read = ensemble.public_read;
 			out.tracks.Clear();
 			for(const MultiAtlasTrackDef& track : ensemble.tracks) {
 				MultiAtlasTrackDef copy;
 				copy.track_id = track.track_id; copy.family = track.family;
 				copy.repo = track.repo; copy.branch = track.branch; copy.store = track.store;
+				copy.editors <<= track.editors;
 				out.tracks.Add(pick(copy));
 			}
 			return true;
