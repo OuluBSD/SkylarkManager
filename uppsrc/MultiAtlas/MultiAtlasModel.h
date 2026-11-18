@@ -83,6 +83,16 @@ struct MultiAtlasMetaFamily : Moveable<MultiAtlasMetaFamily> {
 	}
 };
 
+struct MultiAtlasTrackDef : Moveable<MultiAtlasTrackDef> {
+	String track_id, family, repo, branch, store;
+};
+
+struct MultiAtlasEnsembleDef : Moveable<MultiAtlasEnsembleDef> {
+	String name, title;
+	String meta_family, meta_repo, meta_store;
+	Vector<MultiAtlasTrackDef> tracks;
+};
+
 struct MultiAtlasEvent : Moveable<MultiAtlasEvent> {
 	String id, at, actor, track_id, vid, subject_kind, subject_id, type, action, text;
 	Vector<String> effects, requires;

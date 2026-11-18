@@ -11,7 +11,9 @@ file
 	MultiAtlasModel.h,
 	MultiAtlasModel.cpp,
 	MultiAtlasContract.h,
-	MultiAtlasContract.cpp;
+	MultiAtlasContract.cpp,
+	MultiAtlasRegistry.h,
+	MultiAtlasRegistry.cpp;
 
 mainconfig
 	"" = "MT";

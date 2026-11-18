@@ -1,0 +1,12 @@
+description "Standalone MultiAtlas registry and replay release-gate test";
+
+uses
+	Core,
+	MultiAtlas;
+
+file
+	MultiAtlasReplayTest.cpp,
+	../../uppsrc/MultiAtlas/MultiAtlasRegistryTests.cpp;
+
+mainconfig
+	"" = "";
