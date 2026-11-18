@@ -7,7 +7,9 @@ uses
 
 file
 	MultiAtlasSite.h,
-	MultiAtlasSite.cpp;
+	MultiAtlasSite.cpp,
+	MultiAtlasModel.h,
+	MultiAtlasModel.cpp;
 
 mainconfig
 	"" = "MT";

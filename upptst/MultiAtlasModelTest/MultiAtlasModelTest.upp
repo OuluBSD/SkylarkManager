@@ -1,0 +1,12 @@
+description "Standalone MultiAtlas data model and serialization release-gate test";
+
+uses
+	Core,
+	MultiAtlas;
+
+file
+	MultiAtlasModelTest.cpp,
+	../../uppsrc/MultiAtlas/MultiAtlasModelTests.cpp;
+
+mainconfig
+	"" = "";
