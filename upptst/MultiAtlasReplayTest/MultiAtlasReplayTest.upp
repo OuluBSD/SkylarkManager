@@ -9,7 +9,8 @@ file
 	../../uppsrc/MultiAtlas/MultiAtlasRegistryTests.cpp,
 	../../uppsrc/MultiAtlas/MultiAtlasSchedulerTests.cpp,
 	../../uppsrc/MultiAtlas/MultiAtlasReplayTests.cpp,
-	../../uppsrc/MultiAtlas/MultiAtlasWarningLedgerTests.cpp;
+	../../uppsrc/MultiAtlas/MultiAtlasWarningLedgerTests.cpp,
+	../../uppsrc/MultiAtlas/MultiAtlasStoreTests.cpp;
 
 mainconfig
 	"" = "";

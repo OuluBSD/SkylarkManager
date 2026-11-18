@@ -5,6 +5,7 @@ void RunMultiAtlasReplayTests();
 void RunMultiAtlasSchedulerTests();
 void RunMultiAtlasReplayEngineTests();
 void RunMultiAtlasWarningTests();
+void RunMultiAtlasStoreTests();
 END_UPP_NAMESPACE
 
 CONSOLE_APP_MAIN
@@ -14,4 +15,5 @@ CONSOLE_APP_MAIN
 	RunMultiAtlasSchedulerTests();
 	RunMultiAtlasReplayEngineTests();
 	RunMultiAtlasWarningTests();
+	RunMultiAtlasStoreTests();
 }
