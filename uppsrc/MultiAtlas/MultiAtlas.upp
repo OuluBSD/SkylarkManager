@@ -13,7 +13,9 @@ file
 	MultiAtlasContract.h,
 	MultiAtlasContract.cpp,
 	MultiAtlasRegistry.h,
-	MultiAtlasRegistry.cpp;
+	MultiAtlasRegistry.cpp,
+	MultiAtlasScheduler.h,
+	MultiAtlasScheduler.cpp;
 
 mainconfig
 	"" = "MT";

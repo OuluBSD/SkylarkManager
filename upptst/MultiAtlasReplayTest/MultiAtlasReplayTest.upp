@@ -6,7 +6,8 @@ uses
 
 file
 	MultiAtlasReplayTest.cpp,
-	../../uppsrc/MultiAtlas/MultiAtlasRegistryTests.cpp;
+	../../uppsrc/MultiAtlas/MultiAtlasRegistryTests.cpp,
+	../../uppsrc/MultiAtlas/MultiAtlasSchedulerTests.cpp;
 
 mainconfig
 	"" = "";

@@ -104,6 +104,51 @@ struct MultiAtlasEvent : Moveable<MultiAtlasEvent> {
 	}
 };
 
+// Core-only replay inputs. These deliberately mirror the rule/action/event
+// requirements consumed by replay without depending on the Atlas package.
+struct MultiAtlasAction : Moveable<MultiAtlasAction> {
+	String name;
+	String text;
+	Vector<String> requires;
+	Vector<String> effects;
+	bool entry_none = false;
+	bool processing = false;
+
+	void Jsonize(JsonIO& io) {
+		io("name", name)("text", text)("requires", requires)("effects", effects)
+		  ("entry_none", entry_none)("processing", processing);
+	}
+};
+
+struct MultiAtlasAtomDef : Moveable<MultiAtlasAtomDef> {
+	String name;
+	String text;
+	bool gate = false;
+	bool exported = false;
+
+	void Jsonize(JsonIO& io) { io("name", name)("text", text)("gate", gate)("export", exported); }
+};
+
+struct MultiAtlasRules : Moveable<MultiAtlasRules> {
+	Vector<String> initial;
+	Vector<MultiAtlasAtomDef> atoms;
+	Vector<MultiAtlasAction> actions;
+
+	void Jsonize(JsonIO& io) { io("initial", initial)("atoms", atoms)("actions", actions); }
+};
+
+struct MultiAtlasTrackReplayInput : Moveable<MultiAtlasTrackReplayInput> {
+	String track_id;
+	Vector<MultiAtlasVersion> versions;
+	MultiAtlasRules rules;
+	Vector<MultiAtlasEvent> events;
+};
+
+struct MultiAtlasReplayInput : Moveable<MultiAtlasReplayInput> {
+	Vector<MultiAtlasTrackReplayInput> tracks;
+	MultiAtlasTrackReplayInput meta;
+};
+
 struct MultiAtlasCheck : Moveable<MultiAtlasCheck> {
 	Vector<String> errors;
 	bool Ok() const { return errors.IsEmpty(); }
