@@ -1,4 +1,5 @@
 #include "MultiAtlasModel.h"
+#include "MultiAtlasContract.h"
 
 NAMESPACE_UPP
 
@@ -158,6 +159,65 @@ void RunMultiAtlasModelTests()
 		if(error.Find("missing parent") >= 0 || error.Find("missing ancestor") >= 0)
 			missing_reported = true;
 	MultiAtlasCheckTest(missing_reported, "missing ancestor is distinguished from a parent cycle");
+
+	MultiAtlasContractRef contract;
+	String contract_error;
+	MultiAtlasCheckTest(MultiAtlasParseContract("built:LlmPlayer", contract, contract_error) &&
+	                    contract.track_id.IsEmpty() && contract.family_kind == "built" &&
+	                    contract.atom_name == "built:LlmPlayer" && !contract.negated,
+	                    "legacy built literal parses as a local atom");
+	MultiAtlasCheckTest(MultiAtlasParseContract("tested:0.1", contract, contract_error) &&
+	                    contract.track_id.IsEmpty() && contract.family_kind == "tested",
+	                    "tested literal parses as a local atom");
+	MultiAtlasCheckTest(MultiAtlasParseContract("ai:artifact:nlth_checkpoint", contract, contract_error) &&
+	                    contract.track_id == "ai" && contract.family_kind == "artifact" &&
+	                    contract.atom_name == "artifact:nlth_checkpoint",
+	                    "artifact literal resolves its cross-track namespace");
+	MultiAtlasCheckTest(MultiAtlasParseContract("vision:done:VsmFrameSource", contract, contract_error) &&
+	                    contract.track_id == "vision" && contract.family_kind == "done" &&
+	                    contract.atom_name == "done:VsmFrameSource",
+	                    "done literal resolves its cross-track namespace");
+	MultiAtlasCheckTest(MultiAtlasParseContract("vision@0.4.999:tested:0.4.999", contract, contract_error) &&
+	                    contract.track_id == "vision" && contract.vid_anchor == "0.4.999" &&
+	                    contract.family_kind == "tested",
+	                    "dotted version anchor parses without losing the atom");
+	MultiAtlasCheckTest(MultiAtlasParseContract("!vision@vision-v0-4:artifact:table_crops", contract, contract_error) &&
+	                    contract.negated && contract.track_id == "vision" &&
+	                    contract.vid_anchor == "vision-v0-4" && contract.atom_name == "artifact:table_crops",
+	                    "negation preserves namespace, anchor, and atom identity");
+	MultiAtlasCheckTest(MultiAtlasParseContract("task:task-17:done", contract, contract_error) &&
+	                    contract.track_id.IsEmpty() && contract.family_kind == "task" &&
+	                    contract.atom_name == "task:task-17:done",
+	                    "legacy task completion literal remains local and intact");
+	MultiAtlasCheckTest(MultiAtlasParseContract("task:task-17:accepted", contract, contract_error) &&
+	                    contract.track_id.IsEmpty() && contract.atom_name == "task:task-17:accepted",
+	                    "legacy task acceptance literal remains local and intact");
+	bool bad_empty = !MultiAtlasParseContract("", contract, contract_error) && !contract_error.IsEmpty();
+	bool bad_family = !MultiAtlasParseContract("vision:unknown:x", contract, contract_error) && !contract_error.IsEmpty();
+	bool bad_anchor = !MultiAtlasParseContract("vision@:done:x", contract, contract_error) && !contract_error.IsEmpty();
+	bool bad_negation = !MultiAtlasParseContract("!!done:x", contract, contract_error) && !contract_error.IsEmpty();
+	bool bad_shape = !MultiAtlasParseContract("artifact:", contract, contract_error) && !contract_error.IsEmpty();
+	MultiAtlasCheckTest(bad_empty && bad_family && bad_anchor && bad_negation && bad_shape,
+	                    "malformed contract literals fail with descriptive syntax errors");
+	MultiAtlasTrackAtomRegistry atoms;
+	atoms.track_id = "vision";
+	atoms.Declare("artifact:table_crops");
+	atoms.Declare("!artifact:table_crops");
+	atoms.Declare("tested:0.4.999");
+	atoms.Declare("realized:MultiAtlas", true);
+	atoms.Declare("built:Vision", false);
+	atoms.Import("agent:done:Observer");
+	atoms.Import("!agent:done:Observer");
+	MultiAtlasCheckTest(atoms.IsDeclared("artifact:table_crops") &&
+	                    atoms.IsExported("artifact:table_crops") && atoms.IsExported("tested:0.4.999") &&
+	                    atoms.IsExported("realized:MultiAtlas") && !atoms.IsExported("built:Vision") &&
+	                    atoms.IsImported("agent:done:Observer") && atoms.GetDeclared().GetCount() == 4 &&
+	                    atoms.GetImported().GetCount() == 1,
+	                    "registry tracks sign-free atoms and exports public or explicit atoms");
+	MultiAtlasCheckTest(MultiAtlasIsValidTrackId("vision") && MultiAtlasIsValidTrackId("brown-bear2") &&
+	                    !MultiAtlasIsValidTrackId("tested") && !MultiAtlasIsValidTrackId("meta") &&
+	                    !MultiAtlasIsValidTrackId("bad.track"),
+	                    "track ID validation rejects family collisions and reserved meta namespace");
 
 	Cout() << "MultiAtlasModelTest checks: " << (s_multiatlas_checks - s_multiatlas_failures)
 	       << "/" << s_multiatlas_checks << " passed\n";
