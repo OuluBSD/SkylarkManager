@@ -15,12 +15,14 @@ struct MultiAtlasGoal : Moveable<MultiAtlasGoal> {
 
 struct MultiAtlasElement : Moveable<MultiAtlasElement> {
 	String id, name, track_id, kind, status;
+	String role, owner;
 	int x = 0, y = 0, w = 0, h = 0;
 	String parent, notes;
 	MultiAtlasGoal goal;
 
 	void Jsonize(JsonIO& io) {
 		io("id", id)("name", name)("track_id", track_id)("kind", kind)("status", status)
+		  ("role", role, String())("owner", owner, String())
 		  ("x", x)("y", y)("w", w)("h", h)("parent", parent)("goal", goal)("notes", notes);
 	}
 };

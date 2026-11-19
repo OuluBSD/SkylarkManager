@@ -84,6 +84,10 @@ static bool SeedTrack(const String& repo, const String& track_id, const String& 
 	MultiAtlasMap map; map.map = track_id; map.track_id = track_id; map.version = "v1";
 	MultiAtlasElement e; e.id = "start"; e.name = "Start"; e.kind = "task"; e.status = "open";
 	e.w = 100; e.h = 60; map.elements.Add(e);
+	MultiAtlasElement& workflow = map.elements.Add();
+	workflow.id = "workflow"; workflow.name = "Workflow"; workflow.kind = "block";
+	workflow.status = "active"; workflow.role = "feature"; workflow.owner = "computer";
+	workflow.x = 140; workflow.w = 180; workflow.h = 60;
 	if(!MultiAtlasSaveTrackMap(root, family_id, map, RecordAbsent(), error)) return false;
 	MultiAtlasRules rules; MultiAtlasAction action;
 	if(!warning_action.IsEmpty()) { action.name = "known"; rules.actions.Add(pick(action)); }
@@ -257,6 +261,17 @@ static void HttpTest()
 	      timeline.body.Find("\"ahead_main\":\"1\"") >= 0 && timeline.body.Find("\"behind_main\":\"0\"") >= 0 &&
 	      timeline.body.Find("git.setAttribute('aria-label'") >= 0,
 	      "timeline links track detail and reports whitespace-parsed divergence plus full accessible SHA");
+	HttpReply detail = Request("GET", "/multiatlas/public/track/vision");
+	Check(detail.status == 200 &&
+	      detail.body.Find("\"role\":\"feature\",\"owner\":\"computer\"") >= 0 &&
+	      detail.body.Find("\"role\":\"\",\"owner\":\"\"") >= 0,
+	      "track detail JSON carries classified and empty legacy workflow values");
+	Check(detail.body.Find("classes.push(\"role-\" + e.role)") >= 0 &&
+	      detail.body.Find("classes.push(\"owner-\" + e.owner)") >= 0 &&
+	      detail.body.Find("\"data-role\": role ? e.role") >= 0 &&
+	      detail.body.Find("\"data-owner\": owner ? e.owner") >= 0 &&
+	      detail.body.Find("aria-label=\"Workflow legend\"") >= 0,
+	      "track detail serves the SVG workflow class renderer and accessible legend");
 	HttpReply public_check = Request("GET", "/api/multiatlas/public/check");
 	ValueMap public_json = Json(public_check), public_report = public_json.Get("data");
 	Check(public_check.status == 200 && public_report.Find("ok") >= 0 && public_report.Find("total_errors") >= 0 &&
@@ -356,6 +371,11 @@ static void HttpTest()
 	HttpReply tree = Request("GET", "/api/multiatlas/public/tree", String(), cookie, csrf);
 	HttpReply status = Request("GET", "/api/multiatlas/public/status", String(), cookie, csrf);
 	Check(map.status == 200 && Json(map).Find("data") >= 0, "track map endpoint returns map JSON");
+	ValueArray map_elements = ValueMap(Json(map).Get("data")).Get("elements");
+	ValueMap workflow_element = map_elements.GetCount() == 2 ? ValueMap(map_elements[1]) : ValueMap();
+	Check(workflow_element.Get("role") == "feature" && workflow_element.Get("owner") == "computer" &&
+	      workflow_element.Get("kind") == "block" && workflow_element.Get("status") == "active",
+	      "stored map round-trips workflow fields independently of kind and status");
 	Check(tree.status == 200 && ValueArray(ValueMap(Json(tree).Get("data")).Get("edges")).GetCount() == 1,
 	      "tree endpoint returns a dependency edge and versions");
 	ValueArray status_tracks = ValueMap(Json(status).Get("data")).Get("tracks");
@@ -497,6 +517,13 @@ END_UPP_NAMESPACE
 CONSOLE_APP_MAIN
 {
 	using namespace Upp;
+	MultiAtlasElement legacy;
+	legacy.role = "trial";
+	legacy.owner = "human";
+	Check(LoadFromJson(legacy, "{\"id\":\"legacy\",\"kind\":\"block\",\"status\":\"planned\"}") &&
+	      legacy.role.IsEmpty() && legacy.owner.IsEmpty() &&
+	      legacy.kind == "block" && legacy.status == "planned",
+	      "old map element JSON defaults absent workflow fields to empty");
 	s_root = AppendFileName(GetTempPath(), "multiatlas-api-test-" + AsString((int)msecs()) + "-" + AsString((int)Random(100000)));
 	RealizeDirectory(s_root);
 	HttpTest();
