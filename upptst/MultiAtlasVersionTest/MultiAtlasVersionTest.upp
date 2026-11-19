@@ -1,0 +1,11 @@
+description "MultiAtlasVersion standalone CLI self-tests";
+
+uses
+	Core,
+	MultiAtlas;
+
+file
+	MultiAtlasVersionTest.cpp;
+
+mainconfig
+	"" = "";

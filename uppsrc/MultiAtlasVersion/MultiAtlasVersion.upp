@@ -1,0 +1,11 @@
+description "Offline MultiAtlas ensemble inspection and gate CLI";
+
+uses
+	Core,
+	MultiAtlas;
+
+file
+	MultiAtlasVersion.cpp;
+
+mainconfig
+	"" = "MT";
