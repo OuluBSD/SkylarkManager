@@ -307,11 +307,12 @@ Value ReplayReport(const MultiAtlasReplayInput& input, const MultiAtlasReplayCon
 		for(const MultiAtlasRoadmapMessage& m : context.messages) {
 			if(m.track_id != track.track_id) continue;
 			Value v = MessageValue(m);
+			MultiAtlasContractRef ref; String parse_error;
+			if(MultiAtlasParseContract(m.literal, ref, parse_error) && !ref.track_id.IsEmpty() &&
+			   (m.severity == "error" || (m.severity == "warning" && m.rule == "contract-gate")))
+				unfulfilled.Add(v);
 			if(m.severity == "error") {
 				errors.Add(v);
-				MultiAtlasContractRef ref; String parse_error;
-				if(MultiAtlasParseContract(m.literal, ref, parse_error) && !ref.track_id.IsEmpty())
-					unfulfilled.Add(v);
 			}
 			else warnings.Add(v);
 		}
@@ -323,11 +324,12 @@ Value ReplayReport(const MultiAtlasReplayInput& input, const MultiAtlasReplayCon
 	for(const MultiAtlasRoadmapMessage& m : context.messages) if(m.track_id == "meta") {
 		if(m.severity == "error") {
 			meta_errors.Add(MessageValue(m));
-			MultiAtlasContractRef ref; String parse_error;
-			if(MultiAtlasParseContract(m.literal, ref, parse_error) && !ref.track_id.IsEmpty())
-				unfulfilled.Add(MessageValue(m));
 		}
 		else meta_warnings.Add(MessageValue(m));
+		MultiAtlasContractRef ref; String parse_error;
+		if(MultiAtlasParseContract(m.literal, ref, parse_error) && !ref.track_id.IsEmpty() &&
+		   (m.severity == "error" || (m.severity == "warning" && m.rule == "contract-gate")))
+			unfulfilled.Add(MessageValue(m));
 	}
 	meta.Add("errors", meta_errors); meta.Add("warnings", meta_warnings); tracks.Add(meta);
 	ValueMap out;

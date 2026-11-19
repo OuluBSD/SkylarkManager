@@ -263,8 +263,13 @@ static void HttpTest()
 	      public_report.Find("tracks") >= 0 && public_report.Find("unfulfilled_cross_track_dependencies") >= 0,
 	      "check endpoint returns structured replay report");
 	ValueArray unfulfilled = public_report.Get("unfulfilled_cross_track_dependencies");
-	Check(!(bool)public_report.Get("ok") && unfulfilled.GetCount() == 1,
-	      "blocked DAG exposes its unresolved cross-track gate");
+	ValueMap pending_gate;
+	if(unfulfilled.GetCount() == 1) pending_gate = unfulfilled[0];
+	Check((bool)public_report.Get("ok") && (int)public_report.Get("total_errors") == 0 &&
+	      (int)public_report.Get("total_warnings") > 0 && unfulfilled.GetCount() == 1 &&
+	      pending_gate.Get("severity") == "warning" && pending_gate.Get("rule") == "contract-gate" &&
+	      String(pending_gate.Get("text")).Find("pending gate") >= 0,
+	      "pending tested gate is an unresolved dependency warning without failing replay");
 	Check(public_check.body.Find(~public_meta) < 0 && public_check.body.Find("site-data") < 0,
 	      "public JSON omits repository paths and site-account storage paths");
 
