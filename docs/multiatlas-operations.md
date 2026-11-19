@@ -38,7 +38,40 @@ Never publish a passing gate based only on a local or uncommitted result. A gate
 
 After pushing an event or gate, refresh the ensemble status and roadmap. Check replay errors and warnings, exported gate facts, and blocked requirements. A downstream track or meta version remains pending until every declared prerequisite is available. When a bridge event is missing, verify the child proof was committed and pushed, then inspect the bridge hook and meta store before retrying. Keep bridge events attributable to the source track, gate, and commit.
 
-The meta-map summarizes the ensemble; it does not replace track ownership. Make source changes and track-local roadmap updates in the owning track. Use the meta repository for meta-map records and bridge events only.
+The meta-map summarizes the ensemble; it does not replace track ownership. Make source changes and track-local roadmap updates in the owning track. Use the meta repository for meta-map records, bridge events, and integration trial evidence.
+
+## Record a meta integration trial
+
+1. Use the configured meta repository's `main` worktree. Once the child gate requirements are met, run the integration checks against the current source commit and capture its full hash.
+2. Save a JSON report under `.multiatlas/meta-trials/<version>/`. Use the dotted version ending in `.999`. List each check by name with its actual result. The report requires at least one check, unique check names, and a `passed` result for every check and the report itself.
+
+   ```json
+   {
+     "source_commit": "<full tested source commit hash>",
+     "version": "1.2.999",
+     "result": "passed",
+     "checks": [{"name": "integration tests", "result": "passed"}]
+   }
+   ```
+
+3. Put `evidence.json` beside the report, using the ensemble name and exact meta milestone ID from the registry and roadmap. Set `report_sha256` to the SHA-256 of the report's exact file bytes. The report name must be a plain JSON filename in this same directory.
+
+   ```json
+   {
+     "schema": "multiatlas-meta-trial/v1",
+     "ensemble": "<ensemble name>",
+     "track_id": "meta",
+     "version": "1.2.999",
+     "meta_vid": "<meta milestone ID>",
+     "result": "passed",
+     "source_commit": "<full tested source commit hash>",
+     "report": "report.json",
+     "report_sha256": "<64 hexadecimal characters>"
+   }
+   ```
+
+4. Commit only those two regular files in one commit directly atop the tested source commit. The evidence commit must be the current `main` HEAD when invoking `--meta-trial-pass 1.2.999`. If code changed in the meantime, rerun the checks and prepare fresh evidence.
+5. Run `--meta-trial-pass 1.2.999` for the next unrecorded meta milestone. The command checks the child prerequisites in replay and writes a meta-owned `tested:1.2.999` event to the meta store. Run `--meta-advance <meta milestone ID>` separately to advance the milestone. The trial and later milestones depend on the recorded meta gate.
 
 ## Warning acknowledgments
 
@@ -77,9 +110,11 @@ NEXT_MILESTONE=replace-with-next-milestone
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --track vision --gate-pass "$GATE_VERSION" \
   --commit "$(git -C /home/sblo/OuluBSD/BrownBear-vision rev-parse HEAD)"
 
-# Once gate proof is committed, validate and record its meta bridge, then advance.
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-check
+# Once child gate proof is committed, validate and record its meta bridge.
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-record-gate vision "$GATE_VERSION"
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-check
+# For a .999 milestone, record the passing trial before advancing.
+# "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-trial-pass 1.2.999
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-advance "$NEXT_MILESTONE"
 ```
 
