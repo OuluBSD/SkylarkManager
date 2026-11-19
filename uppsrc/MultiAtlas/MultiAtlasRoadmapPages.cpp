@@ -5,6 +5,7 @@
 #include "MultiAtlasReplayLoader.h"
 #include "MultiAtlasStore.h"
 #include "MultiAtlasContract.h"
+#include "MultiAtlasDashboard.h"
 #include <WebEngine/Request.h>
 #include <WebsiteTemplates/WebsiteTemplates.h>
 
@@ -151,7 +152,7 @@ void Overview(WebRequest& r)
 	shell.html_attributes = " lang=\"en\"" + WebsiteThemeHtmlAttributes(String(), String());
 	shell.head_script = WebsiteThemeHeadScript() + MultiAtlasCanvasStylesheet();
 	shell.topbar_html = WebsiteThemeControlsHtml();
-	shell.body = MultiAtlasCanvasStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(def.title) + "</h1><p>Read-only ensemble overview. Select a lane or inspect the aligned version bands.</p>" + MultiAtlasCanvasHtml(data) + "</main>" + MultiAtlasCanvasScript();
+	shell.body = MultiAtlasCanvasStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(def.title) + "</h1><p>Read-only ensemble overview. Select a lane or inspect the aligned version bands.</p><p><a href=\"/multiatlas/" + MultiAtlasRoadmapEsc(def.name) + "/timeline\">Open release timeline</a></p>" + MultiAtlasCanvasHtml(data) + "</main>" + MultiAtlasCanvasScript();
 	r.Html(RenderAdminShell(shell));
 }
 
@@ -180,6 +181,7 @@ void TrackDetail(WebRequest& r)
 	// listener instead of following the process-wide public host origin.
 	detail.overview_url = "/multiatlas/" + def.name;
 	detail.track_route_base = "/multiatlas/" + def.name + "/track";
+	detail.timeline_url = "/multiatlas/" + def.name + "/timeline";
 	bool found_lane = false;
 	for(const MultiAtlasCanvasLane& lane : overview.lanes)
 		if(lane.id == track_id) {
@@ -226,7 +228,7 @@ void TrackDetail(WebRequest& r)
 	shell.html_attributes = " lang=\"en\"" + WebsiteThemeHtmlAttributes(String(), String());
 	shell.head_script = WebsiteThemeHeadScript() + MultiAtlasClientStylesheet();
 	shell.topbar_html = WebsiteThemeControlsHtml();
-	shell.body = MultiAtlasClientStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(detail.title) + "</h1><p>"
+	shell.body = MultiAtlasClientStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(detail.title) + "</h1><p><a href=\"" + MultiAtlasRoadmapEsc(detail.timeline_url) + "\">Release timeline</a> · "
 	           + MultiAtlasRoadmapEsc(detail.branch) + " · gate " + MultiAtlasRoadmapEsc(detail.gate.IsEmpty() ? "not defined" : detail.gate)
 	           + "</p>" + MultiAtlasClientHtml(detail) + "</main>" + MultiAtlasClientScript();
 	r.Html(RenderAdminShell(shell));
@@ -236,6 +238,7 @@ void TrackDetail(WebRequest& r)
 
 void InstallMultiAtlasRoadmapPages(EngineSite& site)
 {
+	InstallMultiAtlasDashboard(site);
 	site.Router().Add("GET", "multiatlas/*/track/*", TrackDetail);
 	site.Router().Add("GET", "multiatlas/*", Overview);
 }

@@ -57,7 +57,8 @@ static bool InitRepo(const String& repo)
 	       Run("git", {"config", "user.email", "api-test@example.invalid"}, repo) &&
 	       Run("git", {"config", "user.name", "MultiAtlas API Test"}, repo) &&
 	       Run("git", {"add", "README.md"}, repo) &&
-	       Run("git", {"commit", "-q", "-m", "fixture"}, repo);
+	       Run("git", {"commit", "-q", "-m", "fixture"}, repo) &&
+	       Run("git", {"branch", "-M", "main"}, repo);
 }
 
 static String MakeStore(const String& repo, const String& family)
@@ -199,6 +200,10 @@ static void HttpTest()
 	Check(Run("git", {"checkout", "-qb", "track/vision"}, public_vision) &&
 	      Run("git", {"checkout", "-qb", "track/vision"}, private_vision),
 	      "child fixtures use their configured worker branches");
+	Check(SaveFile(AppendFileName(public_vision, "track-only.txt"), "ahead of main\n") &&
+	      Run("git", {"add", "track-only.txt"}, public_vision) &&
+	      Run("git", {"commit", "-q", "-m", "track-only commit"}, public_vision),
+	      "public track fixture has a commit ahead of main");
 	Check(SeedTrack(public_vision, "vision", "family-vision-public"), "public vision store seeded");
 	Check(SeedTrack(public_agent, "agent", "family-agent-public", "vision:tested:v1"), "public dependent agent store seeded");
 	Check(SeedMeta(public_meta, "family-meta-public"), "public meta store seeded");
@@ -238,6 +243,20 @@ static void HttpTest()
 	      "anonymous ensemble listing omits private ensemble");
 	HttpReply private_anon = Request("GET", "/api/multiatlas/private/check");
 	Check(private_anon.status == 404, "anonymous direct request hides private ensemble");
+	HttpReply private_timeline = Request("GET", "/multiatlas/private/timeline");
+	Check(private_timeline.status == 404, "anonymous timeline hides private ensemble");
+	HttpReply timeline = Request("GET", "/multiatlas/public/timeline");
+	int slider_handler = timeline.body.Find("slider.addEventListener('input',update)");
+	String dashboard_script = slider_handler >= 0 ? timeline.body.Mid(slider_handler) : String();
+	Check(timeline.status == 200 && timeline.body.Find("0.1.0") >= 0 && timeline.body.Find("0.7.0") >= 0 &&
+	      timeline.body.Find("1.0.0") >= 0 && timeline.body.Find("mat-scrub") >= 0 &&
+	      slider_handler >= 0 && dashboard_script.Find("fetch(") < 0,
+	      "timeline renders seven milestones and uses local-only slider updates");
+	Check(timeline.body.Find("/track/'+encodeURIComponent(t.id)") >= 0 &&
+	      timeline.body.Find("ahead_main") >= 0 && timeline.body.Find("behind_main") >= 0 &&
+	      timeline.body.Find("\"ahead_main\":\"1\"") >= 0 && timeline.body.Find("\"behind_main\":\"0\"") >= 0 &&
+	      timeline.body.Find("git.setAttribute('aria-label'") >= 0,
+	      "timeline links track detail and reports whitespace-parsed divergence plus full accessible SHA");
 	HttpReply public_check = Request("GET", "/api/multiatlas/public/check");
 	ValueMap public_json = Json(public_check), public_report = public_json.Get("data");
 	Check(public_check.status == 200 && public_report.Find("ok") >= 0 && public_report.Find("total_errors") >= 0 &&

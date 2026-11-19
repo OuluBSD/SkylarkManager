@@ -6,7 +6,7 @@
 NAMESPACE_UPP
 
 struct MultiAtlasTrackDetail : Moveable<MultiAtlasTrackDetail> {
-	String ensemble, ensemble_title, track_id, title, branch, version, gate;
+	String ensemble, ensemble_title, track_id, title, branch, version, gate, timeline_url;
 	String overview_url, track_route_base;
 	MultiAtlasMap map;
 	MultiAtlasTrack family;
