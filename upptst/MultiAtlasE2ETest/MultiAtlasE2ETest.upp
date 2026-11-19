@@ -1,0 +1,13 @@
+description "MultiAtlas synthetic multi-track end-to-end workflow test";
+
+uses
+	Core,
+	Core/SSL,
+	WebEngine,
+	MultiAtlas;
+
+file
+	MultiAtlasE2ETest.cpp;
+
+mainconfig
+	"" = "";
