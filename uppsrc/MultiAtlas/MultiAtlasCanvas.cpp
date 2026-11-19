@@ -97,7 +97,8 @@ String MultiAtlasCanvasHtml(const MultiAtlasCanvasData& data)
 	for(const MultiAtlasCanvasLane& lane : data.lanes)
 		b << "<button type=\"button\" data-view=\"" << MultiAtlasCanvasHtmlEsc(lane.id) << "\" role=\"tab\" aria-selected=\"false\">"
 		  << MultiAtlasCanvasHtmlEsc(lane.title) << "</button>";
-	b << "</div><div class=\"ma-external\" hidden aria-label=\"External dependencies\"></div>"
+	b << "</div><div class=\"ma-detail-link\" hidden><a data-track-detail>Open track diagram</a></div>"
+	  << "<div class=\"ma-external\" hidden aria-label=\"External dependencies\"></div>"
 	  << "<div class=\"ma-toolbar\" aria-label=\"Canvas controls\">"
 	  << "<button type=\"button\" data-action=\"in\" aria-label=\"Zoom in\">+</button>"
 	  << "<button type=\"button\" data-action=\"out\" aria-label=\"Zoom out\">−</button>"
@@ -122,6 +123,9 @@ String MultiAtlasCanvasStylesheet()
 .ma-external[hidden] { display: none; }
 .ma-external button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--accent); border-radius: 999px; padding: 3px 9px; cursor: pointer; }
 .ma-external-label { color: var(--muted); font-size: .9em; }
+.ma-detail-link { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.ma-detail-link[hidden] { display: none; }
+.ma-detail-link a { color: var(--accent); font-weight: 600; }
 .ma-zoom { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ma-stage { height: 72vh; min-height: 400px; overflow: hidden; touch-action: none; }
 .ma-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
@@ -166,6 +170,8 @@ String MultiAtlasCanvasScript()
     var stage = shell.querySelector('.ma-stage');
     var zoom = shell.querySelector('.ma-zoom');
     var external = shell.querySelector('.ma-external');
+    var detailLink = shell.querySelector('.ma-detail-link');
+    var detailAnchor = shell.querySelector('[data-track-detail]');
     var lanes = data.lanes || [];
     var view = { x: 0, y: 0, scale: 1, mode: 'overview' };
     var drag = null;
@@ -320,6 +326,11 @@ String MultiAtlasCanvasScript()
       shell.querySelectorAll('[data-view]').forEach(function (button) {
         button.setAttribute('aria-selected', button.dataset.view === view.mode ? 'true' : 'false');
       });
+      detailLink.hidden = view.mode === 'overview';
+      if (view.mode !== 'overview') {
+        detailAnchor.href = '/multiatlas/' + encodeURIComponent(data.ensemble) +
+          '/track/' + encodeURIComponent(view.mode);
+      }
       renderExternalLinks();
       render();
     }
@@ -373,6 +384,19 @@ String MultiAtlasCanvasScript()
     });
     window.addEventListener('resize', fit);
     render(); fit();
+    var focus = /track=([^&]+)&element=([^&]+)/.exec(window.location.hash);
+    if (focus) {
+      try {
+        var focusTrack = decodeURIComponent(focus[1]);
+        var focusElement = decodeURIComponent(focus[2]);
+        if (lanes.some(function (lane) { return lane.id === focusTrack; })) {
+          view.mode = focusTrack;
+          updateTabs();
+          fit();
+          window.setTimeout(function () { highlight(focusElement, focusTrack); }, 0);
+        }
+      } catch (ignore) { /* malformed fragment is ignored */ }
+    }
   });
 })();
 </script>)MA";

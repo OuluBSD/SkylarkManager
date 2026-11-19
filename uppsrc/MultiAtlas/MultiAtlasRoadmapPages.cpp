@@ -1,5 +1,6 @@
 #include "MultiAtlasRoadmapPages.h"
 #include "MultiAtlasCanvas.h"
+#include "MultiAtlasClient.h"
 #include "MultiAtlasRegistry.h"
 #include "MultiAtlasReplayLoader.h"
 #include "MultiAtlasStore.h"
@@ -42,6 +43,16 @@ static int MultiAtlasRoadmapElementForRoad(const MultiAtlasMap& map, const Strin
 		if((element.kind == "place") == prefer_gate) return i;
 	}
 	return map.elements.IsEmpty() ? -1 : 0;
+}
+
+static MultiAtlasMap MultiAtlasRoadmapCopyMap(const MultiAtlasMap& source)
+{
+	MultiAtlasMap copy;
+	copy.map = source.map; copy.track_id = source.track_id; copy.version = source.version;
+	copy.world.width = source.world.width; copy.world.height = source.world.height;
+	for(const MultiAtlasElement& element : source.elements) copy.elements.Add(clone(element));
+	for(const MultiAtlasRoad& road : source.roads) copy.roads.Add(clone(road));
+	return copy;
 }
 
 bool LoadCanvas(const MultiAtlasEnsembleDef& def, MultiAtlasCanvasData& data, String& error)
@@ -140,7 +151,84 @@ void Overview(WebRequest& r)
 	shell.html_attributes = " lang=\"en\"" + WebsiteThemeHtmlAttributes(String(), String());
 	shell.head_script = WebsiteThemeHeadScript() + MultiAtlasCanvasStylesheet();
 	shell.topbar_html = WebsiteThemeControlsHtml();
-	shell.body = "<main><h1>" + MultiAtlasRoadmapEsc(def.title) + "</h1><p>Read-only ensemble overview. Select a lane or inspect the aligned version bands.</p>" + MultiAtlasCanvasHtml(data) + "</main>" + MultiAtlasCanvasScript();
+	shell.body = MultiAtlasCanvasStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(def.title) + "</h1><p>Read-only ensemble overview. Select a lane or inspect the aligned version bands.</p>" + MultiAtlasCanvasHtml(data) + "</main>" + MultiAtlasCanvasScript();
+	r.Html(RenderAdminShell(shell));
+}
+
+void TrackDetail(WebRequest& r)
+{
+	String ensemble = r.PathArg(0), track_id = r.PathArg(1), error;
+	MultiAtlasEnsembleDef def;
+	if(!MultiAtlasFindEnsemble(MultiAtlasRoadmapSiteRoot(r.Site()), ensemble, def, error)) {
+		r.Status(error.Find("not found") >= 0 ? 404 : 500, "MultiAtlas ensemble unavailable"); return;
+	}
+	if(!def.public_read && !r.HasUser()) { r.Status(404, "not found"); return; }
+	const MultiAtlasTrackDef *track = NULL;
+	for(const MultiAtlasTrackDef& candidate : def.tracks)
+		if(candidate.track_id == track_id) { track = &candidate; break; }
+	if(!track) { r.Status(404, "MultiAtlas track not found"); return; }
+
+	// Load the selected track's full snapshot directly; the overview load also
+	// derives cross-track roads, which the detail view reuses without copying its UI.
+	MultiAtlasCanvasData overview;
+	if(!LoadCanvas(def, overview, error)) { r.Status(500, "MultiAtlas track data unavailable"); return; }
+	MultiAtlasTrackDetail detail;
+	detail.ensemble = def.name; detail.ensemble_title = def.title;
+	detail.track_id = track_id; detail.title = MultiAtlasRoadmapTrackTitle(track_id);
+	detail.branch = track->branch;
+	// These same-origin root paths keep navigation on the composed engine
+	// listener instead of following the process-wide public host origin.
+	detail.overview_url = "/multiatlas/" + def.name;
+	detail.track_route_base = "/multiatlas/" + def.name + "/track";
+	bool found_lane = false;
+	for(const MultiAtlasCanvasLane& lane : overview.lanes)
+		if(lane.id == track_id) {
+			detail.map = MultiAtlasRoadmapCopyMap(lane.map);
+			int gates = lane.gate_status.GetCount();
+			if(gates) detail.gate = lane.gate_status[gates - 1];
+			found_lane = true; break;
+		}
+	if(!found_lane) { r.Status(404, "MultiAtlas track not found"); return; }
+	// Cross-track requirements are stored on their consumer map. Mirror the
+	// endpoint road onto the producer map as well so either side can follow it.
+	for(const MultiAtlasCanvasLane& lane : overview.lanes)
+		for(const MultiAtlasRoad& road : lane.map.roads) {
+			String from_track = road.from_track.IsEmpty() ? lane.id : road.from_track;
+			String to_track = road.to_track.IsEmpty() ? lane.id : road.to_track;
+			if(from_track != track_id || to_track == track_id) continue;
+			bool exists = false;
+			for(const MultiAtlasRoad& current : detail.map.roads)
+				if(current.from == road.from && current.to == road.to &&
+				   current.from_track == road.from_track && current.to_track == road.to_track) {
+					exists = true; break;
+				}
+			if(!exists) detail.map.roads.Add(clone(road));
+		}
+	String root = MultiAtlasResolveTrackStore(def, track_id), revision;
+	MultiAtlasTrack family;
+	if(root.IsEmpty() || !MultiAtlasLoadTrackFamily(root, track->family, family, revision, error) ||
+	   !MultiAtlasLoadTrackRules(root, track->family, detail.rules, revision, error) ||
+	   !MultiAtlasLoadTrackEvents(root, track->family, track_id, detail.events, error)) {
+		r.Status(500, "MultiAtlas track detail unavailable"); return;
+	}
+	if(family.track_id != track_id || family.family != track->family) {
+		r.Status(500, "MultiAtlas track identity mismatch"); return;
+	}
+	detail.family = pick(family);
+	if(!detail.family.versions.IsEmpty()) {
+		const MultiAtlasVersion& head = detail.family.versions[detail.family.versions.GetCount() - 1];
+		detail.version = Format("%d.%d.%d", head.code / 1000000, (head.code / 1000) % 1000, head.code % 1000);
+	}
+	else detail.version = detail.map.version.IsEmpty() ? "No version" : detail.map.version;
+	WebsiteShell shell;
+	shell.title = detail.title + " - " + detail.ensemble_title;
+	shell.brand = "MultiAtlas"; shell.brand_href = detail.overview_url;
+	shell.html_attributes = " lang=\"en\"" + WebsiteThemeHtmlAttributes(String(), String());
+	shell.head_script = WebsiteThemeHeadScript() + MultiAtlasClientStylesheet();
+	shell.topbar_html = WebsiteThemeControlsHtml();
+	shell.body = MultiAtlasClientStylesheet() + "<main><h1>" + MultiAtlasRoadmapEsc(detail.title) + "</h1><p>"
+	           + MultiAtlasRoadmapEsc(detail.branch) + " · gate " + MultiAtlasRoadmapEsc(detail.gate.IsEmpty() ? "not defined" : detail.gate)
+	           + "</p>" + MultiAtlasClientHtml(detail) + "</main>" + MultiAtlasClientScript();
 	r.Html(RenderAdminShell(shell));
 }
 
@@ -148,6 +236,7 @@ void Overview(WebRequest& r)
 
 void InstallMultiAtlasRoadmapPages(EngineSite& site)
 {
+	site.Router().Add("GET", "multiatlas/*/track/*", TrackDetail);
 	site.Router().Add("GET", "multiatlas/*", Overview);
 }
 

@@ -11,6 +11,8 @@ file
 	MultiAtlasSite.cpp,
 	MultiAtlasCanvas.h,
 	MultiAtlasCanvas.cpp,
+	MultiAtlasClient.h,
+	MultiAtlasClient.cpp,
 	MultiAtlasRoadmapPages.h,
 	MultiAtlasRoadmapPages.cpp,
 	MultiAtlasApi.h,
