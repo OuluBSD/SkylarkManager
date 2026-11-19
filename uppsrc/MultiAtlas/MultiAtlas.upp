@@ -9,6 +9,10 @@ uses
 file
 	MultiAtlasSite.h,
 	MultiAtlasSite.cpp,
+	MultiAtlasCanvas.h,
+	MultiAtlasCanvas.cpp,
+	MultiAtlasRoadmapPages.h,
+	MultiAtlasRoadmapPages.cpp,
 	MultiAtlasApi.h,
 	MultiAtlasApi.cpp,
 	MultiAtlasModel.h,

@@ -1,5 +1,6 @@
 #include "MultiAtlasSite.h"
 #include "MultiAtlasApi.h"
+#include "MultiAtlasRoadmapPages.h"
 #include <WebEngine/Request.h>
 
 NAMESPACE_UPP
@@ -16,6 +17,7 @@ static void MultiAtlasStatus(WebRequest& r)
 void InstallMultiAtlasSite(EngineSite& site)
 {
 	InstallMultiAtlasApi(site);
+	InstallMultiAtlasRoadmapPages(site);
 	site.Router().Add("", MultiAtlasStatus);
 }
 
