@@ -133,10 +133,13 @@ String MultiAtlasClientHtml(const MultiAtlasTrackDetail& detail)
 	    << "<button type=\"button\" data-act=\"width\" aria-pressed=\"false\">Fit width / Page scroll</button>"
 	    << "<button type=\"button\" data-act=\"one\">1:1</button><output data-zoom>100%</output></div>"
 	    << "<div class=\"matd-legend\" role=\"group\" aria-label=\"Workflow legend\">"
-	    << "<span>Roles: Feature, Work, Task, Trial / gate</span>"
-	    << "<ul aria-label=\"Owners\"><li class=\"owner-computer\">Computer</li>"
+	    << "<div><strong>Roles</strong><ul class=\"matd-role-legend\" aria-label=\"Roles\">"
+	    << "<li class=\"role-feature\">Feature</li><li class=\"role-work\">Work</li>"
+	    << "<li class=\"role-task\">Task</li><li class=\"role-trial\">Trial / gate</li></ul></div>"
+	    << "<div><strong>Owners</strong><ul class=\"matd-owner-legend\" aria-label=\"Owners\">"
+	    << "<li class=\"owner-computer\">Computer</li>"
 	    << "<li class=\"owner-human\">Human</li><li class=\"owner-agent\">Agent</li>"
-	    << "<li>Unassigned</li></ul></div>"
+	    << "<li>Unassigned</li></ul></div></div>"
 	    << "<div class=\"matd-layout\"><div class=\"matd-stage\"><svg class=\"matd-canvas\" role=\"group\" aria-label=\""
 	    << MultiAtlasDetailEsc(detail.track_id) << " track diagram\" tabindex=\"0\"></svg></div>"
 	    << "<aside class=\"matd-inspector\" aria-live=\"polite\"><h2>Element details</h2><p data-empty>Select an element to inspect its entry, outcome and task status.</p><div data-detail hidden></div></aside></div>"
@@ -168,12 +171,20 @@ String MultiAtlasClientStylesheet()
 .matd .owner-computer { --owner-color:#4c92da; }
 .matd .owner-human { --owner-color:#d79349; }
 .matd .owner-agent { --owner-color:#a878d3; }
-.matd-legend,.matd-legend ul { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; }
-.matd-legend { margin:0 0 8px; font-size:.9rem; }
+.matd .role-feature { --role-color:#08735d; }
+.matd .role-work { --role-color:#3559a5; }
+.matd .role-task { --role-color:#7040a0; }
+.matd .role-trial { --role-color:#a13f62; }
+.matd-legend,.matd-legend div,.matd-legend ul { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+.matd-legend { column-gap:24px; margin:0 0 8px; font-size:.9rem; }
 .matd-legend ul { margin:0; padding:0; list-style:none; }
-.matd-legend li::before { content:""; display:inline-block; width:.8em; height:.8em; margin-right:.35em; vertical-align:baseline; border:1px solid var(--owner-color,var(--line)); background:color-mix(in srgb,var(--owner-color,transparent) 32%,var(--bg)); }
+.matd-legend li::before { content:""; display:inline-block; height:.8em; margin-right:.35em; vertical-align:baseline; }
+.matd-role-legend li::before { width:1.15em; border-radius:.25em; background:var(--role-color); }
+.matd-owner-legend li::before { width:.3em; border-radius:.15em; background:var(--owner-color,var(--line)); }
 .matd-canvas .element { --status-fill:var(--bg); fill:color-mix(in srgb,var(--owner-color,transparent) 32%,var(--status-fill)); stroke:var(--owner-color,var(--line)); stroke-width:2; }
 .matd-canvas .element[data-owner=""] { fill:var(--status-fill); }
+.matd-canvas .element[data-role]:not([data-role=""]) { fill:color-mix(in srgb,var(--role-color) 52%,var(--status-fill)); }
+.matd-canvas .owner-mark { stroke:var(--owner-color); stroke-width:4; stroke-linecap:round; vector-effect:non-scaling-stroke; pointer-events:none; }
 .matd-canvas .element.kind-block { stroke-width:3; }
 .matd-canvas .element.kind-continent { stroke-width:4; }
 .matd-canvas .element.status-hot { stroke:var(--st-hot); --status-fill:color-mix(in srgb,var(--st-hot) 18%,var(--panel)); }
@@ -185,7 +196,9 @@ String MultiAtlasClientStylesheet()
 .matd-canvas .element.status-trouble { stroke:var(--st-trouble); --status-fill:color-mix(in srgb,var(--st-trouble) 18%,var(--panel)); }
 .matd-canvas .label { fill:var(--fg); font:600 14px system-ui,sans-serif; pointer-events:none; }
 .matd-canvas .badge { fill:var(--muted); font:12px system-ui,sans-serif; pointer-events:none; }
-.matd-canvas .workflow-badge { fill:var(--fg); font-weight:600; }
+.matd-canvas .workflow-badge { pointer-events:none; }
+.matd-canvas .workflow-badge rect { fill:var(--role-color); }
+.matd-canvas .workflow-badge text { fill:white; font:700 13px system-ui,sans-serif; }
 .matd-canvas .road { fill:none; stroke:var(--muted); stroke-width:2.2; }
 .matd-canvas .road.kind-communication { stroke-dasharray:7 5; }
 .matd-canvas .road.kind-dependency { stroke:var(--st-hot); stroke-dasharray:3 5; }
@@ -233,6 +246,7 @@ String MultiAtlasClientScript()
       fitWidth: false,
       tiles: false,
       root: null,
+      workflowBadges: [],
       fittedWidth: 0,
       width: 1,
       height: 1,
@@ -285,6 +299,12 @@ String MultiAtlasClientScript()
           "transform",
           "translate(" + view.x + " " + view.y + ") scale(" + view.scale + ")",
         );
+      view.workflowBadges.forEach(function (badge) {
+        // Keep role text near 13 CSS pixels at fit wherever the block can hold it.
+        var scale = Math.min(badge.maxScale, Math.max(1, 1 / view.scale));
+        badge.node.setAttribute("transform",
+          "translate(" + badge.x + " " + badge.y + ") scale(" + scale + ")");
+      });
       zoom.textContent = Math.round(view.scale * 100) + "%";
     }
     function fit() {
@@ -358,6 +378,7 @@ String MultiAtlasClientScript()
       });
     }
     var roleLabels = { feature: "Feature", work: "Work", task: "Task", trial: "Trial / gate" };
+    var roleBadgeWidths = { feature: 66, work: 50, task: 46, trial: 88 };
     var ownerLabels = { computer: "Computer", human: "Human", agent: "Agent" };
     function knownLabel(labels, value) {
       return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : "";
@@ -385,13 +406,30 @@ String MultiAtlasClientScript()
         "data-role": role ? e.role : "",
         "data-owner": owner ? e.owner : "",
       });
+      if (owner)
+        add(g, "line", {
+          x1: r.x + r.w - 8, x2: r.x + r.w - 8,
+          y1: r.y + 11, y2: r.y + r.h - 11,
+          class: "owner-mark owner-" + e.owner,
+          "aria-hidden": "true",
+        });
       return g;
     }
-    function elementBadge(g, e, x, y, legacy) {
-      var role = knownLabel(roleLabels, e.role),
-        owner = knownLabel(ownerLabels, e.owner),
-        workflow = [role, owner].filter(Boolean).join(" · ");
-      add(g, "text", { x: x, y: y, class: workflow ? "badge workflow-badge" : "badge" }, workflow || legacy);
+    function elementBadge(g, e, r, y, legacy, legacyY) {
+      var role = knownLabel(roleLabels, e.role);
+      if (!role) {
+        add(g, "text", { x: r.x + 10, y: legacyY, class: "badge" },
+          knownLabel(ownerLabels, e.owner) || legacy);
+        return;
+      }
+      var width = roleBadgeWidths[e.role],
+        badge = add(g, "g", { class: "workflow-badge role-" + e.role, "aria-hidden": "true" });
+      add(badge, "rect", { x: 0, y: -9, width: width, height: 18, rx: 4 });
+      add(badge, "text", { x: width / 2, y: 4.5, "text-anchor": "middle" }, role);
+      view.workflowBadges.push({
+        node: badge, x: r.x + 10, y: y,
+        maxScale: Math.min((r.w - 24) / width, (r.y + r.h - y) / 9),
+      });
     }
     function renderTree(parent, e, offset, positions, ancestors) {
       var path = ancestors || Object.create(null);
@@ -411,7 +449,8 @@ String MultiAtlasClientScript()
         { x: r.x + 10, y: r.y + 22, class: "label" },
         e.name || e.id,
       );
-      elementBadge(g, e, r.x + 10, r.y + 40, (e.kind || "element") + " · " + (e.status || "planned"));
+      elementBadge(g, e, r, r.y + Math.min(49, r.h * .65),
+        (e.kind || "element") + " · " + (e.status || "planned"), r.y + 40);
       var children = kids(e.id);
       if (children.length)
         add(
@@ -452,6 +491,7 @@ String MultiAtlasClientScript()
         positions = Object.create(null),
         root = add(svg, "g", {});
       view.root = root;
+      view.workflowBadges = [];
       if (view.tiles) {
         var layout = tileLayout(children);
         add(root, "rect", {
@@ -478,7 +518,7 @@ String MultiAtlasClientScript()
             kids(e.id).length + " nested · " + (e.status || "planned"),
           );
           if (knownLabel(roleLabels, e.role) || knownLabel(ownerLabels, e.owner))
-            elementBadge(g, e, t.x + 12, t.y + 78, "");
+            elementBadge(g, e, t, t.y + 76, "", t.y + 78);
           g.addEventListener("click", function () {
             select(e);
           });
