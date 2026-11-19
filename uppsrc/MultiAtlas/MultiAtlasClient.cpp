@@ -129,6 +129,7 @@ String MultiAtlasClientHtml(const MultiAtlasTrackDetail& detail)
 	    << "<button type=\"button\" data-act=\"in\" aria-label=\"Zoom in\">+</button>"
 	    << "<button type=\"button\" data-act=\"out\" aria-label=\"Zoom out\">−</button>"
 	    << "<button type=\"button\" data-act=\"fit\">Fit</button>"
+	    << "<button type=\"button\" data-act=\"width\" aria-pressed=\"false\">Fit width / Page scroll</button>"
 	    << "<button type=\"button\" data-act=\"one\">1:1</button><output data-zoom>100%</output></div>"
 	    << "<div class=\"matd-layout\"><div class=\"matd-stage\"><svg class=\"matd-canvas\" role=\"img\" aria-label=\""
 	    << MultiAtlasDetailEsc(detail.track_id) << " track diagram\" tabindex=\"0\"></svg></div>"
@@ -152,6 +153,10 @@ String MultiAtlasClientStylesheet()
 .matd-stage { min-width:0; height:68vh; min-height:380px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel); touch-action:none; }
 .matd-canvas { display:block; width:100%; height:100%; cursor:grab; }
 .matd-canvas:active { cursor:grabbing; }
+.matd.matd-fit-width .matd-stage { min-height:0; touch-action:auto; box-sizing:content-box; }
+.matd.matd-fit-width .matd-canvas { cursor:auto; }
+.matd.matd-fit-width .matd-canvas .road { pointer-events:none; }
+.matd-toolbar button[aria-pressed=true] { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
 .matd-canvas .plane-bg { fill:var(--panel); }
 .matd-canvas .sea { fill:var(--sea); opacity:.55; stroke:var(--line); }
 .matd-canvas .element { fill:var(--bg); stroke:var(--line); stroke-width:2; }
@@ -199,6 +204,8 @@ String MultiAtlasClientScript()
     var stage = shell.querySelector(".matd-stage"),
       zoom = shell.querySelector("[data-zoom]"),
       planeLabel = shell.querySelector("[data-plane]");
+    var widthMode = shell.querySelector("[data-act=width]"),
+      panZoomControls = shell.querySelectorAll("[data-act=in], [data-act=out], [data-act=one]");
     var inspector = shell.querySelector("[data-detail]"),
       empty = shell.querySelector("[data-empty]"),
       tiles = shell.querySelector("[data-tiles]");
@@ -208,8 +215,10 @@ String MultiAtlasClientScript()
       x: 12,
       y: 12,
       manual: false,
+      fitWidth: false,
       tiles: false,
       root: null,
+      fittedWidth: 0,
       width: 1,
       height: 1,
     };
@@ -264,16 +273,48 @@ String MultiAtlasClientScript()
       zoom.textContent = Math.round(view.scale * 100) + "%";
     }
     function fit() {
-      var W = stage.clientWidth || 800,
-        H = stage.clientHeight || 500;
-      view.scale = Math.max(
-        0.035,
-        Math.min(2, Math.min((W - 36) / view.width, (H - 36) / view.height)),
-      );
-      view.x = (W - view.width * view.scale) / 2;
-      view.y = (H - view.height * view.scale) / 2;
+      var W = stage.clientWidth || 800;
+      view.fittedWidth = W;
+      if (view.fitWidth) {
+        var bounds = view.root.getBBox(),
+          left = Math.min(0, bounds.x),
+          top = Math.min(0, bounds.y),
+          width = Math.max(view.width, bounds.x + bounds.width) - left,
+          height = Math.max(view.height, bounds.y + bounds.height) - top;
+        view.scale = Math.max(1, W - 36) / width;
+        stage.style.height = Math.ceil(height * view.scale + 36) + "px";
+        view.x = 18 - left * view.scale;
+        view.y = 18 - top * view.scale;
+      } else {
+        stage.style.height = "";
+        var H = stage.clientHeight || 500;
+        view.scale = Math.max(
+          0.035,
+          Math.min(2, Math.min((W - 36) / view.width, (H - 36) / view.height)),
+        );
+        view.x = (W - view.width * view.scale) / 2;
+        view.y = (H - view.height * view.scale) / 2;
+      }
+      updateViewBox();
       view.manual = false;
       transform();
+    }
+    function updateViewBox() {
+      svg.setAttribute("viewBox", "0 0 " + (stage.clientWidth || 800) + " " + (stage.clientHeight || 500));
+    }
+    function toggleFitWidth() {
+      view.fitWidth = !view.fitWidth;
+      shell.classList.toggle("matd-fit-width", view.fitWidth);
+      widthMode.setAttribute("aria-pressed", String(view.fitWidth));
+      panZoomControls.forEach(function (control) { control.disabled = view.fitWidth; });
+      Object.keys(pointers).forEach(function (id) {
+        if (svg.hasPointerCapture(Number(id))) svg.releasePointerCapture(Number(id));
+      });
+      pointers = Object.create(null);
+      drag = null;
+      pinch = null;
+      moved = false;
+      fit();
     }
     function zoomAt(x, y, f) {
       var n = Math.max(0.035, Math.min(6, view.scale * f)),
@@ -288,11 +329,10 @@ String MultiAtlasClientScript()
       var cols = Math.max(1, Math.ceil(Math.sqrt(children.length))),
         w = 220,
         h = 100,
-        g = 24;
+        g = 24,
+        rows = Math.max(1, Math.ceil(children.length / cols));
       view.width = cols * w + (cols - 1) * g;
-      view.height =
-        Math.ceil(children.length / cols) * h +
-        (Math.ceil(children.length / cols) - 1) * g;
+      view.height = rows * h + (rows - 1) * g;
       return children.map(function (e, i) {
         return {
           x: (i % cols) * (w + g),
@@ -352,20 +392,24 @@ String MultiAtlasClientScript()
           children.length + " nested elements · Enter to open",
         );
       g.addEventListener("click", function (ev) {
+        ev.stopPropagation();
         if (!moved) {
           select(e);
         }
       });
-      g.addEventListener("dblclick", function () {
+      g.addEventListener("dblclick", function (ev) {
+        ev.stopPropagation();
         if (children.length) enter(e.id);
       });
       g.addEventListener("keydown", function (ev) {
+        if (ev.target !== g) return;
         if (ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
           select(e);
         } else if (ev.key === "ArrowRight" && children.length) {
           ev.preventDefault();
           enter(e.id);
+          svg.focus({ preventScroll: !view.fitWidth });
         }
       });
       children.forEach(function (child) {
@@ -375,9 +419,6 @@ String MultiAtlasClientScript()
     }
     function draw() {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
-      var W = stage.clientWidth || 800,
-        H = stage.clientHeight || 500;
-      svg.setAttribute("viewBox", "0 0 " + W + " " + H);
       var children = currentChildren(),
         positions = Object.create(null),
         root = add(svg, "g", {});
@@ -432,8 +473,10 @@ String MultiAtlasClientScript()
           g.addEventListener("keydown", function (ev) {
             if (ev.key === "Enter") {
               ev.preventDefault();
-              if (kids(e.id).length) enter(e.id);
-              else select(e);
+              if (kids(e.id).length) {
+                enter(e.id);
+                svg.focus({ preventScroll: !view.fitWidth });
+              } else select(e);
             }
           });
         });
@@ -452,8 +495,8 @@ String MultiAtlasClientScript()
             );
           });
         } else {
-          view.width = Math.max(1, (map.world && map.world.width) || 800);
-          view.height = Math.max(1, (map.world && map.world.height) || 600);
+          view.width = Math.max(1, Number(map.width) || 800);
+          view.height = Math.max(1, Number(map.height) || 600);
         }
         add(root, "rect", {
           x: 0,
@@ -556,6 +599,9 @@ String MultiAtlasClientScript()
               (road.label || "External dependency") + " to " + targetTrack,
             "data-target-track": targetTrack,
             "data-target-element": targetId,
+          });
+          hit.addEventListener("click", function () {
+            if (view.fitWidth) navigateExternal(hit);
           });
           hit.addEventListener("keydown", function (ev) {
             if (ev.key === "Enter" || ev.key === " ") {
@@ -701,6 +747,7 @@ String MultiAtlasClientScript()
         else if (a === "out")
           zoomAt(stage.clientWidth / 2, stage.clientHeight / 2, 1 / 1.25);
         else if (a === "fit") fit();
+        else if (a === "width") toggleFitWidth();
         else if (a === "one") {
           view.scale = 1;
           view.x = 0;
@@ -718,6 +765,7 @@ String MultiAtlasClientScript()
     svg.addEventListener(
       "wheel",
       function (ev) {
+        if (view.fitWidth) return;
         ev.preventDefault();
         var r = svg.getBoundingClientRect();
         zoomAt(
@@ -729,6 +777,7 @@ String MultiAtlasClientScript()
       { passive: false },
     );
     svg.addEventListener("pointerdown", function (ev) {
+      if (view.fitWidth) return;
       pointers[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
       svg.setPointerCapture(ev.pointerId);
       moved = false;
@@ -826,7 +875,9 @@ String MultiAtlasClientScript()
     svg.addEventListener("pointerup", pointerEnd);
     svg.addEventListener("pointercancel", pointerEnd);
     svg.addEventListener("keydown", function (ev) {
+      if (ev.defaultPrevented) return;
       if (ev.key === "0") fit();
+      else if (view.fitWidth) return;
       else if (ev.key === "+" || ev.key === "=")
         zoomAt(stage.clientWidth / 2, stage.clientHeight / 2, 1.2);
       else if (ev.key === "-")
@@ -847,9 +898,13 @@ String MultiAtlasClientScript()
     });
     window.addEventListener("resize", function () {
       if (!view.manual) fit();
+      else updateViewBox();
     });
     draw();
     fit();
+    new ResizeObserver(function () {
+      if (view.fitWidth && stage.clientWidth !== view.fittedWidth) fit();
+    }).observe(stage);
     var focus = /element=([^&]+)/.exec(window.location.hash);
     if (focus) {
       try {

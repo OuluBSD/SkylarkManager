@@ -103,6 +103,7 @@ String MultiAtlasCanvasHtml(const MultiAtlasCanvasData& data)
 	  << "<button type=\"button\" data-action=\"in\" aria-label=\"Zoom in\">+</button>"
 	  << "<button type=\"button\" data-action=\"out\" aria-label=\"Zoom out\">−</button>"
 	  << "<button type=\"button\" data-action=\"fit\">Fit (0)</button>"
+	  << "<button type=\"button\" data-action=\"width\" aria-pressed=\"false\">Fit width / Page scroll</button>"
 	  << "<button type=\"button\" data-action=\"one\">1:1</button>"
 	  << "<button type=\"button\" data-action=\"maximize\">Maximize</button>"
 	  << "<button type=\"button\" data-action=\"theme\">Theme</button>"
@@ -130,6 +131,9 @@ String MultiAtlasCanvasStylesheet()
 .ma-stage { height: 72vh; min-height: 400px; overflow: hidden; touch-action: none; }
 .ma-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
 .ma-canvas:active { cursor: grabbing; }
+.ma-shell.ma-fit-width .ma-stage { min-height: 0; touch-action: auto; }
+.ma-shell.ma-fit-width .ma-canvas { cursor: auto; }
+.ma-toolbar button[aria-pressed=true] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .ma-canvas .lane-bg { fill: var(--bg); stroke: var(--line); }
 .ma-canvas .band { fill: var(--panel); stroke: var(--line); }
 .ma-canvas .lane-title, .ma-canvas .band-label { fill: var(--fg); font: 600 15px system-ui, sans-serif; }
@@ -169,15 +173,19 @@ String MultiAtlasCanvasScript()
     var svg = shell.querySelector('.ma-canvas');
     var stage = shell.querySelector('.ma-stage');
     var zoom = shell.querySelector('.ma-zoom');
+    var widthMode = shell.querySelector('[data-action=width]');
+    var maximize = shell.querySelector('[data-action=maximize]');
+    var panZoomControls = shell.querySelectorAll('[data-action=in], [data-action=out], [data-action=one], [data-action=maximize]');
     var external = shell.querySelector('.ma-external');
     var detailLink = shell.querySelector('.ma-detail-link');
     var detailAnchor = shell.querySelector('[data-track-detail]');
     var lanes = data.lanes || [];
-    var view = { x: 0, y: 0, scale: 1, mode: 'overview' };
+    var view = { x: 0, y: 0, scale: 1, mode: 'overview', fitWidth: false };
     var drag = null;
-  var camera = null;
-  var contentWidth = 1;
-  var contentHeight = 1;
+    var camera = null;
+    var contentWidth = 1;
+    var contentHeight = 1;
+    var fittedWidth = 0;
 
     function node(name, attrs, text) {
       var out = document.createElementNS(NS, name);
@@ -226,8 +234,7 @@ String MultiAtlasCanvasScript()
       var width = Math.max(1, selected.length) * laneWidth + 32;
       contentWidth = width;
       contentHeight = height;
-      svg.setAttribute('viewBox', '0 0 ' + Math.max(1, stage.clientWidth) + ' ' + Math.max(1, stage.clientHeight));
-      var root = add(svg, 'g', { transform: 'translate(' + view.x + ' ' + view.y + ') scale(' + view.scale + ')' });
+      var root = add(svg, 'g', {});
       camera = root;
       selected.forEach(function (lane, index) {
         var x = index * laneWidth;
@@ -289,6 +296,10 @@ String MultiAtlasCanvasScript()
         });
       });
       svg.querySelectorAll('g[data-id]').forEach(function (element) { root.appendChild(element); });
+      transform();
+    }
+    function transform() {
+      if (camera) camera.setAttribute('transform', 'translate(' + view.x + ' ' + view.y + ') scale(' + view.scale + ')');
       zoom.textContent = Math.round(view.scale * 100) + '%';
     }
     function renderExternalLinks() {
@@ -335,16 +346,39 @@ String MultiAtlasCanvasScript()
       render();
     }
     function fit() {
-      view.scale = Math.max(.08, Math.min(1.7, Math.min(stage.clientWidth / contentWidth, stage.clientHeight / contentHeight)));
-      view.x = (stage.clientWidth - contentWidth * view.scale) / 2;
+      var width = Math.max(1, stage.clientWidth);
+      fittedWidth = width;
+      if (view.fitWidth) {
+        view.scale = width / contentWidth;
+        stage.style.height = Math.ceil(contentHeight * view.scale + 24) + 'px';
+      } else {
+        stage.style.height = '';
+        view.scale = Math.max(.08, Math.min(1.7, Math.min(width / contentWidth, stage.clientHeight / contentHeight)));
+      }
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + Math.max(1, stage.clientHeight));
+      view.x = (width - contentWidth * view.scale) / 2;
       view.y = 12;
-      render();
+      transform();
+    }
+    function setMaximized(active) {
+      shell.classList.toggle('ma-max', active);
+      document.body.classList.toggle('ma-lock', active);
+      maximize.textContent = active ? 'Restore' : 'Maximize';
+    }
+    function toggleFitWidth() {
+      view.fitWidth = !view.fitWidth;
+      drag = null;
+      if (shell.classList.contains('ma-max')) setMaximized(false);
+      shell.classList.toggle('ma-fit-width', view.fitWidth);
+      widthMode.setAttribute('aria-pressed', String(view.fitWidth));
+      panZoomControls.forEach(function (control) { control.disabled = view.fitWidth; });
+      fit();
     }
     function highlight(id, lane) {
       var target = svg.querySelector('[data-id="' + CSS.escape(id) + '"][data-lane="' + CSS.escape(lane) + '"]');
       if (!target) return;
       target.classList.add('highlight');
-      target.focus({ preventScroll: true });
+      target.focus({ preventScroll: !view.fitWidth });
       window.setTimeout(function () { target.classList.remove('highlight'); }, 1700);
     }
     shell.querySelectorAll('[data-view]').forEach(function (button) {
@@ -353,37 +387,43 @@ String MultiAtlasCanvasScript()
     shell.querySelectorAll('[data-action]').forEach(function (button) {
       button.addEventListener('click', function () {
         var action = button.dataset.action;
-        if (action === 'in' || action === 'out') { view.scale *= action === 'in' ? 1.2 : 1 / 1.2; render(); }
-        else if (action === 'one') { view.scale = 1; view.x = 0; view.y = 0; render(); }
+        if (action === 'in' || action === 'out') { view.scale *= action === 'in' ? 1.2 : 1 / 1.2; transform(); }
+        else if (action === 'one') { view.scale = 1; view.x = 0; view.y = 0; transform(); }
         else if (action === 'fit') fit();
+        else if (action === 'width') toggleFitWidth();
         else if (action === 'maximize') {
-          shell.classList.toggle('ma-max'); document.body.classList.toggle('ma-lock');
-          button.textContent = shell.classList.contains('ma-max') ? 'Restore' : 'Maximize';
+          setMaximized(!shell.classList.contains('ma-max'));
           window.setTimeout(fit, 60);
         }
         else if (action === 'theme') shell.classList.toggle('ma-contrast');
       });
     });
     svg.addEventListener('wheel', function (event) {
-      event.preventDefault(); view.scale *= event.deltaY < 0 ? 1.12 : 1 / 1.12; render();
+      if (view.fitWidth) return;
+      event.preventDefault(); view.scale *= event.deltaY < 0 ? 1.12 : 1 / 1.12; transform();
     }, { passive: false });
     svg.addEventListener('pointerdown', function (event) {
+      if (view.fitWidth) return;
       drag = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
     });
     svg.addEventListener('pointermove', function (event) {
       if (!drag) return;
       view.x = drag.ox + event.clientX - drag.x; view.y = drag.oy + event.clientY - drag.y;
-      if (camera) camera.setAttribute('transform', 'translate(' + view.x + ' ' + view.y + ') scale(' + view.scale + ')');
+      transform();
     });
     svg.addEventListener('pointerup', function () { drag = null; });
     svg.addEventListener('pointercancel', function () { drag = null; });
     svg.addEventListener('keydown', function (event) {
       if (event.key === '0') fit();
-      else if (event.key === '+' || event.key === '=') { view.scale *= 1.2; render(); }
-      else if (event.key === '-') { view.scale /= 1.2; render(); }
+      else if (view.fitWidth) return;
+      else if (event.key === '+' || event.key === '=') { view.scale *= 1.2; transform(); }
+      else if (event.key === '-') { view.scale /= 1.2; transform(); }
     });
     window.addEventListener('resize', fit);
     render(); fit();
+    new ResizeObserver(function () {
+      if (view.fitWidth && stage.clientWidth !== fittedWidth) fit();
+    }).observe(stage);
     var focus = /track=([^&]+)&element=([^&]+)/.exec(window.location.hash);
     if (focus) {
       try {
