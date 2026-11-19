@@ -85,16 +85,17 @@ static void Report(Vector<MultiAtlasRoadmapMessage>& messages, const char *sever
 
 static bool ResolveExternal(const MultiAtlasContractRef& ref,
 	                        const MultiAtlasReplaySources& sources,
-	                        bool& value)
+	                        bool& value, bool& snapshot_passed)
 {
 	if(ref.vid_anchor.IsEmpty()) {
-	int track = sources.final_exports.Find(ref.track_id);
+		int track = sources.final_exports.Find(ref.track_id);
 		if(track < 0)
 			return false;
 		value = Has(sources.final_exports[track], ref.atom_name);
+		snapshot_passed = sources.tracks_without_passed_versions.Find(ref.track_id) < 0;
 	}
 	else {
-	int track = sources.version_exports.Find(ref.track_id);
+		int track = sources.version_exports.Find(ref.track_id);
 		if(track < 0)
 			return false;
 		const VectorMap<String, Vector<String>>& track_worlds = sources.version_exports[track];
@@ -102,6 +103,8 @@ static bool ResolveExternal(const MultiAtlasContractRef& ref,
 		if(version < 0)
 			return false;
 		value = Has(track_worlds[version], ref.atom_name);
+		int passed = sources.passed_version_anchors.Find(ref.track_id);
+		snapshot_passed = passed < 0 || sources.passed_version_anchors[passed].Find(ref.vid_anchor) >= 0;
 	}
 	return true;
 }
@@ -121,10 +124,11 @@ static bool HoldsContract(const String& literal, const Vector<String>& state,
 		known = true;
 		return Holds(state, literal);
 	}
-	known = ResolveExternal(ref, sources, value);
+	bool snapshot_passed;
+	known = ResolveExternal(ref, sources, value, snapshot_passed);
 	if(!known)
 		return false;
-	return ref.negated ? !value : value;
+	return ref.negated ? snapshot_passed && !value : value;
 }
 
 static void CountMessage(MultiAtlasReplayContext& context,
@@ -300,25 +304,36 @@ bool MultiAtlasReplayEnsemble(const MultiAtlasReplayInput& input, MultiAtlasRepl
 	                                     track_worlds, context.messages, effective_id, version_passed);
 		context.exported_atoms_by_track.GetAdd(effective_id) = clone(exported);
 		VectorMap<String, Vector<String>> exported_versions;
+		Index<String>& passed_anchors = sources.passed_version_anchors.GetAdd(track_id);
 		for(int vi = 0; vi < track->versions.GetCount(); vi++) {
 			const MultiAtlasVersion& version = track->versions[vi];
+			Vector<String>& by_id = exported_versions.GetAdd(version.vid);
+			String label;
+			if(version.code >= 0)
+				label = Format("%d.%d.%d", version.code / 1000000,
+				               (version.code / 1000) % 1000, version.code % 1000);
+			if(!version_passed[vi]) {
+				if(!label.IsEmpty())
+					exported_versions.GetAdd(label);
+				continue;
+			}
+
 			Vector<String> filtered;
 			int snapshot = track_worlds.Find(version.vid);
-			if(snapshot >= 0 && version_passed[vi])
+			if(snapshot >= 0)
 				for(const String& atom : track_worlds[snapshot])
 					if(PublicAtom(atom, false, track->rules)) filtered.Add(atom);
-			if(version_passed[vi]) {
-				exported_versions.GetAdd(version.vid) = clone(filtered);
-				if(version.code >= 0)
-					exported_versions.GetAdd(Format("%d.%d.%d", version.code / 1000000,
-					                                   (version.code / 1000) % 1000, version.code % 1000)) = pick(filtered);
+			by_id = clone(filtered);
+			passed_anchors.FindAdd(version.vid);
+			if(!label.IsEmpty()) {
+				exported_versions.GetAdd(label) = pick(filtered);
+				passed_anchors.FindAdd(label);
 			}
 		}
 		context.version_worlds_by_track.GetAdd(track_id) = pick(track_worlds);
-		bool has_passed_version = false;
-		for(bool passed : version_passed) has_passed_version |= passed;
-		if(has_passed_version)
-			sources.final_exports.GetAdd(track_id) = clone(exported);
+		if(passed_anchors.IsEmpty())
+			sources.tracks_without_passed_versions.Add(track_id);
+		sources.final_exports.GetAdd(track_id) = pick(exported);
 		sources.version_exports.GetAdd(track_id) = pick(exported_versions);
 	}
 	for(const MultiAtlasRoadmapMessage& message : context.messages) CountMessage(context, message);

@@ -28,6 +28,9 @@ struct MultiAtlasReplayContext : Moveable<MultiAtlasReplayContext> {
 struct MultiAtlasReplaySources : Moveable<MultiAtlasReplaySources> {
 	VectorMap<String, Vector<String>> final_exports;
 	VectorMap<String, VectorMap<String, Vector<String>>> version_exports;
+	// A passed snapshot can establish absence, even when its exports are empty.
+	Index<String> tracks_without_passed_versions;
+	VectorMap<String, Index<String>> passed_version_anchors;
 };
 
 // Replays one timeline into caller-owned output containers. Imported atoms are

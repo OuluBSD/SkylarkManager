@@ -79,27 +79,29 @@ void RunMultiAtlasReplayEngineTests()
 
 	// Deleting the producer gate event blocks Track 2 at entry and the meta release.
 	input.tracks[0].events.Clear();
-	// Keep a passed prefix so Meta can resolve Track 2's registered but pending gate.
-	MultiAtlasVersion track2_gate_version = pick(input.tracks[1].versions[0]);
-	input.tracks[1].versions.Clear();
-	AddReplayVersion(input.tracks[1], "v1", no_requirements);
-	input.tracks[1].versions.Add(pick(track2_gate_version));
+	input.tracks[1].versions[0].code = 2000;
+	input.meta.versions[0].requires.Add("track2@v2:tested:v2");
+	input.meta.versions[0].requires.Add("track2@0.2.0:tested:v2");
 	passed = MultiAtlasReplayEnsemble(input, context);
 	bool exact_missing = false;
-	bool meta_pending = false;
+	Vector<String> meta_pending;
 	for(const MultiAtlasRoadmapMessage& message : context.messages)
 		if(message.track_id == "track2" && message.vid == "v2" && message.subject_id == "v2" &&
 		   message.literal == "track1:tested:0.1.999" &&
 		   message.text.Find("track1:tested:0.1.999 pending gate") >= 0 && message.severity == "warning")
 			exact_missing = true;
-		else if(message.track_id == "meta" && message.literal == "track2:tested:v2" &&
+		else if(message.track_id == "meta" &&
 		        message.text.Find("pending gate") >= 0 && message.severity == "warning")
-			meta_pending = true;
+			meta_pending.Add(message.literal);
 	ReplayCheck(passed && context.total_errors == 0 && exact_missing &&
-	           meta_pending &&
-	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("track2"), "tested:v2") &&
-	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("meta"), "tested:1.0.0"),
-	           "pending upstream gate warns and blocked version exports neither downstream gate");
+	           ContainsReplayAtom(meta_pending, "track2:tested:v2") &&
+	           context.exported_atoms_by_track.Get("track2").IsEmpty() &&
+	           context.exported_atoms_by_track.Get("meta").IsEmpty(),
+	           "registered track blocked at its first version exports no atoms and its gate is pending");
+	ReplayCheck(passed && context.total_warnings == 5 &&
+	           ContainsReplayAtom(meta_pending, "track2@v2:tested:v2") &&
+	           ContainsReplayAtom(meta_pending, "track2@0.2.0:tested:v2"),
+	           "registered blocked version resolves by both declared ID and canonical label");
 
 	// A known, registered gate that has not yet been proven blocks the timeline
 	// without making an otherwise honest draft plan fail --check.
@@ -217,12 +219,18 @@ void RunMultiAtlasReplayEngineTests()
 	anchored.tracks.SetCount(2); anchored.tracks[0].track_id = "producer";
 	anchored.tracks[1].track_id = "consumer";
 	AddReplayVersion(anchored.tracks[0], "v1", none);
-	Vector<String> unknown_anchor; unknown_anchor.Add("producer@v0:artifact:x");
+	Vector<String> unknown_anchor; unknown_anchor.Add("producer@v0:tested:v0");
 	AddReplayVersion(anchored.tracks[1], "v2", unknown_anchor);
 	passed = MultiAtlasReplayEnsemble(anchored, context);
-	ReplayCheck(!passed && context.messages.GetCount() == 1 &&
+	ReplayCheck(!passed && context.total_errors == 1 && context.total_warnings == 0 &&
+	           context.messages.GetCount() == 1 &&
 	           context.messages[0].text.Find("unknown upstream track or anchor") >= 0,
-	           "unknown version anchor is reported as unavailable rather than known false");
+	           "undeclared anchor is an error even for a tested gate");
+	anchored.tracks[1].versions[0].requires[0] = "missing:tested:v1";
+	passed = MultiAtlasReplayEnsemble(anchored, context);
+	ReplayCheck(!passed && context.fatal_error.Find("unknown track 'missing'") >= 0 &&
+	           context.messages.IsEmpty(),
+	           "unregistered upstream track is rejected before replay even for a tested gate");
 
 	MultiAtlasReplayInput private_atom;
 	private_atom.tracks.SetCount(2);
@@ -262,15 +270,23 @@ void RunMultiAtlasReplayEngineTests()
 	fails.requires.Add("artifact:never"); fails.effects.Add("tested:b1");
 	negated_block.tracks[0].events.Add(pick(fails));
 	Vector<String> negative; negative.Add("!blocked:artifact:never");
+	negative.Add("!blocked@b1:artifact:never");
 	AddReplayVersion(negated_block.tracks[1], "g1", negative);
+	negated_block.tracks[1].events.Add(ReplayEvent("guard", "g1", "gate", "", none));
+	negated_block.tracks[1].events.Top().effects.Add("tested:g1");
 	passed = MultiAtlasReplayEnsemble(negated_block, context);
-	bool negative_unknown = false;
+	int failed_negations = 0;
 	for(const MultiAtlasRoadmapMessage& message : context.messages)
-		if(message.track_id == "guard" && message.text.Find("unknown upstream track or anchor") >= 0)
-			negative_unknown = true;
-	ReplayCheck(!passed && negative_unknown && context.exported_atoms_by_track.Get("blocked").IsEmpty() &&
+		if(message.track_id == "guard" && message.text.Find("not true") >= 0 && message.severity == "error")
+			failed_negations++;
+	ReplayCheck(!passed && failed_negations == 2 && context.exported_atoms_by_track.Get("blocked").IsEmpty() &&
 	           context.exported_atoms_by_track.Get("guard").IsEmpty(),
 	           "negation cannot turn a blocked upstream timeline into a passing contract");
+	negated_block.tracks[0].events.Clear();
+	passed = MultiAtlasReplayEnsemble(negated_block, context);
+	ReplayCheck(passed && context.messages.IsEmpty() &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("guard"), "tested:g1"),
+	           "negation can still use an empty export from a passed snapshot");
 
 	Cout() << "MultiAtlasReplayEngineTest checks: " << (s_replay_checks - s_replay_failures)
 	       << "/" << s_replay_checks << " passed\n";
