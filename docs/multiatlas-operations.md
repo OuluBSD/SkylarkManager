@@ -5,16 +5,14 @@ MultiAtlas keeps each work stream in its own repository branch and store. Worker
 ## Before starting work
 
 1. Open the ensemble in MultiAtlas and check the track's configured branch, repository, current version, and dependency requirements.
-2. Pull the configured track branch in that track's worktree. For the BrownBear pilot, the worktrees are:
+2. Read the repository path and branch from the selected track's configuration. Pull that branch in its configured worktree, and confirm the worktree is clean before making changes:
 
-   | Track | Branch | Worktree |
-   |---|---|---|
-   | vision | `track/vision` | `/home/sblo/OuluBSD/BrownBear-vision` |
-   | ai | `track/ai` | `/home/sblo/OuluBSD/BrownBear-ai` |
-   | agent | `track/agent` | `/home/sblo/OuluBSD/BrownBear-agent` |
-   | hud | `track/hud` | `/home/sblo/OuluBSD/BrownBear-hud` |
-
-   Example for vision: `git -C /home/sblo/OuluBSD/BrownBear-vision pull --ff-only origin track/vision`. Confirm the worktree is clean before making changes.
+   ```sh
+   TRACK_REPO=/path/to/configured-track-worktree
+   TRACK_ID=your-track-id
+   git -C "$TRACK_REPO" pull --ff-only origin "track/$TRACK_ID"
+   git -C "$TRACK_REPO" status --short
+   ```
 3. Check the track roadmap and its required atoms. A requirement such as `vision:tested:v1` means the vision track must publish the `tested:v1` gate before this work can pass its entry check.
 4. Keep code, store records, and gate evidence on the track branch. Do not write one track's events or acknowledgments into another track's store.
 
@@ -93,27 +91,29 @@ The examples below use the installed `MultiAtlasVersion` binary and site directo
 ```sh
 SITE="$HOME/.config/managerskylark"
 CLI="$(pwd)/bin/MultiAtlasVersion"
-ENSEMBLE=brownbear
+ENSEMBLE=your-ensemble
+TRACK_ID=your-track-id
+TRACK_REPO=/path/to/configured-track-worktree
 TASK_ID=replace-with-task-id
 GATE_VERSION=replace-with-gate-version
 NEXT_MILESTONE=replace-with-next-milestone
 
 # Overview and next unblocked task
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --status
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track vision --next
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track "$TRACK_ID" --next
 
 # Record completed task evidence in its owning track
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track vision \
-  --task-done "$TASK_ID" --note "Implemented and verified; commit $(git -C /home/sblo/OuluBSD/BrownBear-vision rev-parse HEAD)"
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track "$TRACK_ID" \
+  --task-done "$TASK_ID" --note "Implemented and verified; commit $(git -C "$TRACK_REPO" rev-parse HEAD)"
 
 # Gate checks remain BLOCKED, and pending-gate warnings are expected,
 # until the committed gate event and proof marker exist.
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track vision --gate-check "$GATE_VERSION"
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track vision --gate-pass "$GATE_VERSION" \
-  --commit "$(git -C /home/sblo/OuluBSD/BrownBear-vision rev-parse HEAD)"
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track "$TRACK_ID" --gate-check "$GATE_VERSION"
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --track "$TRACK_ID" --gate-pass "$GATE_VERSION" \
+  --commit "$(git -C "$TRACK_REPO" rev-parse HEAD)"
 
 # Once child gate proof is committed, validate and record its meta bridge.
-"$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-record-gate vision "$GATE_VERSION"
+"$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-record-gate "$TRACK_ID" "$GATE_VERSION"
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-check
 # For the initial milestone or a .999 milestone, record the passing trial before advancing.
 # "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-trial-pass 1.2.999

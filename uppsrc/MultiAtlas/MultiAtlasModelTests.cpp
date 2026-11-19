@@ -21,16 +21,16 @@ void RunMultiAtlasModelTests()
 	s_multiatlas_failures = 0;
 
 	MultiAtlasMetaFamily family;
-	family.ensemble_name = "brownbear-suite";
-	family.title = "BrownBear Multi-Track System";
-	family.meta_family = "brownbear-meta";
+	family.ensemble_name = "example-suite";
+	family.title = "Example Multi-Track System";
+	family.meta_family = "example-meta";
 	MultiAtlasTrack track;
 	track.track_id = "vision";
-	track.family = "brownbear-vision";
-	track.repo_path = "/work/BrownBear-vision";
+	track.family = "example-vision";
+	track.repo_path = "/work/example-vision";
 	track.branch = "track/vision";
-	track.store_rel_path = "multiatlas/brownbear-vision/store";
-	track.head_key = "brownbear-vision";
+	track.store_rel_path = "multiatlas/example-vision/store";
+	track.head_key = "example-vision";
 	MultiAtlasVersion track_version;
 	track_version.vid = "vision-v0-1";
 	track_version.code = 1001;
@@ -59,10 +59,10 @@ void RunMultiAtlasModelTests()
 	String track_json = StoreAsJson(family.tracks[0]);
 	MultiAtlasTrack track_copy;
 	MultiAtlasCheckTest(LoadFromJson(track_copy, track_json), "track JSON parses");
-	MultiAtlasCheckTest(track_copy.track_id == "vision" && track_copy.family == "brownbear-vision" &&
-	                    track_copy.repo_path == "/work/BrownBear-vision" && track_copy.branch == "track/vision" &&
-	                    track_copy.store_rel_path == "multiatlas/brownbear-vision/store" &&
-	                    track_copy.head_key == "brownbear-vision" &&
+	MultiAtlasCheckTest(track_copy.track_id == "vision" && track_copy.family == "example-vision" &&
+	                    track_copy.repo_path == "/work/example-vision" && track_copy.branch == "track/vision" &&
+	                    track_copy.store_rel_path == "multiatlas/example-vision/store" &&
+	                    track_copy.head_key == "example-vision" &&
 	                    track_copy.versions.GetCount() == 1 && track_copy.versions[0].code == 1001,
 	                    "track round-trip preserves every declared track field");
 
@@ -214,7 +214,7 @@ void RunMultiAtlasModelTests()
 	                    atoms.IsImported("agent:done:Observer") && atoms.GetDeclared().GetCount() == 4 &&
 	                    atoms.GetImported().GetCount() == 1,
 	                    "registry tracks sign-free atoms and exports public or explicit atoms");
-	MultiAtlasCheckTest(MultiAtlasIsValidTrackId("vision") && MultiAtlasIsValidTrackId("brown-bear2") &&
+	MultiAtlasCheckTest(MultiAtlasIsValidTrackId("vision") && MultiAtlasIsValidTrackId("sample-project2") &&
 	                    !MultiAtlasIsValidTrackId("tested") && !MultiAtlasIsValidTrackId("meta") &&
 	                    !MultiAtlasIsValidTrackId("bad.track"),
 	                    "track ID validation rejects family collisions and reserved meta namespace");

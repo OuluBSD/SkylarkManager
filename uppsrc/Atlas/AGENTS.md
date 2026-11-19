@@ -60,7 +60,7 @@ children, else `place`; status defaults to `planned`. Full rules are in
 | `POST /atlas/{map}/road/add|delete` | Road mutations (admin) |
 | `POST /atlas/{map}/seed` | Seed import into an empty map (admin) |
 
-JSON API for import tools (admin, `skylarkctl atlas <command>`; BrownBear's `scripts/atlas-import.sh`):
+JSON API for import tools (admin, `skylarkctl atlas <command>`; a project import script):
 
 - `POST api/atlas/create` (`atlas-map-create`: `map`, `version`, `title`, `width`, `height`, `level`): an empty map
   document at a version. `level` (public, protected, private) is stored before the map, so a private map is never

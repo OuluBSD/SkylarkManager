@@ -24,25 +24,25 @@ static void WriteRegistry(const String& site, const Value& value)
 }
 
 static Value TrackValue(const String& repo, const String& id = "vision",
-	                    const String& store = "multiatlas/brownbear-vision/store")
+	                    const String& store = "multiatlas/example-vision/store")
 {
 	ValueMap track;
-	track.Add("track_id", id); track.Add("family", "brownbear-" + id);
+	track.Add("track_id", id); track.Add("family", "example-" + id);
 	track.Add("repo", repo); track.Add("branch", "track/" + id); track.Add("store", store);
 	ValueArray editors; editors.Add("editor-" + id); track.Add("editors", editors);
 	return track;
 }
 
-static Value EnsembleValue(const String& repo, const String& name = "brownbear-suite",
+static Value EnsembleValue(const String& repo, const String& name = "example-suite",
 	                       const String& track = "vision",
-	                       const String& store = "multiatlas/brownbear-vision/store")
+	                       const String& store = "multiatlas/example-vision/store")
 {
 	ValueMap meta;
-	meta.Add("family", "brownbear-meta"); meta.Add("repo", repo);
-	meta.Add("store", "multiatlas/brownbear-meta/store");
+	meta.Add("family", "example-meta"); meta.Add("repo", repo);
+	meta.Add("store", "multiatlas/example-meta/store");
 	ValueArray tracks; tracks.Add(TrackValue(repo, track, store));
 	ValueMap ensemble;
-	ensemble.Add("name", name); ensemble.Add("title", "BrownBear");
+	ensemble.Add("name", name); ensemble.Add("title", "Example");
 	ensemble.Add("public_read", false);
 	ensemble.Add("meta", meta); ensemble.Add("tracks", tracks);
 	return ensemble;
@@ -66,8 +66,8 @@ void RunMultiAtlasReplayTests()
 	String site = AppendFileName(root, "site"), repo = AppendFileName(root, "repo");
 	String outside = AppendFileName(root, "outside");
 	MakeDirectory(site);
-	MakeDirectory(AppendFileName(repo, "multiatlas/brownbear-meta/store"));
-	MakeDirectory(AppendFileName(repo, "multiatlas/brownbear-vision/store"));
+	MakeDirectory(AppendFileName(repo, "multiatlas/example-meta/store"));
+	MakeDirectory(AppendFileName(repo, "multiatlas/example-vision/store"));
 	MakeDirectory(AppendFileName(repo, "atlas/legacy/store"));
 	MakeDirectory(outside);
 
@@ -81,14 +81,14 @@ void RunMultiAtlasReplayTests()
 
 	ValueArray list; list.Add(EnsembleValue(repo)); WriteRegistry(site, RootValue(list));
 	RegistryCheck(MultiAtlasLoadRegistry(site, ensembles, error) && ensembles.GetCount() == 1 &&
-	              ensembles[0].name == "brownbear-suite" && ensembles[0].title == "BrownBear" &&
+	              ensembles[0].name == "example-suite" && ensembles[0].title == "Example" &&
 	              !ensembles[0].public_read && ensembles[0].tracks[0].editors.GetCount() == 1 &&
 	              ensembles[0].tracks[0].editors[0] == "editor-vision" &&
-	              ensembles[0].meta_family == "brownbear-meta" && ensembles[0].tracks.GetCount() == 1 &&
+	              ensembles[0].meta_family == "example-meta" && ensembles[0].tracks.GetCount() == 1 &&
 	              ensembles[0].tracks[0].track_id == "vision" &&
-	              ensembles[0].tracks[0].store == "multiatlas/brownbear-vision/store",
+	              ensembles[0].tracks[0].store == "multiatlas/example-vision/store",
 	              "registry parses meta and complete track configuration");
-	RegistryCheck(MultiAtlasFindEnsemble(site, "brownbear-suite", found, error) &&
+	RegistryCheck(MultiAtlasFindEnsemble(site, "example-suite", found, error) &&
 	              found.tracks.GetCount() == 1 && found.meta_repo == repo && !found.public_read &&
 	              found.tracks[0].editors.GetCount() == 1 && found.tracks[0].editors[0] == "editor-vision",
 	              "named lookup preserves private visibility and scoped editor configuration");
@@ -104,16 +104,16 @@ void RunMultiAtlasReplayTests()
 	RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("duplicate track_id") >= 0,
 	              "duplicate track IDs are rejected");
 
-	list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "tested")); WriteRegistry(site, RootValue(list));
+	list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "tested")); WriteRegistry(site, RootValue(list));
 	RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("invalid track_id") >= 0,
 	              "reserved atom-family track IDs are rejected");
-	list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "vision", "../outside/store")); WriteRegistry(site, RootValue(list));
+	list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "vision", "../outside/store")); WriteRegistry(site, RootValue(list));
 	RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("safe relative path") >= 0,
 	              "parent traversal in store paths is rejected");
-	list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "vision", "atlas/legacy/store")); WriteRegistry(site, RootValue(list));
+	list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "vision", "atlas/legacy/store")); WriteRegistry(site, RootValue(list));
 	RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("multiatlas/") >= 0,
 	              "legacy Atlas namespace is rejected");
-	list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "vision", "multiatlas/missing/store")); WriteRegistry(site, RootValue(list));
+	list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "vision", "multiatlas/missing/store")); WriteRegistry(site, RootValue(list));
 	RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("does not exist") >= 0,
 	              "missing store directories are reported");
 	list.Clear(); list.Add(EnsembleValue(AppendFileName(root, "missing-repo"))); WriteRegistry(site, RootValue(list));
@@ -121,26 +121,26 @@ void RunMultiAtlasReplayTests()
 	              "missing repository directories are reported");
 
 #ifndef _WIN32
-	String track_dir = AppendFileName(repo, "multiatlas/brownbear-vision");
+	String track_dir = AppendFileName(repo, "multiatlas/example-vision");
 	String escaped_store = AppendFileName(track_dir, "escape");
 	if(symlink(~outside, ~escaped_store) == 0) {
-		list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "vision", "multiatlas/brownbear-vision/escape"));
+		list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "vision", "multiatlas/example-vision/escape"));
 		WriteRegistry(site, RootValue(list));
 		RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("symlink") >= 0,
 		              "symlinked store escapes are rejected");
 	}
 	String legacy_link = AppendFileName(track_dir, "legacy-link");
 	if(symlink(~AppendFileName(repo, "atlas/legacy"), ~legacy_link) == 0) {
-		list.Clear(); list.Add(EnsembleValue(repo, "brownbear-suite", "vision", "multiatlas/brownbear-vision/legacy-link/store"));
+		list.Clear(); list.Add(EnsembleValue(repo, "example-suite", "vision", "multiatlas/example-vision/legacy-link/store"));
 		WriteRegistry(site, RootValue(list));
 		RegistryCheck(!MultiAtlasLoadRegistry(site, ensembles, error) && error.Find("namespace") >= 0,
 		              "symlink to legacy Atlas store namespace is rejected");
 	}
 	String shared_link = AppendFileName(track_dir, "shared-store");
-	if(symlink(~AppendFileName(repo, "multiatlas/brownbear-meta/store"), ~shared_link) == 0) {
+	if(symlink(~AppendFileName(repo, "multiatlas/example-meta/store"), ~shared_link) == 0) {
 		ValueMap aliased = EnsembleValue(repo);
 		ValueArray aliased_tracks; aliased_tracks.Add(TrackValue(repo));
-		ValueMap second = TrackValue(repo, "agent", "multiatlas/brownbear-vision/shared-store");
+		ValueMap second = TrackValue(repo, "agent", "multiatlas/example-vision/shared-store");
 		aliased_tracks.Add(second);
 		aliased.Set("tracks", aliased_tracks);
 		list.Clear(); list.Add(aliased); WriteRegistry(site, RootValue(list));

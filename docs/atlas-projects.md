@@ -21,8 +21,8 @@ If the file is missing, there are no projects.
 ## Format
 
     {"projects": [
-      {"name": "brownbear", "repo": "/srv/BrownBear", "store": "atlas/brownbear/store",
-       "title": "BrownBear", "level": "public", "editors": ["alice"]}
+      {"name": "examplemap", "repo": "/srv/example-project", "store": "atlas/examplemap/store",
+       "title": "Example map", "level": "public", "editors": ["alice"]}
     ]}
 
 | Field | Required | Meaning |
@@ -35,7 +35,7 @@ If the file is missing, there are no projects.
 | `editors` | no | Account names that may edit this project's maps without the admin role. Matched without case. |
 
 A bad entry fails the whole file, and the project routes answer with the reason (for example `projects file: project
-brownbear: store must be a relative path inside the repository`).
+examplemap: store must be a relative path inside the repository`).
 
 ## The store
 
@@ -44,10 +44,10 @@ written by Atlas, so a family changed in Atlas is a change to the files in the r
 `git status` of that repository. Commit it there like any other file. Each event is its own file, so a change to a
 map shows as a small diff.
 
-    atlas/brownbear/store/data/families/brownbear.json
-    atlas/brownbear/store/data/maps/brownbear-v1.0.0.json
-    atlas/brownbear/store/data/rules/brownbear.json
-    atlas/brownbear/store/data/events/brownbear.ev-0001.json  (one per event)
+    atlas/examplemap/store/data/families/examplemap.json
+    atlas/examplemap/store/data/maps/examplemap-v1.0.0.json
+    atlas/examplemap/store/data/rules/examplemap.json
+    atlas/examplemap/store/data/events/examplemap.ev-0001.json  (one per event)
 
 A family with no project store is kept in the data root, as before. Atlas's map list shows the maps of both.
 

@@ -91,12 +91,12 @@ void RunMultiAtlasStoreTests()
 	           "all writes require an explicit expected revision");
 
 	MultiAtlasTrack family;
-	family.track_id = "vision"; family.family = "brownbear-vision"; family.branch = "track/vision";
-	StoreCheck(MultiAtlasSaveTrackFamily(root1, "brownbear-vision", family, RecordAbsent(), error),
+	family.track_id = "vision"; family.family = "example-vision"; family.branch = "track/vision";
+	StoreCheck(MultiAtlasSaveTrackFamily(root1, "example-vision", family, RecordAbsent(), error),
 	           "track family create succeeds");
 	MultiAtlasTrack loaded_family;
-	StoreCheck(MultiAtlasLoadTrackFamily(root1, "brownbear-vision", loaded_family, revision, error) &&
-	           revision == "1" && loaded_family.family == "brownbear-vision",
+	StoreCheck(MultiAtlasLoadTrackFamily(root1, "example-vision", loaded_family, revision, error) &&
+	           revision == "1" && loaded_family.family == "example-vision",
 	           "track family record round-trips");
 	MultiAtlasMetaFamily meta;
 	meta.ensemble_name = "suite"; meta.title = "Integration"; meta.meta_family = "suite-meta";
@@ -107,17 +107,17 @@ void RunMultiAtlasStoreTests()
 
 	MultiAtlasRules rules;
 	rules.initial.Add("built:Core");
-	StoreCheck(MultiAtlasSaveTrackRules(root1, "brownbear-vision", rules, RecordAbsent(), error),
+	StoreCheck(MultiAtlasSaveTrackRules(root1, "example-vision", rules, RecordAbsent(), error),
 	           "rules document create succeeds");
 	MultiAtlasRules loaded_rules;
-	StoreCheck(MultiAtlasLoadTrackRules(root1, "brownbear-vision", loaded_rules, revision, error) &&
+	StoreCheck(MultiAtlasLoadTrackRules(root1, "example-vision", loaded_rules, revision, error) &&
 	           revision == "1" && loaded_rules.initial.GetCount() == 1 && loaded_rules.initial[0] == "built:Core",
 	           "rules document round-trips");
 
 	MultiAtlasEvent event;
 	event.id = "ev-001"; event.at = "2026-11-18T00:00:00Z"; event.actor = "agent";
 	event.track_id = "vision"; event.vid = "0.1.0"; event.type = "task-done"; event.text = "passed";
-	String event_family = "brownbear-vision";
+	String event_family = "example-vision";
 	bool event_saved = MultiAtlasPutTrackEvent(root1, event_family, "vision", event, error);
 	Vector<MultiAtlasEvent> events;
 	bool events_loaded = MultiAtlasLoadTrackEvents(root1, event_family, "vision", events, error);

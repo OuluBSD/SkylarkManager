@@ -4,7 +4,7 @@ using namespace Upp;
 
 // atlasver: prints what an implementation worker needs from an Atlas store. It only reads the store's JSON; nothing is
 // written, so it is safe on the live store. Usage:
-//   atlasver <store data dir> [--family brownbear]          the versions, one line each
+//   atlasver <store data dir> --family <family>             the versions, one line each
 //   atlasver <store data dir> --version 0.0.3               one version, in full
 //   atlasver <store data dir> --items 0.0                   every version of a minor group: the items a release needs
 //
@@ -260,12 +260,12 @@ CONSOLE_APP_MAIN
 	for(int i = 0; i < CommandLine().GetCount(); i++)
 		args.Add(CommandLine()[i]);
 	if(args.IsEmpty()) {
-		Cout() << "usage: atlasver <store data dir> [--family brownbear] [--version a.b.c | --items a.b]\n";
+		Cout() << "usage: atlasver <store data dir> --family <family> [--version a.b.c | --items a.b]\n";
 		SetExitCode(1);
 		return;
 	}
 	String data = args[0];
-	String family = "brownbear";
+	String family;
 	String want_version, want_items;
 	for(int i = 1; i < args.GetCount(); i++) {
 		if(args[i] == "--family" && i + 1 < args.GetCount())
