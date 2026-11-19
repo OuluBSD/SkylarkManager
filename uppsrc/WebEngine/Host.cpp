@@ -40,6 +40,13 @@ WebEngineHost::WebEngineHost()
 	prefork = 0;
 }
 
+WebEngineHost::~WebEngineHost()
+{
+	StopEngines();
+	for(Listener* L : listeners)
+		delete L;
+}
+
 void WebEngineHost::BindSite(int port, const String& site_id)
 {
 	ASSERT_(port > 0 && port != this->port, "engine listener port must be positive and differ from the stock port");
@@ -82,6 +89,10 @@ void WebEngineHost::StopEngines()
 		poke.Connect("127.0.0.1", L->port);
 		poke.Close();
 	}
+	// StopEngines is also called by the destructor. Join before listener
+	// storage can be released, since ListenerLoop keeps references into it.
+	for(Thread& thread : listener_threads)
+		thread.Wait();
 }
 
 void WebEngineHost::WorkThread()

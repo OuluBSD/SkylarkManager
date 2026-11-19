@@ -16,6 +16,7 @@ public:
 	typedef WebEngineHost CLASSNAME;
 
 	WebEngineHost();
+	~WebEngineHost() override;
 
 	WebEngine& Engine() { return TheWebEngine(); }
 
