@@ -183,10 +183,15 @@ static Vector<String> ReplayTrack(const MultiAtlasTrackReplayInput& track,
 			bool holds = HoldsContract(literal, state, sources, known);
 			if(!holds) {
 				entry_ok = false;
+				MultiAtlasContractRef ref;
+				String parse_error;
+				bool pending_gate = known && MultiAtlasParseContract(literal, ref, parse_error) &&
+				                    !ref.negated && ref.family_kind == "tested";
 				String reason = known ? "not true" : "unknown upstream track or anchor";
-				Report(messages, "error", track_id, version.vid, "version", version.vid,
+				Report(messages, pending_gate ? "warning" : "error", track_id, version.vid, "version", version.vid,
 				       "contract-gate", literal, track_id + " version " + version.vid +
-				       " subject " + version.vid + " requirement " + literal + " " + reason);
+				       " subject " + version.vid + " requirement " + literal + " " +
+				       (pending_gate ? "pending gate" : reason));
 			}
 		}
 		if(entry_ok) {
@@ -240,8 +245,11 @@ static Vector<String> ReplayTrack(const MultiAtlasTrackReplayInput& track,
 	}
 
 	Vector<String> exported;
-	if(!track.versions.IsEmpty() && !timeline_blocked) {
-		int last_snapshot = version_atoms.Find(track.versions[track.versions.GetCount() - 1].vid);
+	int last_passed = -1;
+	for(int i = 0; i < version_passed.GetCount(); i++)
+		if(version_passed[i]) last_passed = i;
+	if(last_passed >= 0) {
+		int last_snapshot = version_atoms.Find(track.versions[last_passed].vid);
 		const Vector<String>& final_state = version_atoms[last_snapshot];
 		for(const String& atom : final_state)
 			if(PublicAtom(atom, false, track.rules)) exported.Add(atom);
@@ -307,7 +315,9 @@ bool MultiAtlasReplayEnsemble(const MultiAtlasReplayInput& input, MultiAtlasRepl
 			}
 		}
 		context.version_worlds_by_track.GetAdd(track_id) = pick(track_worlds);
-		if(!version_passed.IsEmpty() && version_passed.Top())
+		bool has_passed_version = false;
+		for(bool passed : version_passed) has_passed_version |= passed;
+		if(has_passed_version)
 			sources.final_exports.GetAdd(track_id) = clone(exported);
 		sources.version_exports.GetAdd(track_id) = pick(exported_versions);
 	}

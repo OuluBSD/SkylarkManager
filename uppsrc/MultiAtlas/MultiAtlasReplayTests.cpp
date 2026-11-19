@@ -79,16 +79,104 @@ void RunMultiAtlasReplayEngineTests()
 
 	// Deleting the producer gate event blocks Track 2 at entry and the meta release.
 	input.tracks[0].events.Clear();
+	// Keep a passed prefix so Meta can resolve Track 2's registered but pending gate.
+	MultiAtlasVersion track2_gate_version = pick(input.tracks[1].versions[0]);
+	input.tracks[1].versions.Clear();
+	AddReplayVersion(input.tracks[1], "v1", no_requirements);
+	input.tracks[1].versions.Add(pick(track2_gate_version));
 	passed = MultiAtlasReplayEnsemble(input, context);
 	bool exact_missing = false;
+	bool meta_pending = false;
 	for(const MultiAtlasRoadmapMessage& message : context.messages)
 		if(message.track_id == "track2" && message.vid == "v2" && message.subject_id == "v2" &&
 		   message.literal == "track1:tested:0.1.999" &&
-		   message.text.Find("track1:tested:0.1.999 not true") >= 0)
+		   message.text.Find("track1:tested:0.1.999 pending gate") >= 0 && message.severity == "warning")
 			exact_missing = true;
-	ReplayCheck(!passed && exact_missing && !ContainsReplayAtom(context.exported_atoms_by_track.Get("track2"), "tested:v2") &&
+		else if(message.track_id == "meta" && message.literal == "track2:tested:v2" &&
+		        message.text.Find("pending gate") >= 0 && message.severity == "warning")
+			meta_pending = true;
+	ReplayCheck(passed && context.total_errors == 0 && exact_missing &&
+	           meta_pending &&
+	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("track2"), "tested:v2") &&
 	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("meta"), "tested:1.0.0"),
-	           "missing upstream gate reports exact literal and blocked version exports neither downstream gate");
+	           "pending upstream gate warns and blocked version exports neither downstream gate");
+
+	// A known, registered gate that has not yet been proven blocks the timeline
+	// without making an otherwise honest draft plan fail --check.
+	MultiAtlasReplayInput pending_gate;
+	pending_gate.tracks.SetCount(2);
+	pending_gate.tracks[0].track_id = "vision";
+	pending_gate.tracks[1].track_id = "agent";
+	AddReplayVersion(pending_gate.tracks[0], "0.4.999", no_requirements);
+	AddReplayVersion(pending_gate.tracks[1], "0.5.0", Vector<String>());
+	pending_gate.tracks[1].versions.Top().requires.Add("vision:tested:0.4.999");
+	AddReplayVersion(pending_gate.meta, "1.0.0", no_requirements);
+	pending_gate.meta.versions.Top().requires.Add("vision:tested:0.4.999");
+	passed = MultiAtlasReplayEnsemble(pending_gate, context);
+	ReplayCheck(passed && context.total_errors == 0 && context.total_warnings == 2 &&
+	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("agent"), "tested:0.5.0") &&
+	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("meta"), "tested:1.0.0"),
+	           "pending registered tested gates warn and block dependent track and meta timelines without check errors");
+
+	MultiAtlasReplayInput prior_exports;
+	prior_exports.tracks.SetCount(3);
+	prior_exports.tracks[0].track_id = "vision";
+	prior_exports.tracks[1].track_id = "ai";
+	prior_exports.tracks[2].track_id = "agent";
+	AddReplayVersion(prior_exports.tracks[0], "0.4.999", no_requirements);
+	AddReplayVersion(prior_exports.tracks[1], "0.1.0", no_requirements);
+	Vector<String> ai_gate_req; ai_gate_req.Add("vision:tested:0.4.999");
+	AddReplayVersion(prior_exports.tracks[1], "0.2.0", ai_gate_req);
+	MultiAtlasEvent ai_realize = ReplayEvent("ai", "0.1.0", "core", "", no_requirements);
+	ai_realize.effects.Add("artifact:checkpoint"); ai_realize.effects.Add("realized:CardEvaluator");
+	prior_exports.tracks[1].events.Add(pick(ai_realize));
+	Vector<String> agent_req; agent_req.Add("ai:realized:CardEvaluator");
+	AddReplayVersion(prior_exports.tracks[2], "0.1.0", agent_req);
+	MultiAtlasEvent agent_gate = ReplayEvent("agent", "0.1.0", "gate", "", no_requirements);
+	agent_gate.effects.Add("tested:0.1.0"); prior_exports.tracks[2].events.Add(pick(agent_gate));
+	AddReplayVersion(prior_exports.meta, "1.0.0", no_requirements);
+	prior_exports.meta.versions.Top().requires.Add("ai:tested:0.2.0");
+	passed = MultiAtlasReplayEnsemble(prior_exports, context);
+	bool meta_pending_gate = false;
+	for(const MultiAtlasRoadmapMessage& message : context.messages)
+		if(message.track_id == "meta" && message.literal == "ai:tested:0.2.0" &&
+		   message.severity == "warning" && message.text.Find("pending gate") >= 0)
+			meta_pending_gate = true;
+	ReplayCheck(passed && context.total_errors == 0 && context.total_warnings == 2 &&
+	           meta_pending_gate &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("ai"), "artifact:checkpoint") &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("ai"), "realized:CardEvaluator") &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("agent"), "tested:0.1.0") &&
+	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("ai"), "tested:0.2.0") &&
+	           !ContainsReplayAtom(context.exported_atoms_by_track.Get("meta"), "tested:1.0.0"),
+	           "latest passed snapshot retains AI artifact/realization imports while pending later gates block exports");
+	pending_gate.tracks[0].events.Add(ReplayEvent("vision", "0.4.999", "gate", "", no_requirements));
+	pending_gate.tracks[0].events.Top().effects.Add("tested:0.4.999");
+	pending_gate.tracks[1].events.Add(ReplayEvent("agent", "0.5.0", "gate", "", no_requirements));
+	pending_gate.tracks[1].events.Top().effects.Add("tested:0.5.0");
+	pending_gate.meta.events.Add(ReplayEvent("meta", "1.0.0", "release", "", no_requirements));
+	pending_gate.meta.events.Top().effects.Add("tested:1.0.0");
+	passed = MultiAtlasReplayEnsemble(pending_gate, context);
+	ReplayCheck(passed && context.total_errors == 0 && context.total_warnings == 0 &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("agent"), "tested:0.5.0") &&
+	           ContainsReplayAtom(context.exported_atoms_by_track.Get("meta"), "tested:1.0.0"),
+	           "actual gate fact unblocks downstream track and meta milestones");
+
+	MultiAtlasReplayInput bad_prerequisite;
+	bad_prerequisite.tracks.SetCount(2);
+	bad_prerequisite.tracks[0].track_id = "vision";
+	bad_prerequisite.tracks[1].track_id = "agent";
+	AddReplayVersion(bad_prerequisite.tracks[0], "v1", no_requirements);
+	Vector<String> bad_req; bad_req.Add("vision:artifact:missing");
+	AddReplayVersion(bad_prerequisite.tracks[1], "v1", bad_req);
+	passed = MultiAtlasReplayEnsemble(bad_prerequisite, context);
+	ReplayCheck(!passed && context.total_errors == 1 && context.messages[0].severity == "error",
+	           "unsatisfied cross-track artifact prerequisite remains an error");
+	bad_prerequisite.tracks[1].versions[0].requires.Clear();
+	bad_prerequisite.tracks[1].versions[0].requires.Add("vision:tested:");
+	passed = MultiAtlasReplayEnsemble(bad_prerequisite, context);
+	ReplayCheck(!passed && !context.fatal_error.IsEmpty() && context.total_errors == 0,
+	           "malformed tested contract remains an error");
 
 	// Anchors use the named snapshot, even when a later version removes the atom.
 	input.tracks[0].events.Clear();
@@ -97,8 +185,11 @@ void RunMultiAtlasReplayEngineTests()
 	AddReplayVersion(input.tracks[0], "0.2.0", no_requirements);
 	MultiAtlasEvent retract = ReplayEvent("track1", "0.2.0", "retract", "", no_requirements);
 	retract.effects.Add("!tested:0.1.999"); input.tracks[0].events.Add(pick(retract));
-	input.tracks[1].versions[0].requires.Clear();
-	input.tracks[1].versions[0].requires.Add("track1@0.1.999:tested:0.1.999");
+	for(MultiAtlasVersion& version : input.tracks[1].versions)
+		if(version.vid == "v2") {
+			version.requires.Clear();
+			version.requires.Add("track1@0.1.999:tested:0.1.999");
+		}
 	input.tracks[1].rules.actions.Clear();
 	input.meta.versions[0].requires.Clear();
 	input.meta.versions[0].requires.Add("track1@0.1.999:tested:0.1.999");
