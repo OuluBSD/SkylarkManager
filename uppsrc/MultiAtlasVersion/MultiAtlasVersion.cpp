@@ -25,7 +25,7 @@ String Usage()
 {
 	return "usage: MultiAtlasVersion <site_dir> --ensemble <name> <command>\n"
 	       "  --meta-check                   Show the next milestone and unmet requirements\n"
-	       "  --meta-trial-pass <version>    Record committed evidence for a .999 meta trial\n"
+	       "  --meta-trial-pass <version>    Record committed evidence for the initial or a .999 meta trial\n"
 	       "  --meta-advance <milestone-id>  Record the next eligible milestone\n"
 	       "  --meta-record-gate <track> <version>  Record a verified child gate\n"
 	       "  --status | --check | --deps | --version <version> | --next\n"
@@ -119,9 +119,17 @@ String NextMeta(const MultiAtlasReplayInput& in) {
 	for(const auto&v:in.meta.versions){bool seen=false;for(const auto&e:in.meta.events)if(e.vid==v.vid&&e.type=="milestone")seen=true;if(!seen)return v.vid;}
 	return String();
 }
-bool IsTrial(const MultiAtlasVersion& version)
+bool IsTrial(const MultiAtlasTrackReplayInput& meta, int index)
 {
-	return version.code >= 0 && version.code % 1000 == 999;
+	int code = meta.versions[index].code;
+	return code >= 0 && (index == 0 || code % 1000 == 999);
+}
+
+int PriorTrial(const MultiAtlasTrackReplayInput& meta, int index)
+{
+	for(int i = index - 1; i >= 0; i--)
+		if(IsTrial(meta, i)) return i;
+	return -1;
 }
 
 String TrialAtom(const MultiAtlasVersion& version)
@@ -147,13 +155,11 @@ bool TrialRecorded(const MultiAtlasReplayInput& in, const MultiAtlasVersion& ver
 bool MetaReady(MultiAtlasReplayInput& in, const String& vid, Vector<String>& missing,
                String& err, bool recording_trial = false)
 {
-	int target = -1, trial = -1;
+	int target = -1;
 	Vector<Vector<int>> trial_requirements;
 	trial_requirements.SetCount(in.meta.versions.GetCount());
 	for(int i = 0; i < in.meta.versions.GetCount(); i++) {
 		const MultiAtlasVersion& version = in.meta.versions[i];
-		if(IsTrial(version) && (version.vid != vid || !recording_trial))
-			trial = i;
 		if(version.vid == vid) {
 			target = i;
 			break;
@@ -168,7 +174,7 @@ bool MetaReady(MultiAtlasReplayInput& in, const String& vid, Vector<String>& mis
 	// requirements before it can apply the trial event in that version.
 	for(int i = 0; i <= target; i++) {
 		MultiAtlasVersion& version = in.meta.versions[i];
-		if(!IsTrial(version)) continue;
+		if(!IsTrial(in.meta, i)) continue;
 		String atom = TrialAtom(version);
 		for(int j = version.requires.GetCount() - 1; j >= 0; j--)
 			if(version.requires[j] == atom) {
@@ -198,7 +204,10 @@ bool MetaReady(MultiAtlasReplayInput& in, const String& vid, Vector<String>& mis
 			else if(message.severity == "error")
 				err = message.text;
 		}
-	if(trial >= 0) {
+	int prior_trial = PriorTrial(in.meta, target);
+	int own_trial = !recording_trial && IsTrial(in.meta, target) ? target : -1;
+	for(int trial : {prior_trial, own_trial}) {
+		if(trial < 0) continue;
 		const MultiAtlasVersion& gate = in.meta.versions[trial];
 		int meta = replay.version_worlds_by_track.Find("meta");
 		String atom = TrialAtom(gate);
@@ -346,29 +355,32 @@ bool VerifyMetaTrial(const MultiAtlasEnsembleDef& ens, const MultiAtlasVersion& 
 void RecordMetaTrial(const MultiAtlasEnsembleDef& ens, MultiAtlasReplayInput& in,
                      const String& requested)
 {
-	const MultiAtlasVersion *target = NULL;
-	for(const MultiAtlasVersion& version : in.meta.versions)
+	int target_index = -1;
+	for(int i = 0; i < in.meta.versions.GetCount(); i++) {
+		const MultiAtlasVersion& version = in.meta.versions[i];
 		if(version.vid == requested || VLabel(version.code) == requested) {
-			target = &version;
+			target_index = i;
 			break;
 		}
-	if(!target || !IsTrial(*target)) {
-		Error("meta trial pass requires a configured .999 meta version");
+	}
+	if(target_index < 0 || !IsTrial(in.meta, target_index)) {
+		Error("meta trial pass requires the first configured meta version or a .999 meta version");
 		return;
 	}
+	const MultiAtlasVersion& target = in.meta.versions[target_index];
 	String err;
 	MetaTrialProof proof;
-	if(!VerifyMetaTrial(ens, *target, proof, err)) {
+	if(!VerifyMetaTrial(ens, target, proof, err)) {
 		Error("meta trial pass refused: " + err);
 		return;
 	}
 	String next = NextMeta(in);
-	if(target->vid != next) {
+	if(target.vid != next) {
 		Error("trial version is not the next unrecorded milestone: " + next);
 		return;
 	}
 	Vector<String> missing;
-	if(!MetaReady(in, target->vid, missing, err, true)) {
+	if(!MetaReady(in, target.vid, missing, err, true)) {
 		Error(err.IsEmpty() ? "meta trial prerequisites are missing" : err);
 		for(const String& requirement : missing) Cout() << "missing " << requirement << '\n';
 		return;
@@ -379,27 +391,32 @@ void RecordMetaTrial(const MultiAtlasEnsembleDef& ens, MultiAtlasReplayInput& in
 		return;
 	}
 	MultiAtlasEvent event;
-	event.id = TrialId(*target);
+	event.id = TrialId(target);
 	event.at = Stamp();
 	event.actor = Actor();
 	event.track_id = "meta";
-	event.vid = target->vid;
+	event.vid = target.vid;
 	event.subject_kind = "milestone";
-	event.subject_id = target->vid;
+	event.subject_id = target.vid;
 	event.type = "gate-pass";
 	event.action = "MetaTrialPass";
 	event.text = "Meta trial passed at source commit " + proof.source + " with evidence "
 	             + proof.head + ":" + proof.marker + " and report " + proof.report +
 	             " (SHA-256 " + ToLower(proof.report_hash) + ")";
-	for(const String& requirement : target->requires)
-		if(requirement != TrialAtom(*target)) event.requires.Add(requirement);
-	event.effects.Add(TrialAtom(*target));
+	for(const String& requirement : target.requires)
+		if(requirement != TrialAtom(target)) event.requires.Add(requirement);
+	int prior = PriorTrial(in.meta, target_index);
+	if(prior >= 0) {
+		String required = TrialAtom(in.meta.versions[prior]);
+		if(!Has(event.requires, required)) event.requires.Add(required);
+	}
+	event.effects.Add(TrialAtom(target));
 	if(!MultiAtlasPutTrackEvent(MultiAtlasResolveTrackStore(ens, "meta"), ens.meta_family,
 	                           "meta", event, err)) {
 		Error(err);
 		return;
 	}
-	Cout() << "recorded meta trial " << VLabel(target->code) << " at " << proof.head << '\n';
+	Cout() << "recorded meta trial " << VLabel(target.code) << " at " << proof.head << '\n';
 }
 bool Emit(const MultiAtlasEnsembleDef& ens,const String& tid,const String& family,const String& action,const String& subject,const String& text,const String& vid,const Vector<String>& effects,String& err) {
 	String root=MultiAtlasResolveTrackStore(ens,tid); if(root.IsEmpty()){err="store unavailable";return false;}
@@ -464,9 +481,11 @@ CONSOLE_APP_MAIN {
 		event.type = "milestone";
 		event.action = "Advance";
 		event.text = "Integrated milestone " + next;
-		for(const MultiAtlasVersion& version : input.meta.versions)
-			if(version.vid == next && IsTrial(version)) {
-				event.requires.Add(TrialAtom(version));
+		for(int i = 0; i < input.meta.versions.GetCount(); i++)
+			if(input.meta.versions[i].vid == next) {
+				int prior = PriorTrial(input.meta, i);
+				if(prior >= 0) event.requires.Add(TrialAtom(input.meta.versions[prior]));
+				if(IsTrial(input.meta, i)) event.requires.Add(TrialAtom(input.meta.versions[i]));
 				break;
 			}
 		if(!MultiAtlasPutTrackEvent(MultiAtlasResolveTrackStore(ens, "meta"), ens.meta_family,

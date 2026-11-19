@@ -8,6 +8,7 @@ NAMESPACE_UPP
 static int s_checks, s_failures;
 static String s_root, s_cli;
 static const char *GATE_VERSION = "1.0.0";
+static const char *BASELINE_VERSION = "0.0.0";
 static const char *TRIAL_VERSION = "1.0.999";
 
 struct CliResult {
@@ -155,8 +156,9 @@ static bool SeedMeta(const String& repo, const String& family, const String& req
 	meta.ensemble_name = "cli-fixture";
 	meta.title = "CLI fixture";
 	meta.meta_family = family;
-	meta.versions.Add(Version("m1", 1000000));
+	meta.versions.Add(Version("m1", 0));
 	if(!required.IsEmpty()) meta.versions[0].requires.Add(required);
+	meta.versions.Add(Version("m-after-baseline", 1000000));
 	auto& trial = meta.versions.Add(Version("m-trial", 1000999));
 	trial.requires.Add("alpha:tested:1.0.999");
 	meta.versions.Add(Version("m-next", 1001000)).requires.Add("tested:1.0.999");
@@ -296,10 +298,14 @@ static void ResolveCli()
 	}
 }
 
-static const char *TRIAL_DIR = ".multiatlas/meta-trials/1.0.999";
+static String TrialDir(const String& version)
+{
+	return ".multiatlas/meta-trials/" + version;
+}
 
 static bool WriteTrialEvidence(const String& repo, const String& source,
-                              const String& case_name)
+                               const String& case_name, const String& version = TRIAL_VERSION,
+                               const String& vid = "m-trial")
 {
 	ValueMap check;
 	check.Add("name", "integration");
@@ -308,7 +314,7 @@ static bool WriteTrialEvidence(const String& repo, const String& source,
 	checks.Add(check);
 	ValueMap report;
 	report.Add("source_commit", source);
-	report.Add("version", TRIAL_VERSION);
+	report.Add("version", version);
 	report.Add("result", "passed");
 	report.Add("checks", checks);
 	String report_json = AsJSON(report);
@@ -316,15 +322,71 @@ static bool WriteTrialEvidence(const String& repo, const String& source,
 	marker.Add("schema", "multiatlas-meta-trial/v1");
 	marker.Add("ensemble", case_name == "identity" ? "another-ensemble" : "cli-fixture");
 	marker.Add("track_id", "meta");
-	marker.Add("version", case_name == "wrong-version" ? "1.1.999" : TRIAL_VERSION);
-	marker.Add("meta_vid", "m-trial");
+	marker.Add("version", case_name == "wrong-version" ? "1.1.999" : version);
+	marker.Add("meta_vid", vid);
 	marker.Add("source_commit", source);
 	marker.Add("result", case_name == "failed" ? "failed" : "passed");
 	marker.Add("report", case_name == "traversal" ? "../report.json" : "report.json");
 	marker.Add("report_sha256", SHA256String(case_name == "hash" ? "different report" : report_json));
-	String dir = AppendFileName(repo, TRIAL_DIR);
+	String dir = AppendFileName(repo, TrialDir(version));
 	return RealizeDirectory(dir) && SaveFile(AppendFileName(dir, "report.json"), report_json) &&
-	       SaveFile(AppendFileName(dir, "evidence.json"), AsJSON(marker));
+	       SaveFile(AppendFileName(dir, "evidence.json"), case_name == "malformed" ? "{" : AsJSON(marker));
+}
+
+static void CheckResult(const CliResult& result, int expected_exit, const String& message,
+                        const String& label)
+{
+	bool pass = result.exit_code == expected_exit && result.out.Find(message) >= 0;
+	if(!pass) ShowFailure(label, result);
+	Check(pass, label);
+}
+
+static bool SeedBaselineEvidence(const String& site, const String& repo, const String& family)
+{
+	auto trial = [&] { return Invoke({site, "--ensemble", "cli-fixture", "--meta-trial-pass", BASELINE_VERSION}); };
+	CheckResult(trial(), 1, "committed meta trial evidence is missing", "baseline rejects missing evidence");
+	String source;
+	if(!Git(repo, {"rev-parse", "HEAD"}, &source)) return false;
+	const String dir = TrialDir(BASELINE_VERSION);
+	for(const String& status : {"malformed", "failed", "valid"}) {
+		if(!Git(repo, {"reset", "--mixed", source}) ||
+		   !WriteTrialEvidence(repo, source, status, BASELINE_VERSION, "m1") ||
+		   !Git(repo, {"add", "-f", "--", dir}) ||
+		   !Git(repo, {"commit", "-q", "-m", "record " + status + " baseline trial evidence"}))
+			return false;
+		if(status == "valid")
+			CheckResult(trial(), 1, "missing alpha:tested:1.0.0", "baseline requires the child gate");
+		else
+			CheckResult(trial(), 1, "identity, version, or passing result", "baseline rejects " + status + " evidence");
+	}
+	Check(!HasEvent(repo, family, "meta", "meta-trial-0.0.0", "gate-pass"),
+	      "baseline rejections append no test event");
+	return true;
+}
+
+static void AdvanceBaseline(const String& site, const String& repo, const String& family)
+{
+	auto advance = [&](const String& vid) { return Invoke({site, "--ensemble", "cli-fixture", "--meta-advance", vid}); };
+	auto check = [&] { return Invoke({site, "--ensemble", "cli-fixture", "--meta-check"}); };
+	CheckResult(check(), 1, "missing tested:0.0.0", "meta check requires the baseline after the child gate passes");
+	CheckResult(advance("m1"), 1, "missing tested:0.0.0", "initial milestone requires the baseline trial");
+	CheckResult(advance("m-after-baseline"), 1, "not the next", "advancement cannot skip the baseline milestone");
+	const String legacy_id = "legacy-baseline-milestone";
+	Check(AddEvent(repo, family, "meta", legacy_id, "m1", "milestone", "m1", "milestone",
+	               "Legacy milestone without a baseline event"), "seed a legacy initial milestone");
+	CheckResult(advance("m-after-baseline"), 1, "missing tested:0.0.0", "subsequent milestone requires the preceding baseline trial");
+	String legacy_path = AppendFileName(Store(repo, family), "events/" + family + ".ev-" + legacy_id + ".json");
+	Check(DeleteFile(legacy_path), "remove legacy baseline milestone fixture");
+
+	CliResult recorded = Invoke({site, "--ensemble", "cli-fixture", "--meta-trial-pass", "m1"});
+	bool trial_passed = recorded.exit_code == 0 && HasEvent(repo, family, "meta", "meta-trial-0.0.0", "gate-pass");
+	if(!trial_passed) ShowFailure("record baseline trial", recorded);
+	Check(trial_passed, "committed passing evidence records the meta-owned baseline trial");
+	CheckResult(check(), 0, "next=m1", "baseline trial leaves the initial milestone unadvanced");
+	CheckResult(advance("m-after-baseline"), 1, "not the next", "recorded baseline still requires sequential advancement");
+	CheckResult(advance("m1"), 0, "recorded milestone m1", "initial milestone advances with its baseline trial");
+	CheckResult(advance("m-after-baseline"), 0, "recorded milestone m-after-baseline",
+	            "subsequent milestone advances with the preceding baseline trial");
 }
 
 static void MetaTrialTests(const String& site, const String& meta_repo, const String& meta_family,
@@ -342,8 +404,8 @@ static void MetaTrialTests(const String& site, const String& meta_repo, const St
 		Check(pass, label);
 	};
 
-	rejected(trial("m1"), "configured .999", "trial rejects non-gate versions");
-	rejected(trial("../../1.0.999"), "configured .999", "trial rejects malformed version paths");
+	rejected(trial("m-after-baseline"), "first configured meta version or a .999", "trial rejects later non-gate versions");
+	rejected(trial("../../1.0.999"), "first configured meta version or a .999", "trial rejects malformed version paths");
 	rejected(trial(), "committed meta trial evidence is missing", "trial rejects missing evidence");
 	String source;
 	if(!Git(meta_repo, {"rev-parse", "HEAD"}, &source)) {
@@ -360,9 +422,9 @@ static void MetaTrialTests(const String& site, const String& meta_repo, const St
 	auto evidence_case = [&](const String& case_name, const String& message, const String& label) {
 		bool prepared = Git(meta_repo, {"reset", "--mixed", source}) &&
 		                WriteTrialEvidence(meta_repo, source, case_name) &&
-		                Git(meta_repo, {"add", "-f", "--", TRIAL_DIR});
+		                Git(meta_repo, {"add", "-f", "--", TrialDir(TRIAL_VERSION)});
 		if(prepared && case_name == "missing-report")
-			prepared = Git(meta_repo, {"rm", "-f", "--cached", "--", String(TRIAL_DIR) + "/report.json"});
+			prepared = Git(meta_repo, {"rm", "-f", "--cached", "--", TrialDir(TRIAL_VERSION) + "/report.json"});
 		if(prepared && case_name == "source-change")
 			prepared = SaveFile(AppendFileName(meta_repo, "README.md"), "Untested code change\n") &&
 			           Git(meta_repo, {"add", "--", "README.md"});
@@ -395,12 +457,12 @@ static void MetaTrialTests(const String& site, const String& meta_repo, const St
 		Check(false, "return to meta main");
 		return;
 	}
-	String report_path = AppendFileName(AppendFileName(meta_repo, TRIAL_DIR), "report.json");
+	String report_path = AppendFileName(AppendFileName(meta_repo, TrialDir(TRIAL_VERSION)), "report.json");
 	Check(SaveFile(report_path, "uncommitted replacement"), "modify committed trial report locally");
 	rejected(trial(), "uncommitted changes", "trial rejects local changes to its committed report");
-	Check(Git(meta_repo, {"checkout", "--", String(TRIAL_DIR) + "/report.json"}), "restore committed report");
+	Check(Git(meta_repo, {"checkout", "--", TrialDir(TRIAL_VERSION) + "/report.json"}), "restore committed report");
 
-	Check(!HasEvent(meta_repo, meta_family, "meta", "meta-trial-", "gate-pass"),
+	Check(!HasEvent(meta_repo, meta_family, "meta", "meta-trial-1.0.999", "gate-pass"),
 	      "rejected trials append no gate events");
 	Check(AddEvent(alpha_repo, alpha_family, "alpha", "trial-gate", "trial-v1", "element",
 	               "trial", "gate-pass", "child trial passed", {"tested:1.0.999"}, "GatePass") &&
@@ -445,6 +507,10 @@ static void CliTests()
 	String meta_repo = Repo("meta-repo-clean"), meta_family = "cli-meta-clean";
 	CliResult blocked_meta = Invoke({site, "--ensemble", "cli-fixture", "--meta-check"});
 	Check(blocked_meta.exit_code == 1, "meta check is blocked before required child gate proof");
+	if(!SeedBaselineEvidence(site, meta_repo, meta_family)) {
+		Check(false, "baseline evidence fixtures are committed");
+		return;
+	}
 	CliResult deps = Invoke({site, "--ensemble", "cli-fixture", "--deps"});
 	Check(deps.exit_code == 0 && deps.out.Find("alpha -> beta") >= 0 && deps.out.Find("alpha -> meta") >= 0,
 	      "dependency command prints the child DAG and topological order");
@@ -478,9 +544,6 @@ static void CliTests()
 	Check(verified_gate.exit_code == 0 && recorded_gate.exit_code == 0 &&
 	      HasEvent(meta_repo, meta_family, "meta", "gate-alpha-" + String(GATE_VERSION) + "-", "stage"),
 	      "verified gate proof passes and can be recorded in the meta event log");
-	CliResult clear_meta = Invoke({site, "--ensemble", "cli-fixture", "--meta-check"});
-	if(clear_meta.exit_code != 0) ShowFailure("meta-check", clear_meta);
-	Check(clear_meta.exit_code == 0, "meta check passes after the required child gate proof");
 	CliResult clean = Invoke({site, "--ensemble", "cli-fixture", "--check"});
 	Check(clean.exit_code == 0, "clean ensemble --check exits 0 (" + TrimBoth(clean.err) + ")");
 	CliResult json = Invoke({site, "--ensemble", "cli-fixture", "--check", "--json"});
@@ -491,15 +554,7 @@ static void CliTests()
 	}
 	catch(...) {}
 	Check(json_ok, "clean --check --json emits parseable JSON and exits 0");
-	CliResult advance = Invoke({site, "--ensemble", "cli-fixture", "--meta-advance", "m1"});
-	if(advance.exit_code != 0) ShowFailure("meta-advance", advance);
-	Vector<MultiAtlasEvent> meta_events;
-	String meta_error;
-	bool advanced = MultiAtlasLoadTrackEvents(Store(meta_repo, meta_family), meta_family, "meta", meta_events, meta_error);
-	bool found_advance = false;
-	for(const MultiAtlasEvent& event : meta_events)
-		if(event.type == "milestone" && event.text.Find("Integrated milestone m1") >= 0) found_advance = true;
-	Check(advance.exit_code == 0 && advanced && found_advance, "meta advance appends a milestone event");
+	AdvanceBaseline(site, meta_repo, meta_family);
 	MetaTrialTests(site, meta_repo, meta_family, alpha_repo, alpha_family);
 
 	CliResult feedback_alpha = Invoke({site, "--ensemble", "cli-fixture", "--track", "alpha", "--feedback", "--category", "docs", "--severity", "friction", "--note", "alpha note"});

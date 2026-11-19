@@ -42,8 +42,10 @@ The meta-map summarizes the ensemble; it does not replace track ownership. Make 
 
 ## Record a meta integration trial
 
+The first configured meta version requires a baseline trial, regardless of its version suffix. Subsequent trial gates are the versions ending in `.999`. Each milestone after the baseline requires the most recent preceding trial gate. A trial milestone also requires its own passing trial.
+
 1. Use the configured meta repository's `main` worktree. Once the child gate requirements are met, run the integration checks against the current source commit and capture its full hash.
-2. Save a JSON report under `.multiatlas/meta-trials/<version>/`. Use the dotted version ending in `.999`. List each check by name with its actual result. The report requires at least one check, unique check names, and a `passed` result for every check and the report itself.
+2. Save a JSON report under `.multiatlas/meta-trials/<version>/`. Use the dotted version of the baseline or `.999` milestone. List each check by name with its actual result. The report requires at least one check, unique check names, and a `passed` result for every check and the report itself.
 
    ```json
    {
@@ -113,7 +115,7 @@ NEXT_MILESTONE=replace-with-next-milestone
 # Once child gate proof is committed, validate and record its meta bridge.
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-record-gate vision "$GATE_VERSION"
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-check
-# For a .999 milestone, record the passing trial before advancing.
+# For the initial milestone or a .999 milestone, record the passing trial before advancing.
 # "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-trial-pass 1.2.999
 "$CLI" "$SITE" --ensemble "$ENSEMBLE" --meta-advance "$NEXT_MILESTONE"
 ```
