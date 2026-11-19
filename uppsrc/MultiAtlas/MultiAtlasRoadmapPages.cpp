@@ -24,6 +24,158 @@ String MultiAtlasRoadmapEsc(const String& s)
 	return String(b);
 }
 
+struct MultiAtlasCatalogProject : Moveable<MultiAtlasCatalogProject> {
+	String name, title, level;
+};
+
+// The selector mirrors Atlas' project catalog, but reads only project names,
+// titles, and visibility labels. MultiAtlas map/family/store content is always
+// loaded from the independent MultiAtlas registry and stores below.
+static bool LoadAtlasProjectCatalog(const String& site_dir,
+                                    Vector<MultiAtlasCatalogProject>& projects, String& error)
+{
+	projects.Clear();
+	error.Clear();
+	String path = AppendFileName(AppendFileName(AppendFileName(site_dir, "engine"), "atlas"), "projects.json");
+	if(!FileExists(path)) return true;
+	FileIn in(path);
+	if(!in.IsOpen()) {
+		error = "cannot read Atlas project catalog";
+		return false;
+	}
+	if(in.GetLeft() > 4 * 1024 * 1024) {
+		error = "Atlas project catalog exceeds 4 MiB";
+		return false;
+	}
+	String json;
+	while(!in.IsEof()) {
+		int count = min(8192, (int)in.GetLeft());
+		if(count <= 0) break;
+		json.Cat(in.Get(count));
+	}
+	Value root;
+	try {
+		root = ParseJSON(json);
+	}
+	catch(...) {
+		error = "Atlas project catalog is not valid JSON";
+		return false;
+	}
+	if(!root.Is<ValueMap>()) {
+		error = "Atlas project catalog root must be an object";
+		return false;
+	}
+	ValueMap top = root;
+	Value list = top.Get("projects");
+	if(!list.Is<ValueArray>()) return true;
+	ValueArray entries = list;
+	for(const Value& value : entries) {
+		if(!value.Is<ValueMap>()) {
+			error = "Atlas project catalog entry must be an object";
+			projects.Clear();
+			return false;
+		}
+		ValueMap row = value;
+		MultiAtlasCatalogProject project;
+		Value name = row.Get("name"), title = row.Get("title"), level = row.Get("level");
+		if(!name.Is<String>() || TrimBoth((String)name).IsEmpty()) {
+			error = "Atlas project catalog entry has no project name";
+			projects.Clear();
+			return false;
+		}
+		project.name = TrimBoth((String)name);
+		project.title = title.Is<String>() ? TrimBoth((String)title) : String();
+		if(project.title.IsEmpty()) project.title = project.name;
+		project.level = level.Is<String>() ? ToLower(TrimBoth((String)level)) : "private";
+		for(const MultiAtlasCatalogProject& prior : projects)
+			if(prior.name == project.name) {
+				error = "Atlas project catalog contains duplicate project names";
+				projects.Clear();
+				return false;
+			}
+		projects.Add(pick(project));
+	}
+	return true;
+}
+
+static const MultiAtlasEnsembleDef *FindCatalogEnsemble(const Vector<MultiAtlasEnsembleDef>& ensembles,
+                                                        const String& name)
+{
+	for(const MultiAtlasEnsembleDef& ensemble : ensembles)
+		if(ensemble.name == name) return &ensemble;
+	return NULL;
+}
+
+static String MultiAtlasProjectRows(WebRequest& r, const Vector<MultiAtlasCatalogProject>& projects,
+                                    const Vector<MultiAtlasEnsembleDef>& ensembles)
+{
+	StringBuffer rows;
+	int count = 0;
+	for(const MultiAtlasCatalogProject& project : projects) {
+		// Match Atlas' public project index for anonymous viewers. MultiAtlas
+		// visibility is checked independently on the matched ensemble below.
+		if(project.level != "public") continue;
+		const MultiAtlasEnsembleDef *ensemble = FindCatalogEnsemble(ensembles, project.name);
+		rows << "<tr><td>" << MultiAtlasRoadmapEsc(project.title) << "</td><td>"
+		     << MultiAtlasRoadmapEsc(project.name) << "</td><td>";
+		if(!ensemble) rows << "Not configured for MultiAtlas";
+		else if(!ensemble->public_read && !r.HasUser()) rows << "Sign-in required";
+		else rows << "<a href=\"" << MultiAtlasRoadmapEsc(r.Site().Url("multiatlas/" + ensemble->name))
+		          << "\">Open MultiAtlas map</a>";
+		rows << "</td><td>" << (ensemble ? AsString(ensemble->tracks.GetCount()) : String("—")) << "</td></tr>";
+		count++;
+	}
+	if(!count) return "<p>No public Atlas projects are listed.</p>";
+	return "<table><thead><tr><th>Project</th><th>Project ID</th><th>MultiAtlas</th><th>Tracks</th></tr></thead><tbody>"
+	     + String(rows) + "</tbody></table>";
+}
+
+static void ProjectList(WebRequest& r)
+{
+	String site_dir = MultiAtlasRoadmapSiteRoot(r.Site()), error;
+	Vector<MultiAtlasEnsembleDef> ensembles;
+	if(!MultiAtlasLoadRegistry(site_dir, ensembles, error)) {
+		r.Status(500, "MultiAtlas project registry unavailable");
+		return;
+	}
+	Vector<MultiAtlasCatalogProject> projects;
+	String catalog_error;
+	bool catalog_ok = LoadAtlasProjectCatalog(site_dir, projects, catalog_error);
+	StringBuffer body;
+	body << "<main><h1>MultiAtlas projects</h1><p>Select a project to open its multi-map roadmap."
+	         " This selector uses Atlas' public project names; every map, track, replay, and event comes from the separate MultiAtlas registry and stores.</p>";
+	if(!catalog_ok)
+		body << "<p role=\"status\">Atlas project list unavailable; showing registered MultiAtlas ensembles.</p>";
+	if(catalog_ok && !projects.IsEmpty())
+		body << MultiAtlasProjectRows(r, projects, ensembles);
+	else {
+		StringBuffer rows;
+		int count = 0;
+		for(const MultiAtlasEnsembleDef& ensemble : ensembles) {
+			if(!ensemble.public_read && !r.HasUser()) continue;
+			rows << "<tr><td>" << MultiAtlasRoadmapEsc(ensemble.title) << "</td><td>"
+			     << MultiAtlasRoadmapEsc(ensemble.name) << "</td><td><a href=\""
+			     << MultiAtlasRoadmapEsc(r.Site().Url("multiatlas/" + ensemble.name))
+			     << "\">Open MultiAtlas map</a></td><td>" << ensemble.tracks.GetCount() << "</td></tr>";
+			count++;
+		}
+		if(count)
+			body << "<table><thead><tr><th>Project</th><th>Project ID</th><th>MultiAtlas</th><th>Tracks</th></tr></thead><tbody>"
+			     << String(rows) << "</tbody></table>";
+		else body << "<p>No MultiAtlas projects are configured.</p>";
+	}
+	body << "</main>";
+	WebsiteShell shell;
+	shell.title = "MultiAtlas projects";
+	shell.brand = "MultiAtlas";
+	shell.brand_href = r.Site().Url("");
+	shell.html_attributes = " lang=\"en\"" + WebsiteThemeHtmlAttributes(String(), String());
+	shell.head_script = WebsiteThemeHeadScript();
+	shell.topbar_html = WebsiteThemeControlsHtml();
+	shell.body = String(body);
+	r.Html(RenderAdminShell(shell));
+}
+
 static String MultiAtlasRoadmapTrackTitle(const String& id)
 {
 	if(id == "vision") return "Track: Vision";
@@ -239,6 +391,7 @@ void TrackDetail(WebRequest& r)
 void InstallMultiAtlasRoadmapPages(EngineSite& site)
 {
 	InstallMultiAtlasDashboard(site);
+	site.Router().Add("", ProjectList);
 	site.Router().Add("GET", "multiatlas/*/track/*", TrackDetail);
 	site.Router().Add("GET", "multiatlas/*", Overview);
 }
