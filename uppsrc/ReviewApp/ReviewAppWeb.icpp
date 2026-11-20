@@ -162,6 +162,118 @@ static void LabelPut(WebRequest& r)
 	r.Json(out, 201);
 }
 
+// ---- Pages: queue list, item detail with the decision form, and the form's POST target ----
+
+static const char *ReviewBrand = "Review";
+
+static bool PageGate(WebRequest& r, const String& title)
+{
+	if(HasRole(r, ReviewerRoles()))
+		return true;
+	WebAppRenderPage(r, ReviewBrand, title, "<p>A reviewer or admin role is required.</p>" + WebAppSignInHint(r));
+	return false;
+}
+
+static String StatusLink(WebRequest& r, const String& status)
+{
+	return "<a href=\"" + WebAppEscape(r.Site().Url("") + "?status=" + status) + "\">"
+	       + WebAppEscape(status.IsEmpty() ? String("all") : status) + "</a> ";
+}
+
+static void PageList(WebRequest& r)
+{
+	if(!PageGate(r, "Review queue"))
+		return;
+	String status = r.Param("status");
+	int offset = r.Param("offset").IsEmpty() ? 0 : r.IntParam("offset");
+	const int limit = 20;
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewPage page;
+	StoreResult s = q.Page(status, offset, limit, page);
+	if(!s) {
+		WebAppRenderPage(r, ReviewBrand, "Review queue", "<p>" + WebAppEscape(s.error) + "</p>");
+		return;
+	}
+	String b;
+	b << "<p>Show: " << StatusLink(r, "") << StatusLink(r, "open") << StatusLink(r, "accept")
+	  << StatusLink(r, "correct") << StatusLink(r, "reject") << StatusLink(r, "uncertain") << "</p>";
+	b << "<table><tr><th>Item</th><th>Status</th><th>Proposed</th><th>Label</th><th>Reviewer</th><th>Revision</th></tr>";
+	for(const ReviewItem& it : page.items)
+		b << "<tr><td><a href=\"" << WebAppEscape(r.Site().Url("item/" + it.id)) << "\">" << WebAppEscape(it.id)
+		  << "</a></td><td>" << WebAppEscape(it.status) << "</td><td>" << WebAppEscape(it.proposed_label)
+		  << "</td><td>" << WebAppEscape(it.label) << "</td><td>" << WebAppEscape(it.reviewer)
+		  << "</td><td>" << WebAppEscape(it.revision) << "</td></tr>";
+	b << "</table><p>" << page.total << " matching items";
+	String base = r.Site().Url("") + "?status=" + status + "&offset=";
+	if(offset > 0)
+		b << " <a href=\"" << WebAppEscape(base + AsString(max(0, offset - limit))) << "\">Previous</a>";
+	if(offset + limit < page.total)
+		b << " <a href=\"" << WebAppEscape(base + AsString(offset + limit)) << "\">Next</a>";
+	b << "</p>";
+	WebAppRenderPage(r, ReviewBrand, "Review queue", b);
+}
+
+static void PageItem(WebRequest& r)
+{
+	if(!PageGate(r, "Item"))
+		return;
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewItem it;
+	StoreResult s = q.Get(r.PathArg(0), it);
+	if(!s) {
+		r.Status(404, "Not found");
+		WebAppRenderPage(r, ReviewBrand, "Item", "<p>" + WebAppEscape(s.error) + "</p>");
+		return;
+	}
+	Vector<ReviewLabel> labels;
+	q.ListLabels(labels);
+	String b;
+	b << "<dl><dt>Image blob</dt><dd>" << WebAppEscape(it.image_blob) << "</dd>"
+	  << "<dt>Source</dt><dd>" << WebAppEscape(it.source_ref) << "</dd>"
+	  << "<dt>Proposed label</dt><dd>" << WebAppEscape(it.proposed_label) << "</dd>"
+	  << "<dt>Status</dt><dd>" << WebAppEscape(it.status) << "</dd>"
+	  << "<dt>Label</dt><dd>" << WebAppEscape(it.label) << "</dd>"
+	  << "<dt>Text</dt><dd>" << WebAppEscape(it.text) << "</dd>"
+	  << "<dt>Reviewer</dt><dd>" << WebAppEscape(it.reviewer) << "</dd>"
+	  << "<dt>Revision</dt><dd>" << WebAppEscape(it.revision) << "</dd></dl>";
+	b << "<form method=\"post\" action=\"" << WebAppEscape(r.Site().Url("decide")) << "\">"
+	  << "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" << WebAppEscape(r.CsrfToken()) << "\">"
+	  << "<input type=\"hidden\" name=\"id\" value=\"" << WebAppEscape(it.id) << "\">"
+	  << "<input type=\"hidden\" name=\"revision\" value=\"" << WebAppEscape(it.revision) << "\">"
+	  << "<label>Decision <select name=\"decision\">"
+	  << "<option>accept</option><option>correct</option><option>reject</option><option>uncertain</option>"
+	  << "</select></label> "
+	  << "<label>Label <select name=\"label\"><option value=\"\">(none)</option>";
+	for(const ReviewLabel& l : labels)
+		b << "<option value=\"" << WebAppEscape(l.id) << "\">" << WebAppEscape(l.name)
+		  << (l.requires_text ? " (text required)" : "") << "</option>";
+	b << "</select></label> "
+	  << "<label>Text <input name=\"text\" maxlength=\"2000\"></label> "
+	  << "<button type=\"submit\">Record decision</button></form>";
+	WebAppRenderPage(r, ReviewBrand, "Item " + it.id, b);
+}
+
+static void PageDecide(WebRequest& r)
+{
+	if(!PageGate(r, "Decision"))
+		return;
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	String id = r.Param("id");
+	ReviewItem it;
+	StoreResult s = q.Decide(id, r.Param("decision"), r.Param("label"), r.Param("text"),
+	                         r.User().user_id, r.Param("revision"), it);
+	if(!s) {
+		String msg = WebAppEscape(s.error);
+		if(s.conflict)
+			msg << " The item changed after you opened it; reload it to see the current revision.";
+		WebAppRenderPage(r, ReviewBrand, "Decision refused",
+		                 "<p>" + msg + "</p><p><a href=\"" + WebAppEscape(r.Site().Url("item/" + id))
+		                 + "\">Back to the item</a></p>");
+		return;
+	}
+	r.Redirect(r.Site().Url("item/" + id));
+}
+
 class ReviewWebApp : public WebApp {
 public:
 	String         Id() const override { return "ReviewApp"; }
@@ -170,6 +282,9 @@ public:
 	Vector<String> Roles() const override { return ReviewerRoles(); }
 
 	void Install(EngineSite& site, WebAppContext& ctx) override {
+		site.Router().Add("GET", "", PageList);
+		site.Router().Add("GET", "item/*", PageItem);
+		site.Router().Add("POST", "decide", PageDecide);
 		site.Router().Add("GET", "api/items", ItemsList);
 		site.Router().Add("GET", "api/items/*", ItemGet);
 		site.Router().Add("POST", "api/items/decide", ItemDecide);
