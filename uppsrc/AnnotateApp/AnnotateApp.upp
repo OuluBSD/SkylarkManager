@@ -1,0 +1,11 @@
+description "Annotation model: window classes with three anchors, frames with layers, labelled regions, anchor snapping, rescaling between window classes, radial slot extrapolation, crop export with a manifest, WebApp AnnotateApp\377";
+
+uses
+	Core,
+	WebStorage,
+	WebAppHost;
+
+file
+	AnnotateApp.h,
+	AnnotateApp.cpp,
+	AnnotateAppWeb.icpp;

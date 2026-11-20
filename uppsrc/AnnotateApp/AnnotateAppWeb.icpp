@@ -1,0 +1,338 @@
+#include "AnnotateApp.h"
+#include <WebAppHost/WebAppHost.h>
+
+NAMESPACE_UPP
+
+// WebApp "AnnotateApp": JSON routes over AnnotateStore, the geometry operations and the site's blob store.
+// Every route needs the annotator or admin role. POST bodies are JSON; record writes take the expected
+// revision in the revision parameter (RecordAbsent when it is empty).
+
+static const char *AnnotateRoles = "annotator,admin";
+static const char *BlobCollection = "annotate-blobs";
+
+static bool HasRole(WebRequest& r)
+{
+	if(!r.HasUser())
+		return false;
+	return FindIndex(r.User().roles, String("annotator")) >= 0 || FindIndex(r.User().roles, String("admin")) >= 0;
+}
+
+static ValueMap Err(const String& error)
+{
+	ValueMap e;
+	e.Add("ok", false);
+	e.Add("error", error);
+	return e;
+}
+
+static bool RequireRole(WebRequest& r)
+{
+	if(HasRole(r))
+		return true;
+	r.Json(Err("annotator role required"), r.HasUser() ? 403 : 401);
+	return false;
+}
+
+static int ErrorCode(const StoreResult& s)
+{
+	if(s.conflict)
+		return 409;
+	if(s.error.Find("not found") >= 0 || s.error.Find("unknown") >= 0)
+		return 404;
+	return 400;
+}
+
+template <class T>
+static bool ReadBody(WebRequest& r, T& out)
+{
+	try {
+		LoadFromJson(out, r.Body());
+	}
+	catch(Exc&) {
+		return false;
+	}
+	return true;
+}
+
+static String RevisionOf(WebRequest& r)
+{
+	String rev = r.Param("revision");
+	return rev.IsEmpty() ? String(RecordAbsent()) : rev;
+}
+
+static ValueMap RectValue(const AnnRect& r)
+{
+	ValueMap m;
+	m.Add("x", r.x);
+	m.Add("y", r.y);
+	m.Add("w", r.w);
+	m.Add("h", r.h);
+	return m;
+}
+
+static ValueMap PointValue(AnnPoint p)
+{
+	ValueMap m;
+	m.Add("x", p.x);
+	m.Add("y", p.y);
+	return m;
+}
+
+static void WindowsList(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Vector<WindowClass> all;
+	StoreResult s = st.ListWindowClasses(all);
+	if(!s) { r.Json(Err(s.error), 400); return; }
+	ValueArray rows;
+	for(const WindowClass& wc : all) {
+		ValueMap m;
+		m.Add("id", wc.id);
+		m.Add("name", wc.name);
+		m.Add("width", wc.width);
+		m.Add("height", wc.height);
+		m.Add("revision", wc.revision);
+		rows.Add(m);
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("window_classes", rows);
+	r.Json(out);
+}
+
+static void WindowPut(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	WindowClass wc;
+	if(!ReadBody(r, wc)) { r.Json(Err("body is not a window class"), 400); return; }
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	StoreResult s = st.PutWindowClass(wc, RevisionOf(r));
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", wc.id);
+	r.Json(out, 201);
+}
+
+static void FramesList(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Vector<Frame> all;
+	StoreResult s = st.ListFrames(all);
+	if(!s) { r.Json(Err(s.error), 400); return; }
+	ValueArray rows;
+	for(const Frame& f : all) {
+		ValueMap m;
+		m.Add("id", f.id);
+		m.Add("window_class", f.window_class);
+		m.Add("image_blob", f.image_blob);
+		m.Add("content_type", f.content_type);
+		m.Add("revision", f.revision);
+		rows.Add(m);
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("frames", rows);
+	r.Json(out);
+}
+
+static void FramePut(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	Frame f;
+	if(!ReadBody(r, f)) { r.Json(Err("body is not a frame"), 400); return; }
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	StoreResult s = st.PutFrame(f, RevisionOf(r));
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", f.id);
+	r.Json(out, 201);
+}
+
+static void FrameRegions(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Vector<Region> all;
+	StoreResult s = st.ListRegions(r.PathArg(0), all);
+	if(!s) { r.Json(Err(s.error), 400); return; }
+	ValueArray rows;
+	for(const Region& rg : all) {
+		ValueMap m;
+		m.Add("id", rg.id);
+		m.Add("layer", rg.layer);
+		m.Add("rect", RectValue(rg.rect));
+		m.Add("label", rg.label);
+		m.Add("slot_group", rg.slot_group);
+		m.Add("text_hint", rg.text_hint);
+		m.Add("revision", rg.revision);
+		rows.Add(m);
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("regions", rows);
+	r.Json(out);
+}
+
+static void RegionPut(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	Region rg;
+	if(!ReadBody(r, rg)) { r.Json(Err("body is not a region"), 400); return; }
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	StoreResult s = st.PutRegion(rg, RevisionOf(r));
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", rg.id);
+	r.Json(out, 201);
+}
+
+static void OpSnap(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	Value v;
+	try {
+		v = ParseJSON(r.Body());
+	}
+	catch(Exc&) {
+		r.Json(Err("body is not JSON"), 400);
+		return;
+	}
+	if(!v.Is<ValueMap>()) { r.Json(Err("body must be an object"), 400); return; }
+	ValueMap b = v;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	WindowClass wc;
+	StoreResult s = st.GetWindowClass(String(b["window_class"]), wc);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	AnnPoint snapped;
+	int index = -1;
+	bool hit = SnapToAnchor(wc, AnnPoint((int)b["x"], (int)b["y"]), (int)b["max_distance"], snapped, index);
+	ValueMap out = PointValue(snapped);
+	out.Add("ok", true);
+	out.Add("snapped", hit);
+	out.Add("anchor", index);
+	r.Json(out);
+}
+
+static void OpRescale(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	Value v;
+	try {
+		v = ParseJSON(r.Body());
+	}
+	catch(Exc&) {
+		r.Json(Err("body is not JSON"), 400);
+		return;
+	}
+	if(!v.Is<ValueMap>()) { r.Json(Err("body must be an object"), 400); return; }
+	ValueMap b = v;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	WindowClass from, to;
+	StoreResult s1 = st.GetWindowClass(String(b["from"]), from);
+	if(!s1) { r.Json(Err(s1.error), ErrorCode(s1)); return; }
+	StoreResult s2 = st.GetWindowClass(String(b["to"]), to);
+	if(!s2) { r.Json(Err(s2.error), ErrorCode(s2)); return; }
+	ValueMap rv = b["rect"];
+	AnnRect in((int)rv["x"], (int)rv["y"], (int)rv["w"], (int)rv["h"]), out_rect;
+	String error;
+	if(!RescaleRect(from, to, in, out_rect, error)) { r.Json(Err(error), 400); return; }
+	ValueMap out = RectValue(out_rect);
+	out.Add("ok", true);
+	r.Json(out);
+}
+
+static void OpExtrapolate(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	Value v;
+	try {
+		v = ParseJSON(r.Body());
+	}
+	catch(Exc&) {
+		r.Json(Err("body is not JSON"), 400);
+		return;
+	}
+	if(!v.Is<ValueMap>()) { r.Json(Err("body must be an object"), 400); return; }
+	ValueMap b = v;
+	ValueMap c = b["centre"], sd = b["seed"];
+	Vector<AnnPoint> slots;
+	String error;
+	if(!ExtrapolateSlots(AnnPoint((int)c["x"], (int)c["y"]), AnnPoint((int)sd["x"], (int)sd["y"]),
+	                     (double)b["step"], (int)b["count"], slots, error)) {
+		r.Json(Err(error), 400);
+		return;
+	}
+	ValueArray rows;
+	for(AnnPoint p : slots)
+		rows.Add(PointValue(p));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("slots", rows);
+	r.Json(out);
+}
+
+// Crops every region of a frame from its raw image, stores each crop as a blob "crop-<region>"
+// of the same site, and returns the manifest.
+static void FrameExport(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Frame f;
+	StoreResult s = st.GetFrame(r.PathArg(0), f);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	if(f.image_blob.IsEmpty()) { r.Json(Err("frame has no image"), 400); return; }
+	BlobStore blobs(r.Site().id, r.Site().data_root, BlobCollection, BlobStore::DefaultMaxBytes);
+	String bytes;
+	BlobRecord meta;
+	StoreResult g = blobs.Get(f.image_blob, bytes, meta);
+	if(!g) { r.Json(Err(g.error), ErrorCode(g)); return; }
+	Vector<Region> regions;
+	StoreResult lr = st.ListRegions(f.id, regions);
+	if(!lr) { r.Json(Err(lr.error), 400); return; }
+	Vector<CropResult> crops;
+	String manifest, error;
+	if(!ExportCrops(f.id, bytes, meta.width, meta.height, f.content_type, regions, crops, manifest, error)) {
+		r.Json(Err(error), 400);
+		return;
+	}
+	for(const CropResult& c : crops) {
+		BlobRecord stored;
+		StoreResult w = blobs.Put("crop-" + c.region, c.bytes, f.content_type, c.rect.w, c.rect.h,
+		                          c.checksum, String(), stored);
+		if(!w) { r.Json(Err(w.error), 400); return; }
+	}
+	r.Plain(manifest, "application/json; charset=UTF-8");
+}
+
+class AnnotateWebApp : public WebApp {
+public:
+	String         Id() const override { return "AnnotateApp"; }
+	String         Title() const override { return "Annotation"; }
+	int            DefaultPort() const override { return 18430; }
+	Vector<String> Roles() const override { Vector<String> v; v.Add("annotator"); v.Add("admin"); return v; }
+
+	void Install(EngineSite& site, WebAppContext& ctx) override {
+		site.Router().Add("GET", "api/window-classes", WindowsList);
+		site.Router().Add("POST", "api/window-classes", WindowPut);
+		site.Router().Add("GET", "api/frames", FramesList);
+		site.Router().Add("POST", "api/frames", FramePut);
+		site.Router().Add("GET", "api/frames/regions/*", FrameRegions);
+		site.Router().Add("POST", "api/frames/export/*", FrameExport);
+		site.Router().Add("POST", "api/regions", RegionPut);
+		site.Router().Add("POST", "api/ops/snap", OpSnap);
+		site.Router().Add("POST", "api/ops/rescale", OpRescale);
+		site.Router().Add("POST", "api/ops/extrapolate", OpExtrapolate);
+		InstallBlobRoutes(site, BlobCollection, BlobStore::DefaultMaxBytes, AnnotateRoles, AnnotateRoles);
+	}
+};
+
+INITBLOCK {
+	RegisterWebapp<AnnotateWebApp>("AnnotateApp");
+}
+
+END_UPP_NAMESPACE

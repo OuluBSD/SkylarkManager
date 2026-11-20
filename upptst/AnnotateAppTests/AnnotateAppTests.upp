@@ -1,0 +1,9 @@
+description "AnnotateApp self-test: anchor snapping, rescale between window classes, radial slot extrapolation, crop export with manifest, store refusals\377";
+
+uses
+	Core,
+	AnnotateApp,
+	WebAppHost;
+
+file
+	AnnotateAppTests.cpp;
