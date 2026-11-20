@@ -49,6 +49,37 @@ bool AtlasPkgValid(const String& pkg)
 	return true;
 }
 
+AtlasLocalAtomCheck AtlasCheckLocalAtom(const String& workspace, const String& atom)
+{
+	AtlasLocalAtomCheck result;
+	String pkg;
+	if(atom.StartsWith("built:"))
+		pkg = atom.Mid(6);
+	else if(atom.StartsWith("realized:"))
+		pkg = atom.Mid(9);
+	else {
+		result.status = "NOT CHECKED";
+		result.path = atom.StartsWith("artifact:") ? "artifact atom (not inspected)" : "atom not inspected locally";
+		return result;
+	}
+
+	String dir = AppendFileName(AppendFileName(workspace, "uppsrc"), pkg);
+	result.path = AppendFileName(dir, "*.upp");
+	bool has_package_file = false;
+	if(!pkg.IsEmpty() && AtlasPkgValid(pkg) && DirectoryExists(dir)) {
+		FindFile ff(result.path);
+		has_package_file = ff;
+	}
+	result.status = has_package_file ? "OK" : "MISSING";
+	return result;
+}
+
+String AtlasPlacementReason(const Vector<String>& entry)
+{
+	return entry.IsEmpty() ? "placed here by the owner (no reason recorded)"
+	                       : "earliest version where its entry holds";
+}
+
 bool AtlasStatusValid(const String& status)
 {
 	return status == "hot" || status == "active" || status == "planned" || status == "not-ready"
@@ -1263,6 +1294,52 @@ String AtlasWarningId(const AtlasRoadmapMessage& m)
 	return String(hex);
 }
 
+bool AtlasWarningIdValid(const String& id)
+{
+	if(id.GetCount() != 16)
+		return false;
+	for(int i = 0; i < id.GetCount(); i++)
+		if(String("0123456789abcdef").Find(id[i]) < 0)
+			return false;
+	return true;
+}
+
+bool AtlasBuildWarningAck(const Vector<AtlasRoadmapMessage>& findings, const String& raw_id, const String& raw_comment,
+                          const String& actor, const String& at, AtlasWarningAck& out, int& http_status, String& error)
+{
+	String id = TrimBoth(raw_id);
+	String comment = TrimBoth(raw_comment);
+	if(!AtlasWarningIdValid(id)) {
+		http_status = 400;
+		error = "id must be the warning id from the warnings list";
+		return false;
+	}
+	if(comment.IsEmpty()) {
+		http_status = 400;
+		error = "a warning needs a comment: say why it is acceptable, or what will change";
+		return false;
+	}
+	for(const AtlasRoadmapMessage& m : findings) {
+		if(m.severity != "warning" || AtlasWarningId(m) != id)
+			continue;
+		out.warning_id = id;
+		out.rule = m.rule;
+		out.subject_kind = m.subject_kind;
+		out.subject_id = m.subject_id;
+		out.vid = m.vid;
+		out.text = m.text;
+		out.comment = comment;
+		out.actor = actor;
+		out.at = at;
+		http_status = 200;
+		error.Clear();
+		return true;
+	}
+	http_status = 404;
+	error = "no current warning has that id";
+	return false;
+}
+
 // The ledger: every warning needs a comment from a person. A warning without one is an error at the head, so
 // the head stays red until each warning is acknowledged. The error is named after the warning, not its subject.
 static void AddLedger(Vector<AtlasRoadmapMessage>& out, const Vector<AtlasWarningAck>& acks, const AtlasFamily& f)
@@ -1983,6 +2060,256 @@ bool AtlasSafeSourcePath(const String& path)
 		if((byte)path[i] < 32)
 			return false;
 	return true;
+}
+
+static bool ArtifactManifestString(const ValueMap& map, const char *key, String& out)
+{
+	int i = map.Find(key);
+	if(i < 0 || !IsString(map.GetValue(i)))
+		return false;
+	out = map.GetValue(i);
+	return !out.IsEmpty();
+}
+
+static bool ArtifactManifestInteger(const Value& value, const String& field, int64& number, String& error)
+{
+	if(value.Is<int>())
+		number = (int)value;
+	else if(value.Is<int64>())
+		number = (int64)value;
+	else if(value.Is<double>()) {
+		double parsed = value;
+		if(parsed < -9223372036854775808.0 || parsed >= 9223372036854775808.0 || (double)(int64)parsed != parsed) {
+			error = field + " must be an integer";
+			return false;
+		}
+		number = (int64)parsed;
+	}
+	else {
+		error = field + " must be an integer";
+		return false;
+	}
+	return true;
+}
+
+static bool ArtifactManifestMinimum(const ValueMap& map, bool& specified, int64& minimum, String& error)
+{
+	int i = map.Find("min_bytes");
+	specified = i >= 0;
+	minimum = 0;
+	if(!specified)
+		return true;
+	if(!ArtifactManifestInteger(map.GetValue(i), "min_bytes", minimum, error))
+		return false;
+	if(minimum < 0) {
+		error = "min_bytes must not be negative";
+		return false;
+	}
+	return true;
+}
+
+static bool ArtifactManifestMinFiles(const ValueMap& map, int64& minimum, String& error)
+{
+	int i = map.Find("min_files");
+	if(i < 0) {
+		error = "file_list artifact requires min_files of at least 1";
+		return false;
+	}
+	if(!ArtifactManifestInteger(map.GetValue(i), "min_files", minimum, error))
+		return false;
+	if(minimum < 1) {
+		error = "file_list min_files must be at least 1";
+		return false;
+	}
+	return true;
+}
+
+bool AtlasCheckArtifactManifest(const Vector<String>& names, const String& manifest_path,
+                                Vector<AtlasArtifactCheck>& out, String& error)
+{
+	out.Clear();
+	error.Clear();
+	int64 manifest_size = GetFileLength(manifest_path);
+	if(manifest_size <= 0 || manifest_size > 1024 * 1024) {
+		error = "manifest is missing, empty, or exceeds 1 MiB";
+		return false;
+	}
+	Value document;
+	try {
+		document = ParseJSON(LoadFile(manifest_path));
+	}
+	catch(Exc& e) {
+		error = String("invalid manifest JSON: ") + e;
+		return false;
+	}
+	if(!document.Is<ValueMap>()) {
+		error = "manifest root must be an object";
+		return false;
+	}
+	ValueMap manifest = document;
+	Value root_value = manifest.Get("roots");
+	Value artifact_value = manifest.Get("artifacts");
+	if(!root_value.Is<ValueMap>() || !artifact_value.Is<ValueMap>()) {
+		error = "manifest must contain roots and artifacts objects";
+		return false;
+	}
+	ValueMap roots = root_value;
+	ValueMap artifacts = artifact_value;
+	VectorMap<String, String> root_paths;
+	for(int i = 0; i < roots.GetCount(); i++) {
+		String name = roots.GetKey(i).ToString();
+		Value root_path = roots.GetValue(i);
+		if(!AtlasIdValid(name) || !IsString(root_path) || !IsFullPath(root_path.ToString())) {
+			error = "each manifest root must map a name to an absolute path";
+			return false;
+		}
+		root_paths.Add(name, NormalizePath(root_path.ToString()));
+	}
+
+	for(const String& name : names) {
+		if(name.IsEmpty()) {
+			error = "artifact name must not be empty";
+			return false;
+		}
+		AtlasArtifactCheck check;
+		check.name = name;
+		int ai = artifacts.Find(name);
+		if(ai < 0) {
+			check.status = "NOT DECLARED";
+			check.path = "(not declared)";
+			check.reason = "not declared in manifest";
+			out.Add(pick(check));
+			continue;
+		}
+		Value artifact_value = artifacts.GetValue(ai);
+		if(!artifact_value.Is<ValueMap>()) {
+			error = "artifact " + name + " must be an object";
+			return false;
+		}
+		ValueMap artifact = artifact_value;
+		String root_name, relative;
+		int kind_index = artifact.Find("kind");
+		if(kind_index >= 0) {
+			Value kind_value = artifact.GetValue(kind_index);
+			if(!IsString(kind_value)) {
+				error = "artifact " + name + " kind must be a string";
+				return false;
+			}
+			check.kind = kind_value.ToString();
+		}
+		if(check.kind != "file" && check.kind != "file_list") {
+			error = "artifact " + name + " kind must be file or file_list";
+			return false;
+		}
+		if(!ArtifactManifestString(artifact, "root", root_name) ||
+		   !ArtifactManifestString(artifact, "path", relative) || !AtlasSafeSourcePath(relative)) {
+			error = "artifact " + name + " requires a known root and a safe relative path";
+			return false;
+		}
+		String pattern;
+		int pattern_index = artifact.Find("pattern");
+		if(pattern_index >= 0) {
+			Value pattern_value = artifact.GetValue(pattern_index);
+			if(!IsString(pattern_value)) {
+				error = "artifact " + name + " pattern must be a string suffix";
+				return false;
+			}
+			pattern = pattern_value.ToString();
+			if(pattern.IsEmpty() || pattern.Find('/') >= 0 || pattern.Find('\\') >= 0) {
+				error = "artifact " + name + " pattern must be a non-empty file-name suffix";
+				return false;
+			}
+		}
+		int ri = root_paths.Find(root_name);
+		if(ri < 0) {
+			error = "artifact " + name + " names an undeclared root " + root_name;
+			return false;
+		}
+		bool has_minimum = false;
+		int64 minimum = 0;
+		if(!ArtifactManifestMinimum(artifact, has_minimum, minimum, error))
+			return false;
+		if(check.kind == "file_list" && !ArtifactManifestMinFiles(artifact, check.min_files, error))
+			return false;
+		String root = root_paths[ri];
+		check.path = NormalizePath(AppendFileName(root, relative));
+		String prefix = root.EndsWith("/") ? root : root + "/";
+		if(!check.path.StartsWith(prefix) && check.path != root) {
+			error = "artifact " + name + " path escapes its root";
+			return false;
+		}
+		if(!DirectoryExists(root)) {
+			check.status = "MISSING";
+			check.reason = check.kind == "file_list" ? "folder not reachable" : "root not reachable";
+			out.Add(pick(check));
+			continue;
+		}
+		if(check.kind == "file_list") {
+			if(!DirectoryExists(check.path)) {
+				check.status = "MISSING";
+				check.reason = "folder not reachable";
+				out.Add(pick(check));
+				continue;
+			}
+			for(FindFile ff(AppendFileName(check.path, "*")); ff; ff.Next()) {
+				if(!ff.IsFile() || (!pattern.IsEmpty() && !ff.GetName().EndsWith(pattern)))
+					continue;
+				check.files_found++;
+				if(has_minimum && GetFileLength(ff.GetPath()) < minimum)
+					check.undersized_files++;
+			}
+			bool too_few = check.files_found < check.min_files;
+			bool too_small = check.undersized_files > 0;
+			if(too_few || too_small) {
+				check.status = "BAD";
+				if(too_few)
+					check.reason = "found " + AsString(check.files_found) + " matching files; min_files requires " + AsString(check.min_files);
+				if(too_small)
+					check.reason << (check.reason.IsEmpty() ? String() : "; ") << AsString(check.undersized_files)
+					             << " matching files are smaller than min_bytes " << AsString(minimum);
+			}
+			else
+				check.status = "OK";
+			out.Add(pick(check));
+			continue;
+		}
+		if(!FileExists(check.path)) {
+			check.status = "MISSING";
+			check.reason = "file not found";
+			out.Add(pick(check));
+			continue;
+		}
+		check.size = GetFileLength(check.path);
+		if(check.size < 0) {
+			check.status = "MISSING";
+			check.reason = "file not reachable";
+		}
+		else if(has_minimum && check.size < minimum) {
+			check.status = "BAD";
+			check.reason = AsString(check.size) + " bytes is less than min_bytes " + AsString(minimum);
+		}
+		else
+			check.status = "OK";
+		out.Add(pick(check));
+	}
+	return true;
+}
+
+String AtlasArtifactSummaryLine(const Vector<AtlasArtifactCheck>& checks)
+{
+	int ok = 0, missing = 0, bad = 0, undeclared = 0;
+	for(const AtlasArtifactCheck& check : checks) {
+		if(check.status == "OK")
+			ok++;
+		else if(check.status == "MISSING")
+			missing++;
+		else if(check.status == "BAD")
+			bad++;
+		else if(check.status == "NOT DECLARED")
+			undeclared++;
+	}
+	return "artifacts: " + AsString(checks.GetCount()) + " (OK " + AsString(ok) + ", MISSING " + AsString(missing) +
+	       ", BAD " + AsString(bad) + ", NOT DECLARED " + AsString(undeclared) + ")";
 }
 
 static bool IsMarker(const AtlasFileEdit& e)

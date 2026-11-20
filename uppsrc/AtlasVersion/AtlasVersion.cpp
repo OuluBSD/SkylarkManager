@@ -1,12 +1,15 @@
 #include <Core/Core.h>
+#include <Atlas/AtlasModel.h>
+#include <Atlas/AtlasSite.h>
 
 using namespace Upp;
 
 // atlasver: prints what an implementation worker needs from an Atlas store. It only reads the store's JSON; nothing is
 // written, so it is safe on the live store. Usage:
 //   atlasver <store data dir> --family <family>             the versions, one line each
-//   atlasver <store data dir> --version 0.0.3               one version, in full
-//   atlasver <store data dir> --items 0.0                   every version of a minor group: the items a release needs
+//   atlasver <store data dir> --family <family> --version 0.0.3  one version, in full
+//   atlasver <store data dir> --family <family> --items 0.0 every version of a minor group: the items a release needs
+//   atlasver <store data dir> --family <family> --version 0.1.999 --check-artifacts manifest.json  check gate artifacts
 //
 // A version is a work item list. Work is an element whose latest stage event sits in that version; its entry is the
 // action's requires and its outcome is the action's effects. A x.y.999 version holds test gates only.
@@ -45,7 +48,7 @@ struct Ver : Moveable<Ver> {
 struct Work : Moveable<Work> {
 	String          element, name, pkg, action, vid;
 	bool            processing = false;
-	Vector<String>  entry, outcome, feature_lines;
+	Vector<String>  entry, placement_entry, outcome, feature_lines;
 	bool            entry_none = false;
 };
 
@@ -71,6 +74,14 @@ static Vector<String> Strings(const ValueMap& m, const char *key)
 	for(int i = 0; i < a.GetCount(); i++)
 		out.Add(a[i].ToString());
 	return out;
+}
+
+static bool HasString(const Vector<String>& strings, const String& value)
+{
+	for(const String& s : strings)
+		if(s == value)
+			return true;
+	return false;
 }
 
 static bool Load(const String& data, const String& family, VersionStore& st)
@@ -140,6 +151,7 @@ static bool Load(const String& data, const String& family, VersionStore& st)
 		w.element = id;
 		w.vid = Str(ev, "vid");
 		w.action = Str(ev, "action");
+		w.placement_entry = Strings(ev, "requires");
 		for(int i = 0; i < elements.GetCount(); i++) {
 			ValueMap el = elements[i];
 			if(Str(el, "id") != id)
@@ -160,6 +172,9 @@ static bool Load(const String& data, const String& family, VersionStore& st)
 			if(Str(a, "name") != w.action)
 				continue;
 			w.entry = Strings(a, "requires");
+			for(const String& lit : w.entry)
+				if(!HasString(w.placement_entry, lit))
+					w.placement_entry.Add(lit);
 			w.outcome = Strings(a, "effects");
 			w.entry_none = a.Get("entry_none").ToString() == "true";
 			w.processing = a.Get("processing").ToString() == "true";
@@ -207,7 +222,39 @@ static String Join(const Vector<String>& v)
 	return s;
 }
 
-static void PrintVersion(const VersionStore& st, const Ver& v)
+static Vector<String> ArtifactNamesForVersion(const VersionStore& st, const Ver& v)
+{
+	Vector<String> names;
+	for(const Work& w : st.work) {
+		if(w.vid != v.vid)
+			continue;
+		for(const String& atom : w.entry) {
+			if(!atom.StartsWith("artifact:"))
+				continue;
+			String name = atom.Mid(9);
+			if(!HasString(names, name))
+				names.Add(name);
+		}
+	}
+	return names;
+}
+
+static void PrintArtifactChecks(const Vector<AtlasArtifactCheck>& checks)
+{
+	for(const AtlasArtifactCheck& check : checks) {
+		Cout() << "    artifact: " << check.name;
+		if(check.kind == "file_list")
+			Cout() << " file_list";
+		Cout() << " " << check.status << " path=" << check.path;
+		if(!check.reason.IsEmpty())
+			Cout() << " (" << check.reason << ")";
+		Cout() << "\n";
+	}
+	Cout() << "  " << AtlasArtifactSummaryLine(checks) << "\n";
+}
+
+static void PrintVersion(const VersionStore& st, const Ver& v, const String& workspace,
+                         bool check_artifacts, const Vector<AtlasArtifactCheck>& artifacts)
 {
 	bool gate = v.code % 1000 == 999;
 	Cout() << "== " << Label(v.code) << "  (" << v.vid << ")" << (gate ? "  test gates only: a beta of the next minor" : "") << "\n";
@@ -223,6 +270,12 @@ static void PrintVersion(const VersionStore& st, const Ver& v)
 		Cout() << "    " << w.name << (w.pkg.IsEmpty() ? String() : "  [" + w.pkg + "]")
 		       << (w.processing ? "  processing" : "") << "\n";
 		Cout() << "      entry:   " << (!w.entry.IsEmpty() ? Join(w.entry) : w.entry_none ? String("none") : String("NOT DECLARED")) << "\n";
+		Cout() << "      placement: " << AtlasPlacementReason(w.placement_entry) << "\n";
+		if(!workspace.IsEmpty())
+			for(const String& atom : w.placement_entry) {
+				AtlasLocalAtomCheck check = AtlasCheckLocalAtom(workspace, atom);
+				Cout() << "      local:    " << atom << "  " << check.status << "  " << check.path << "\n";
+			}
 		Cout() << "      outcome: " << (w.outcome.IsEmpty() ? String("NOT DECLARED") : Join(w.outcome)) << "\n";
 		for(const String& f : w.feature_lines)
 			Cout() << "      user action: " << f << "\n";
@@ -237,6 +290,8 @@ static void PrintVersion(const VersionStore& st, const Ver& v)
 			continue;
 		Cout() << "    " << t.id << ": " << t.title << "  (needed by " << LabelOfVid(st, t.target) << ", for " << t.link << ")\n";
 	}
+	if(check_artifacts)
+		PrintArtifactChecks(artifacts);
 	Cout() << "\n";
 }
 
@@ -254,19 +309,84 @@ static void PrintList(const VersionStore& st)
 	}
 }
 
+static bool LoadWarningState(const String& data, const String& family, Vector<AtlasRoadmapMessage>& findings,
+                             Vector<AtlasWarningAck>& acks, String& error)
+{
+	String store_root = GetFileFolder(data);
+	AtlasFamily f;
+	String frev;
+	if(!AtlasLoadFamily(store_root, family, f, frev, error))
+		return false;
+	AtlasMap head;
+	String hrev;
+	if(!AtlasLoadMap(store_root, f.head_key, head, hrev, error))
+		return false;
+	AtlasRules rules;
+	String rrev;
+	if(!AtlasLoadRules(store_root, family, rules, rrev, error))
+		return false;
+	Vector<AtlasEvent> events;
+	if(!AtlasLoadEvents(store_root, family, events, error))
+		return false;
+	Vector<Vector<String>> worlds;
+	AtlasRoadmapFindings(head, f, rules, events, findings, worlds);
+	return AtlasLoadAcks(store_root, family, acks, error);
+}
+
+static bool IsAcknowledged(const Vector<AtlasWarningAck>& acks, const String& id)
+{
+	for(const AtlasWarningAck& a : acks)
+		if(a.warning_id == id)
+			return true;
+	return false;
+}
+
+static void PrintWarnings(const Vector<AtlasRoadmapMessage>& findings, const Vector<AtlasWarningAck>& acks)
+{
+	int errors = 0, warnings = 0, acknowledged = 0, open = 0;
+	for(const AtlasRoadmapMessage& m : findings) {
+		if(m.severity == "error") {
+			errors++;
+			continue;
+		}
+		if(m.severity != "warning")
+			continue;
+		warnings++;
+		String id = AtlasWarningId(m);
+		if(IsAcknowledged(acks, id)) {
+			acknowledged++;
+			continue;
+		}
+		open++;
+		Cout() << "id=" << id << " severity=" << m.severity << " rule=" << m.rule << " text=" << m.text << "\n";
+	}
+	Cout() << "warnings: " << warnings << " (acknowledged " << acknowledged << ", open " << open
+	       << "); finding errors: " << errors
+	       << "; open warnings each raise one unacknowledged-warning error on the check\n";
+}
+
+static String OperatorName()
+{
+	String user = GetEnv("USER");
+	if(user.IsEmpty()) user = GetEnv("LOGNAME");
+	if(user.IsEmpty()) user = GetEnv("USERNAME");
+	return TrimBoth(user);
+}
+
 CONSOLE_APP_MAIN
 {
 	Vector<String> args;
 	for(int i = 0; i < CommandLine().GetCount(); i++)
 		args.Add(CommandLine()[i]);
 	if(args.IsEmpty()) {
-		Cout() << "usage: atlasver <store data dir> --family <family> [--version a.b.c | --items a.b]\n";
+		Cout() << "usage: atlasver <store data dir> --family <family> [--version a.b.c | --items a.b | --warnings | --ack <id> --comment <text> | --unack <id>] [--check-local <workspace>] [--check-artifacts <manifest.json>]\n";
 		SetExitCode(1);
 		return;
 	}
 	String data = args[0];
 	String family;
-	String want_version, want_items;
+	String want_version, want_items, workspace, artifact_manifest, ack_id, unack_id, comment;
+	bool list_warnings = false, do_ack = false, do_unack = false, has_comment = false, check_artifacts = false;
 	for(int i = 1; i < args.GetCount(); i++) {
 		if(args[i] == "--family" && i + 1 < args.GetCount())
 			family = args[++i];
@@ -274,15 +394,114 @@ CONSOLE_APP_MAIN
 			want_version = args[++i];
 		else if(args[i] == "--items" && i + 1 < args.GetCount())
 			want_items = args[++i];
+		else if(args[i] == "--check-local" && i + 1 < args.GetCount())
+			workspace = args[++i];
+		else if(args[i] == "--check-artifacts" && i + 1 < args.GetCount()) {
+			check_artifacts = true;
+			artifact_manifest = args[++i];
+		}
+		else if(args[i] == "--warnings")
+			list_warnings = true;
+		else if(args[i] == "--ack" && i + 1 < args.GetCount()) {
+			do_ack = true;
+			ack_id = args[++i];
+		}
+		else if(args[i] == "--unack" && i + 1 < args.GetCount()) {
+			do_unack = true;
+			unack_id = args[++i];
+		}
+		else if(args[i] == "--comment" && i + 1 < args.GetCount()) {
+			has_comment = true;
+			comment = args[++i];
+		}
 		else {
 			Cout() << "unknown argument: " << args[i] << "\n";
 			SetExitCode(1);
 			return;
 		}
 	}
+	if(family.IsEmpty()) {
+		Cout() << "--family is required\n";
+		SetExitCode(1);
+		return;
+	}
+
+	int commands = (list_warnings ? 1 : 0) + (do_ack ? 1 : 0) + (do_unack ? 1 : 0);
+	if((commands && (!want_version.IsEmpty() || !want_items.IsEmpty() || !workspace.IsEmpty() || check_artifacts))
+	|| (!want_version.IsEmpty() && !want_items.IsEmpty()) || (has_comment && !do_ack)) {
+		Cout() << "warning commands and version checks must be used separately; --comment requires --ack\n";
+		SetExitCode(1);
+		return;
+	}
+	if(commands > 1) {
+		Cout() << "choose only one warning command\n";
+		SetExitCode(1);
+		return;
+	}
+	if(commands) {
+		Vector<AtlasRoadmapMessage> findings;
+		Vector<AtlasWarningAck> acks;
+		String error;
+		if(!LoadWarningState(data, family, findings, acks, error)) {
+			Cout() << error << "\n";
+			SetExitCode(1);
+			return;
+		}
+		if(list_warnings) {
+			PrintWarnings(findings, acks);
+			return;
+		}
+		if(do_ack) {
+			String actor = OperatorName();
+			if(actor.IsEmpty()) {
+				PrintWarnings(findings, acks);
+				Cout() << "cannot determine the operating-system user name\n";
+				SetExitCode(1);
+				return;
+			}
+			AtlasWarningAck ack;
+			int status;
+			if(!AtlasBuildWarningAck(findings, ack_id, comment, actor, AtlasNowIso(), ack, status, error)) {
+				PrintWarnings(findings, acks);
+				Cout() << "refused: " << error << "\n";
+				SetExitCode(1);
+				return;
+			}
+			if(!AtlasSaveAck(GetFileFolder(data), family, ack, error)) {
+				Cout() << "could not save acknowledgement: " << error << "\n";
+				SetExitCode(1);
+				return;
+			}
+			Cout() << "acknowledged " << ack.warning_id << " by " << ack.actor << " at " << ack.at << "\n";
+			return;
+		}
+		String id = TrimBoth(unack_id);
+		if(!AtlasWarningIdValid(id)) {
+			Cout() << "refused: id must be the warning id from the warnings list\n";
+			SetExitCode(1);
+			return;
+		}
+		if(!AtlasDeleteAck(GetFileFolder(data), family, id, error)) {
+			Cout() << "could not remove acknowledgement: " << error << "\n";
+			SetExitCode(1);
+			return;
+		}
+		Cout() << "unacknowledged " << id << "\n";
+		return;
+	}
 
 	VersionStore st;
 	Load(data, family, st);
+	if(check_artifacts && want_version.IsEmpty()) {
+		Cout() << "--check-artifacts requires --version a.b.c\n";
+		SetExitCode(1);
+		return;
+	}
+	if(!workspace.IsEmpty() && want_version.IsEmpty() && want_items.IsEmpty()) {
+		Cout() << "--check-local requires --version or --items\n";
+		SetExitCode(1);
+		return;
+	}
 
 	if(want_version.IsEmpty() && want_items.IsEmpty()) {
 		PrintList(st);
@@ -307,7 +526,17 @@ CONSOLE_APP_MAIN
 		bool in = is_group ? (v.code / 1000 == code / 1000) : (v.code == code);
 		if(!in)
 			continue;
-		PrintVersion(st, v);
+		Vector<AtlasArtifactCheck> artifact_checks;
+		if(check_artifacts) {
+			Vector<String> artifact_names = ArtifactNamesForVersion(st, v);
+			String error;
+			if(!AtlasCheckArtifactManifest(artifact_names, artifact_manifest, artifact_checks, error)) {
+				Cout() << "artifact manifest error: " << error << "\n";
+				SetExitCode(1);
+				return;
+			}
+		}
+		PrintVersion(st, v, workspace, check_artifacts, artifact_checks);
 		any = true;
 	}
 	if(!any) {
@@ -315,4 +544,3 @@ CONSOLE_APP_MAIN
 		SetExitCode(1);
 	}
 }
-

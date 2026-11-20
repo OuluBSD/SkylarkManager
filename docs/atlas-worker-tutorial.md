@@ -25,9 +25,9 @@ the plan, and to tell the plan's owner where the plan is wrong.
 
 The `atlasver` program prints the plan. It only reads the store and never writes.
 
-    bin/AtlasVersion <store data dir>                    the versions, one line each
-    bin/AtlasVersion <store data dir> --version 0.0.1    one version in full
-    bin/AtlasVersion <store data dir> --items 0.0        every version of a group: the items to implement
+    bin/AtlasVersion <store data dir> --family <family>                         the versions, one line each
+    bin/AtlasVersion <store data dir> --family <family> --version 0.0.1          one version in full
+    bin/AtlasVersion <store data dir> --family <family> --items 0.0              every version of a group: the items to implement
 
 For each work item it prints:
 
@@ -62,3 +62,5 @@ owner's decision, made with the planner tool or the Atlas pages.
 
 The Atlas check lists what the plan gets wrong. A check error that is an unacknowledged warning is a warning the owner has
 not reviewed yet. Report any other error, with its text.
+
+If your assignment is part of a MultiAtlas ensemble, use the [MultiAtlas guide for agents moving from Atlas](multiatlas-agent-guide.md). MultiAtlas has separate track ownership and currently does not provide Atlas's full roadmap authoring surface.

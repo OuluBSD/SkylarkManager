@@ -26,6 +26,8 @@ struct AtlasDiagramBubble : Moveable<AtlasDiagramBubble> {
 	String         pkg;           // work: the U++ package the element implements, or a virtual group for data
 	String         action;        // work: the action name
 	String         detail;        // work: the action's text
+	String         placement;     // work: entry-based placement explanation
+	String         local;         // work: local package check line, empty when not configured
 	Vector<String> requires;      // work: entry literals
 	Vector<String> effects;       // work: outcome literals
 	Vector<String> waits;         // work: task:<id>:done entry literals, shown as waiting, not as unmet
@@ -60,7 +62,7 @@ struct AtlasVersionDiagram : Moveable<AtlasVersionDiagram> {
 // bubbles are left out, so are arrows to or from them, and they add nothing to a banner's counts.
 void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRules& rules,
                        const Vector<AtlasEvent>& events, const Vector<AtlasFile>& files, const Vector<String>& hidden,
-                       AtlasVersionDiagram& out);
+                       AtlasVersionDiagram& out, const String& workspace = String());
 
 // The minor group of a version label: "0.2.5" -> "0.2".
 String AtlasMinorGroup(const String& label);

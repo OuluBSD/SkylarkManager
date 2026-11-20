@@ -1485,6 +1485,9 @@ static void MoveElement(WebRequest& r)
 
 void InstallAtlasSite(EngineSite& site)
 {
+	String project_error;
+	if(!AtlasLoadProjectsAtStartup(site.data_root, project_error) && project_error.GetCount())
+		LOG("Atlas project configuration: " << project_error);
 	SiteRouter& rt = site.Router();
 	rt.Add("", MapList); // the root is the public map list (Atlas reads are public; edits remain gated)
 	rt.Add("atlas", MapList);

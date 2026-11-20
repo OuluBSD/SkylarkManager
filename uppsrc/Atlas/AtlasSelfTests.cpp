@@ -250,10 +250,15 @@ static void SeedChecks()
 	      "a seed refuses a map that already has elements and leaves it untouched");
 }
 
-static String ProjectJson(const char *name, const char *repo, const char *store, const char *level, const char *editors)
+static String ProjectJson(const char *name, const char *repo, const char *store, const char *level, const char *editors,
+	                      const char *workspace = "")
 {
-	return String("{\"projects\": [{\"name\": \"") + name + "\", \"repo\": \"" + repo + "\", \"store\": \"" + store
-	     + "\", \"level\": \"" + level + "\", \"editors\": [" + editors + "]}]}";
+	String json = String("{\"projects\": [{\"name\": \"") + name + "\", \"repo\": \"" + repo + "\", \"store\": \"" + store
+	            + "\", \"level\": \"" + level + "\", \"editors\": [" + editors + "]";
+	if(*workspace)
+		json << ", \"workspace\": \"" << workspace << "\"";
+	json << "}]}";
+	return json;
 }
 
 static void ProjectChecks(const String& scratch)
@@ -266,11 +271,16 @@ static void ProjectChecks(const String& scratch)
 	Check(AtlasLoadProjects(AppendFileName(scratch, "no-projects-file"), all, err) && all.IsEmpty(),
 	      "a data root without projects.json has no projects");
 
-	SaveFile(path, ProjectJson("demo", "/srv/project", "atlas/demo", "private", "\"Alice\", \"bob\""));
+	SaveFile(path, ProjectJson("demo", "/srv/project", "atlas/demo", "private", "\"Alice\", \"bob\"", "/srv/project"));
 	bool loaded = AtlasLoadProjects(root, all, err);
 	Check(loaded && all.GetCount() == 1 && all[0].store == "atlas/demo" && all[0].level == "private"
-	      && all[0].editors.GetCount() == 2 && all[0].editors[0] == "alice",
-	      "a project loads with its store, and its editors in lower case");
+	      && all[0].workspace == "/srv/project" && all[0].editors.GetCount() == 2 && all[0].editors[0] == "alice",
+	      "a project loads its store, workspace and lower-case editors");
+	Check(AtlasLoadProjectsAtStartup(root, err) && AtlasStartupWorkspace(root, "demo") == "/srv/project",
+	      "the project's absolute workspace is read into the startup configuration");
+	SaveFile(path, ProjectJson("demo", "/srv/project", "atlas/demo", "private", "\"Alice\", \"bob\"", "/srv/changed"));
+	Check(AtlasStartupWorkspace(root, "demo") == "/srv/project",
+	      "the workspace setting stays at its startup value until restart");
 	Check(AtlasProjectEditor(root, "demo", "ALICE") && !AtlasProjectEditor(root, "demo", "carol")
 	      && !AtlasProjectEditor(root, "other", "alice") && !AtlasProjectEditor(root, "demo", ""),
 	      "an editor is matched without case, and only for their own project");
@@ -286,6 +296,9 @@ static void ProjectChecks(const String& scratch)
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("repo") >= 0, "a repository path must be absolute");
 	SaveFile(path, ProjectJson("demo", "/srv/project", "atlas/demo", "shared", ""));
 	Check(!AtlasLoadProjects(root, all, err) && err.Find("level") >= 0, "a project level must be a known visibility");
+	SaveFile(path, ProjectJson("demo", "/srv/project", "atlas/demo", "private", "", "relative/workspace"));
+	Check(!AtlasLoadProjects(root, all, err) && err.Find("workspace must be an absolute path") >= 0,
+	      "a project workspace must be an absolute path");
 	SaveFile(path, "{\"projects\": [{\"name\": \"demo\", \"repo\": \"/srv/project\", \"store\": \"\", \"level\": \"private\", "
 	               "\"sources\": [{\"alias\": \"demo\", \"path\": \"/home/x/DEMO\"}]}]}");
 	Check(AtlasLoadProjects(root, all, err) && all.GetCount() == 1 && all[0].sources.GetCount() == 1
@@ -1145,6 +1158,22 @@ static void LedgerChecks()
 	String id = AtlasWarningId(warned[0]);
 	Check(id.GetCount() == 16, "a warning id is 16 hex digits");
 	Check(AtlasWarningId(warned[0]) == id, "the same finding always gets the same id");
+	int status = 0;
+	String ack_error;
+	AtlasWarningAck prepared;
+	Check(AtlasWarningIdValid(id) && !AtlasWarningIdValid("not-an-id")
+	      && AtlasBuildWarningAck(findings, id, "checked by hand", "operator", "2026-01-02T03:04:05Z",
+	                           prepared, status, ack_error)
+	      && status == 200 && prepared.warning_id == id && prepared.comment == "checked by hand"
+	      && prepared.actor == "operator" && prepared.at == "2026-01-02T03:04:05Z",
+	      "the shared warning validator builds an acknowledgement for a current warning");
+	Check(!AtlasBuildWarningAck(findings, id, " \t ", "operator", "now", prepared, status, ack_error)
+	      && status == 400 && ack_error.Find("needs a comment") >= 0,
+	      "the shared warning validator refuses an empty comment");
+	Check(!AtlasBuildWarningAck(findings, "ffffffffffffffff", "checked by hand", "operator", "now",
+	                            prepared, status, ack_error)
+	      && status == 404 && ack_error.Find("no current warning") >= 0,
+	      "the shared warning validator refuses an unknown warning id");
 	AtlasRoadmapMessage moved = warned[0];
 	moved.vid = "v9";
 	Check(AtlasWarningId(moved) != id, "a finding at another version gets another id");
@@ -1173,8 +1202,7 @@ static void LedgerChecks()
 
 	for(const AtlasRoadmapMessage& m : warned) {
 		AtlasWarningAck a;
-		a.warning_id = AtlasWarningId(m);
-		a.comment = "checked by hand";
+		AtlasBuildWarningAck(findings, AtlasWarningId(m), "checked by hand", "operator", "now", a, status, ack_error);
 		acks.Add(pick(a));
 	}
 	out.Clear();
@@ -1534,7 +1562,7 @@ static void PkgChecks()
 	      "an element with a bad package name fails the map check");
 }
 
-static void DiagramChecks()
+static void DiagramChecks(const String& scratch)
 {
 	AtlasFamily f;
 	AtlasVersion v1, v2, v3;
@@ -1583,6 +1611,36 @@ static void DiagramChecks()
 	Check(works == 3 && d.bubbles.GetCount() == 7, "work units and contract bubbles are all drawn");
 	Check(unmet == 1, "only the work with an entry nothing produces is flagged as unmet");
 	Check(d.arrows.GetCount() == 3, "producers are joined to what they feed: a->b, the gate->b, a->the feature");
+	String alpha_placement, beta_placement;
+	bool local_absent = true;
+	for(const AtlasDiagramBubble& b : d.bubbles)
+		if(b.kind == "work") {
+			local_absent &= b.local.IsEmpty();
+			if(b.text == "Alpha") alpha_placement = b.placement;
+			if(b.text == "Beta") beta_placement = b.placement;
+		}
+	Check(local_absent, "local package checks are not shown when no workspace is configured");
+	Check(alpha_placement == "placed here by the owner (no reason recorded)"
+	      && beta_placement == "earliest version where its entry holds",
+	      "work bubbles show the two entry-based placement reasons");
+
+	String workspace = AppendFileName(scratch, "atlas-diagram-workspace");
+	String present_dir = AppendFileName(AppendFileName(workspace, "uppsrc"), "PresentPkg");
+	RealizeDirectory(present_dir);
+	SaveFile(AppendFileName(present_dir, "PresentPkg.upp"), "description \"test\";\n");
+	AtlasMap local_head = SmallMap();
+	local_head.elements[0].pkg = "PresentPkg";
+	local_head.elements[1].pkg = "MissingPkg";
+	AtlasVersionDiagram local_diagram;
+	AtlasBuildDiagram(f, local_head, rules, events, no_files, none, local_diagram, workspace);
+	String alpha_local, beta_local;
+	for(const AtlasDiagramBubble& b : local_diagram.bubbles)
+		if(b.kind == "work") {
+			if(b.text == "Alpha") alpha_local = b.local;
+			if(b.text == "Beta") beta_local = b.local;
+		}
+	Check(alpha_local == "local: built:PresentPkg OK", "a work bubble reports a present local package");
+	Check(beta_local == "local: built:MissingPkg MISSING", "a work bubble reports a missing local package");
 	bool arrows_valid = true;
 	for(const AtlasDiagramArrow& a : d.arrows)
 		arrows_valid &= a.from >= 0 && a.to >= 0 && a.from < d.bubbles.GetCount() && a.to < d.bubbles.GetCount()
@@ -2000,8 +2058,8 @@ static void AckStoreChecks(const String& scratch)
 	Check(AtlasSaveAck(data, "ackfam", a, err), "a comment can be replaced through the store");
 	Check(AtlasLoadAcks(data, "ackfam", seen, err) && seen.GetCount() == 1 && seen[0].comment == "written through the store",
 	      "a record written through the store reads back at once");
-	Check(AtlasDeleteAck(data, "ackfam", a.warning_id, err), "a comment is removed by its warning id");
-	Check(AtlasLoadAcks(data, "ackfam", back, err) && back.IsEmpty(), "a removed comment no longer reads back");
+	Check(AtlasDeleteAck(data, "ackfam", a.warning_id, err), "unack removes the comment by warning id");
+	Check(AtlasLoadAcks(data, "ackfam", back, err) && back.IsEmpty(), "an unacknowledged warning comment no longer reads back");
 }
 
 static void SourceChecks(const String& scratch)
@@ -2064,6 +2122,209 @@ static void SourceChecks(const String& scratch)
 	      "a reader of the map sees the edits without their code; an editor sees the code too");
 }
 
+static void AtlasVersionToolChecks(const String& scratch)
+{
+	String workspace = AppendFileName(scratch, "atlas-version-local");
+	String package = AppendFileName(AppendFileName(workspace, "uppsrc"), "PresentPkg");
+	RealizeDirectory(package);
+	SaveFile(AppendFileName(package, "PresentPkg.upp"), "description \"test\";\n");
+
+	AtlasLocalAtomCheck present = AtlasCheckLocalAtom(workspace, "built:PresentPkg");
+	Check(present.status == "OK" && present.path == AppendFileName(package, "*.upp"),
+	      "local check finds a package with a .upp file and reports the inspected path");
+	AtlasLocalAtomCheck missing = AtlasCheckLocalAtom(workspace, "realized:MissingPkg");
+	Check(missing.status == "MISSING" && missing.path.Find("uppsrc/MissingPkg/*.upp") >= 0,
+	      "local check reports a missing package at its expected path");
+	AtlasLocalAtomCheck artifact = AtlasCheckLocalAtom(workspace, "artifact:dataset");
+	Check(artifact.status == "NOT CHECKED" && artifact.path == "artifact atom (not inspected)",
+	      "local check leaves artifact atoms explicitly unchecked");
+
+	Vector<String> entry;
+	entry.Add("built:PresentPkg");
+	Check(AtlasPlacementReason(entry) == "earliest version where its entry holds",
+	      "an item with recorded entry atoms reports the entry-based placement reason");
+	entry.Clear();
+	Check(AtlasPlacementReason(entry) == "placed here by the owner (no reason recorded)",
+	      "an item without recorded entry atoms reports owner placement");
+}
+
+static void ArtifactManifestChecks(const String& scratch)
+{
+	String root = AppendFileName(scratch, "artifact-root");
+	RealizeDirectory(root);
+	SaveFile(AppendFileName(root, "present.txt"), "data");
+	SaveFile(AppendFileName(root, "small.bin"), "x");
+	String unreachable = AppendFileName(scratch, "not-mounted");
+	FileDelete(unreachable);
+
+	ValueMap roots;
+	roots.Add("data", root);
+	roots.Add("offline", unreachable);
+	ValueMap artifacts;
+	ValueMap present;
+	present.Add("root", "data");
+	present.Add("path", "present.txt");
+	present.Add("min_bytes", 3);
+	artifacts.Add("present", present);
+	ValueMap missing;
+	missing.Add("root", "data");
+	missing.Add("path", "absent.txt");
+	artifacts.Add("missing", missing);
+	ValueMap too_small;
+	too_small.Add("root", "data");
+	too_small.Add("path", "small.bin");
+	too_small.Add("min_bytes", 2);
+	artifacts.Add("too_small", too_small);
+	ValueMap offline;
+	offline.Add("root", "offline");
+	offline.Add("path", "not-mounted.bin");
+	artifacts.Add("offline", offline);
+	ValueMap manifest;
+	manifest.Add("roots", roots);
+	manifest.Add("artifacts", artifacts);
+	String manifest_path = AppendFileName(scratch, "manifest.json");
+	SaveFile(manifest_path, AsJSON(manifest, true));
+
+	Vector<String> names;
+	names.Add("present");
+	names.Add("missing");
+	names.Add("too_small");
+	names.Add("offline");
+	names.Add("not_declared");
+	Vector<AtlasArtifactCheck> checks;
+	String error;
+	bool loaded = AtlasCheckArtifactManifest(names, manifest_path, checks, error);
+	Check(loaded && error.IsEmpty() && checks.GetCount() == 5 && checks[0].kind == "file" && checks[0].status == "OK"
+	      && checks[0].path == AppendFileName(root, "present.txt"),
+	      "an existing file-kind artifact meeting min_bytes remains OK with its inspected path");
+	Check(loaded && checks.GetCount() == 5 && checks[1].status == "MISSING" && checks[1].reason == "file not found",
+	      "a missing artifact file is reported as MISSING");
+	Check(loaded && checks.GetCount() == 5 && checks[2].status == "BAD" && checks[2].size == 1,
+	      "an artifact smaller than min_bytes is reported as BAD");
+	Check(loaded && checks.GetCount() == 5 && checks[3].status == "MISSING" && checks[3].reason == "root not reachable",
+	      "an unreachable artifact root is MISSING with the required reason");
+	Check(loaded && checks.GetCount() == 5 && checks[4].status == "NOT DECLARED",
+	      "an artifact absent from the manifest is NOT DECLARED");
+	Check(loaded && AtlasArtifactSummaryLine(checks) ==
+	      "artifacts: 5 (OK 1, MISSING 2, BAD 1, NOT DECLARED 1)",
+	      "artifact summary counts each result status");
+}
+
+static void ArtifactFileListChecks(const String& scratch)
+{
+	String root = AppendFileName(scratch, "artifact-file-list-root");
+	String enough = AppendFileName(root, "enough");
+	String few = AppendFileName(root, "few");
+	String small = AppendFileName(root, "small");
+	RealizeDirectory(AppendFileName(enough, "nested"));
+	RealizeDirectory(AppendFileName(few, "nested"));
+	RealizeDirectory(small);
+	SaveFile(AppendFileName(enough, "a.txt"), "abcdef");
+	SaveFile(AppendFileName(enough, "b.txt"), "ghijkl");
+	SaveFile(AppendFileName(enough, "ignore.bin"), "x");
+	SaveFile(AppendFileName(AppendFileName(enough, "nested"), "nested.txt"), "nested");
+	SaveFile(AppendFileName(few, "only.txt"), "ok");
+	SaveFile(AppendFileName(AppendFileName(few, "nested"), "nested.txt"), "ok");
+	SaveFile(AppendFileName(small, "small.txt"), "x");
+	SaveFile(AppendFileName(root, "legacy.txt"), "legacy");
+	String offline_root = AppendFileName(scratch, "artifact-file-list-offline");
+	FileDelete(offline_root);
+
+	ValueMap roots;
+	roots.Add("data", root);
+	roots.Add("offline", offline_root);
+	ValueMap artifacts;
+	ValueMap many;
+	many.Add("kind", "file_list");
+	many.Add("root", "data");
+	many.Add("path", "enough");
+	many.Add("min_files", 2);
+	many.Add("min_bytes", 5);
+	many.Add("pattern", ".txt");
+	artifacts.Add("enough_list", many);
+	ValueMap few_files;
+	few_files.Add("kind", "file_list");
+	few_files.Add("root", "data");
+	few_files.Add("path", "few");
+	few_files.Add("min_files", 2);
+	few_files.Add("pattern", ".txt");
+	artifacts.Add("few_list", few_files);
+	ValueMap undersized;
+	undersized.Add("kind", "file_list");
+	undersized.Add("root", "data");
+	undersized.Add("path", "small");
+	undersized.Add("min_files", 1);
+	undersized.Add("min_bytes", 5);
+	undersized.Add("pattern", ".txt");
+	artifacts.Add("small_list", undersized);
+	ValueMap missing_folder;
+	missing_folder.Add("kind", "file_list");
+	missing_folder.Add("root", "data");
+	missing_folder.Add("path", "missing-folder");
+	missing_folder.Add("min_files", 1);
+	artifacts.Add("missing_folder", missing_folder);
+	ValueMap missing_root;
+	missing_root.Add("kind", "file_list");
+	missing_root.Add("root", "offline");
+	missing_root.Add("path", ".");
+	missing_root.Add("min_files", 1);
+	artifacts.Add("missing_root", missing_root);
+	ValueMap legacy_file;
+	legacy_file.Add("root", "data");
+	legacy_file.Add("path", "legacy.txt");
+	legacy_file.Add("min_bytes", 1);
+	artifacts.Add("legacy_file", legacy_file);
+	ValueMap no_min_files;
+	no_min_files.Add("kind", "file_list");
+	no_min_files.Add("root", "data");
+	no_min_files.Add("path", "enough");
+	no_min_files.Add("pattern", ".txt");
+	artifacts.Add("no_min_files", no_min_files);
+	ValueMap manifest;
+	manifest.Add("roots", roots);
+	manifest.Add("artifacts", artifacts);
+	String manifest_path = AppendFileName(scratch, "file-list-manifest.json");
+	SaveFile(manifest_path, AsJSON(manifest, true));
+
+	Vector<String> names;
+	names.Add("enough_list");
+	names.Add("few_list");
+	names.Add("small_list");
+	names.Add("missing_folder");
+	names.Add("missing_root");
+	names.Add("legacy_file");
+	Vector<AtlasArtifactCheck> checks;
+	String error;
+	bool loaded = AtlasCheckArtifactManifest(names, manifest_path, checks, error);
+	Check(loaded && checks.GetCount() == 6 && checks[0].kind == "file_list" && checks[0].status == "OK"
+	      && checks[0].files_found == 2,
+	      "a file_list with enough suffix-matching regular files is OK and ignores nested folders");
+	Check(loaded && checks.GetCount() == 6 && checks[1].status == "BAD"
+	      && checks[1].reason.Find("found 1") >= 0 && checks[1].reason.Find("2") >= 0,
+	      "a file_list below min_files is BAD and reports found and required counts");
+	Check(loaded && checks.GetCount() == 6 && checks[2].status == "BAD"
+	      && checks[2].undersized_files == 1 && checks[2].reason.Find("1") >= 0,
+	      "a file_list with a file below min_bytes is BAD and reports the undersized count");
+	Check(loaded && checks.GetCount() == 6 && checks[3].status == "MISSING"
+	      && checks[3].reason == "folder not reachable",
+	      "a missing file_list folder is reported as MISSING with its reason");
+	Check(loaded && checks.GetCount() == 6 && checks[4].status == "MISSING"
+	      && checks[4].reason == "folder not reachable",
+	      "an unreachable file_list root is reported as a missing folder");
+	Check(loaded && checks.GetCount() == 6 && checks[5].kind == "file" && checks[5].status == "OK",
+	      "a legacy file artifact defaults to kind file and keeps its prior behavior");
+	Check(loaded && AtlasArtifactSummaryLine(checks) ==
+	      "artifacts: 6 (OK 2, MISSING 2, BAD 2, NOT DECLARED 0)",
+	      "artifact summary counts file_list results like file results");
+
+	Vector<String> invalid_name;
+	invalid_name.Add("no_min_files");
+	Vector<AtlasArtifactCheck> invalid_result;
+	Check(!AtlasCheckArtifactManifest(invalid_name, manifest_path, invalid_result, error)
+	      && error.Find("requires min_files") >= 0,
+	      "a file_list without min_files is refused with a clear error");
+}
+
 bool RunAtlasSelfTests(const String& scratch_dir)
 {
 	s_checks = 0;
@@ -2079,7 +2340,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	StrictnessChecks();
 	GateAndTaskChecks();
 	LedgerChecks();
-	DiagramChecks();
+	DiagramChecks(scratch_dir);
 	TaskChecks();
 	ProcessingTaskChecks();
 	MultiLinkChecks();
@@ -2094,6 +2355,9 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	FileStoreChecks(scratch_dir);
 	AckStoreChecks(scratch_dir);
 	SourceChecks(scratch_dir);
+	AtlasVersionToolChecks(scratch_dir);
+	ArtifactManifestChecks(scratch_dir);
+	ArtifactFileListChecks(scratch_dir);
 	Cout() << "Atlas self-tests: " << (s_checks - s_failed) << "/" << s_checks << " checks passed\n";
 	return s_failed == 0;
 }

@@ -12,6 +12,7 @@ struct AtlasDiagramUnit : Moveable<AtlasDiagramUnit> {
 	String element;
 	String vid;
 	String action;
+	Vector<String> entry;
 };
 
 static const AtlasElement *FindElement(const AtlasMap& head, const String& id)
@@ -29,6 +30,14 @@ static String ElementNamed(const AtlasMap& head, const String& name)
 		if(e.name == name)
 			return e.id;
 	return String();
+}
+
+static String LocalPackageLine(const String& pkg, const String& workspace)
+{
+	if(pkg.IsEmpty() || workspace.IsEmpty())
+		return String();
+	AtlasLocalAtomCheck check = AtlasCheckLocalAtom(workspace, "built:" + pkg);
+	return "local: built:" + pkg + " " + check.status;
 }
 
 static bool IsHidden(const Vector<String>& hidden, const String& id)
@@ -217,7 +226,7 @@ static int FindTask(const AtlasVersionDiagram& g, const String& lit)
 
 void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRules& rules,
                        const Vector<AtlasEvent>& events, const Vector<AtlasFile>& files, const Vector<String>& hidden,
-                       AtlasVersionDiagram& out)
+                       AtlasVersionDiagram& out, const String& workspace)
 {
 	out.rows.Clear();
 	out.bubbles.Clear();
@@ -227,12 +236,15 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 	Vector<AtlasDiagramUnit> units;
 	for(const AtlasElement& el : head.elements) {
 		String vid, action = rules.FindAction(el.name) >= 0 ? el.name : String();
+		Vector<String> entry;
 		for(const AtlasEvent& ev : events) {
 			if(ev.type != "stage" || ev.subject_id != el.id || ev.stage != "planned")
 				continue;
 			vid = ev.vid;
 			if(!ev.action.IsEmpty())
 				action = ev.action;
+			for(const String& lit : ev.requires)
+				entry.Add(lit);
 			break;
 		}
 		if(vid.IsEmpty() || action.IsEmpty())
@@ -241,6 +253,7 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 		u.element = el.id;
 		u.vid = vid;
 		u.action = action;
+		u.entry = pick(entry);
 		units.Add(pick(u));
 	}
 
@@ -350,16 +363,21 @@ void AtlasBuildDiagram(const AtlasFamily& f, const AtlasMap& head, const AtlasRu
 			b.text = el ? el->name : b.element;
 			b.pkg = el ? el->pkg : String();
 			b.action = units[u].action;
+			for(const String& lit : units[u].entry)
+				b.requires.Add(lit);
 			int ai = rules.FindAction(b.action);
 			if(ai >= 0) {
 				const AtlasAction& a = rules.actions[ai];
 				b.processing = a.processing;
 				b.detail = a.text;
 				for(const String& lit : a.requires)
-					b.requires.Add(lit);
+					if(FindIndex(b.requires, lit) < 0)
+						b.requires.Add(lit);
 				for(const String& lit : a.effects)
 					b.effects.Add(lit);
 			}
+			b.placement = AtlasPlacementReason(b.requires);
+			b.local = LocalPackageLine(b.pkg, workspace);
 			out.rows[r].bubbles.Add(out.bubbles.GetCount());
 			out.bubbles.Add(pick(b));
 

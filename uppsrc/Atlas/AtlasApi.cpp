@@ -575,17 +575,6 @@ static void TaskReopen(WebRequest& r)  { TaskEvent(r, "reopened"); }
 static void TaskAssign(WebRequest& r)  { TaskEvent(r, "assigned"); }
 static void TaskNote(WebRequest& r)    { TaskEvent(r, "note"); }
 
-// A warning id is the 16 hex digits AtlasWarningId makes.
-static bool WarningIdValid(const String& id)
-{
-	if(id.GetCount() != 16)
-		return false;
-	for(int i = 0; i < id.GetCount(); i++)
-		if(String("0123456789abcdef").Find(id[i]) < 0)
-			return false;
-	return true;
-}
-
 // The warnings of the roadmap, each with its comment if it has one, and the comments that no longer match a
 // finding. Every finding is listed here, whatever the cut-off of the checks.
 static void WarningsGet(WebRequest& r)
@@ -684,45 +673,23 @@ static void WarningAck(WebRequest& r)
 		ApiFail(r, 500, err);
 		return;
 	}
-	String id = TrimBoth(P(r, "id"));
-	String comment = TrimBoth(P(r, "comment"));
-	if(!WarningIdValid(id)) {
-		ApiFail(r, 400, "id must be the warning id from the warnings list");
-		return;
-	}
-	if(comment.IsEmpty()) {
-		ApiFail(r, 400, "a warning needs a comment: say why it is acceptable, or what will change");
-		return;
-	}
 	Vector<AtlasRoadmapMessage> findings;
 	Vector<Vector<String>> worlds;
 	AtlasRoadmapFindings(head, f, rules, events, findings, worlds);
-	int pos = -1;
-	for(int i = 0; i < findings.GetCount() && pos < 0; i++)
-		if(findings[i].severity == "warning" && AtlasWarningId(findings[i]) == id)
-			pos = i;
-	if(pos < 0) {
-		ApiFail(r, 404, "no current warning has that id");
+	AtlasWarningAck a;
+	int status;
+	if(!AtlasBuildWarningAck(findings, P(r, "id"), P(r, "comment"), r.User().username,
+	                         AtlasNowIso(), a, status, err)) {
+		ApiFail(r, status, err);
 		return;
 	}
-	const AtlasRoadmapMessage& m = findings[pos];
-	AtlasWarningAck a;
-	a.warning_id = id;
-	a.rule = m.rule;
-	a.subject_kind = m.subject_kind;
-	a.subject_id = m.subject_id;
-	a.vid = m.vid;
-	a.text = m.text;
-	a.comment = comment;
-	a.actor = r.User().username;
-	a.at = AtlasNowIso();
 	if(!AtlasSaveAck(r.Site().data_root, r.PathArg(0), a, err)) {
 		ApiFail(r, 500, err);
 		return;
 	}
 	ValueMap out;
 	out.Add("ok", true);
-	out.Add("id", id);
+	out.Add("id", a.warning_id);
 	r.Json(out);
 }
 
@@ -732,7 +699,7 @@ static void WarningUnack(WebRequest& r)
 	if(!ApiAuthFamily(r, r.PathArg(0)))
 		return;
 	String id = TrimBoth(P(r, "id"));
-	if(!WarningIdValid(id)) {
+	if(!AtlasWarningIdValid(id)) {
 		ApiFail(r, 400, "id must be the warning id from the warnings list");
 		return;
 	}

@@ -1,5 +1,6 @@
 #include "AtlasSite.h"
 #include "AtlasDiagram.h"
+#include "AtlasImport.h"
 
 NAMESPACE_UPP
 
@@ -720,7 +721,8 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 	String file_err;
 	AtlasListFiles(r.Site().data_root, family, files, file_err);
 	AtlasVersionDiagram g;
-	AtlasBuildDiagram(d.f, d.head, d.rules, d.events, files, hidden, g);
+	String workspace = AtlasStartupWorkspace(r.Site().data_root, family);
+	AtlasBuildDiagram(d.f, d.head, d.rules, d.events, files, hidden, g, workspace);
 	if(g.rows.IsEmpty())
 		return "<p class=\"ad-empty\">No versions yet.</p>";
 
@@ -780,6 +782,9 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 						lines += WrapText("waits for " + JoinComma(b.waits), chars).GetCount();
 					if(b.unmet)
 						lines += WrapText("entry not produced above", chars).GetCount();
+					lines += WrapText("placement: " + b.placement, chars).GetCount();
+					if(b.local.GetCount())
+						lines += WrapText(b.local, chars).GetCount();
 				}
 				bx[i] = x0 + (full ? 0 : k * (slot + GAP));
 				bw[i] = slot;
@@ -892,6 +897,9 @@ static String DiagramBody(WebRequest& r, const RoadmapData& d, bool edit, const 
 				s << "<div style=\"color:var(--st-notready)\">waits for " << AtlasEsc(JoinComma(b.waits)) << "</div>";
 			if(b.unmet)
 				s << "<div style=\"color:var(--st-trouble)\">entry not produced above</div>";
+			s << "<div class=\"dg-k\">placement: " << AtlasEsc(b.placement) << "</div>";
+			if(b.local.GetCount())
+				s << "<div class=\"dg-k\">" << AtlasEsc(b.local) << "</div>";
 		}
 		else if(b.kind == "task") {
 			s << "<strong>" << BreakableName(b.text) << "</strong>"
@@ -1029,7 +1037,7 @@ static String WarningsBody(WebRequest& r, const RoadmapData& d, bool edit, const
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << warnings.GetCount() << "</div><div class=\"ad-card-label\">warnings</div></div>"
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << open << "</div><div class=\"ad-card-label\">open</div></div>"
 	  << "<div class=\"ad-card\"><div class=\"ad-card-value\">" << stale.GetCount() << "</div><div class=\"ad-card-label\">stale comments</div></div>"
-	  << "</div><p class=\"ad-note\">A warning does not block a change. An open warning is an error at the head until it has a comment: say why it is acceptable, or what will change in the plan. A comment goes stale when its finding changes or goes away.</p>";
+	  << "</div><p class=\"ad-note\">A warning does not block a change. Open warnings each raise one unacknowledged-warning error on the check until commented: say why it is acceptable, or what will change in the plan. A comment goes stale when its finding changes or goes away.</p>";
 
 	b << "<section class=\"ad-panel\"><header><h2>Findings</h2></header>"
 	  << "<div class=\"ad-table-wrap\"><table class=\"ad-table\"><tr><th>Status</th><th>Version</th><th>Subject</th><th>Rule</th><th>Finding</th><th>Comment</th></tr>";

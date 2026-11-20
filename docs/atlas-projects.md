@@ -15,7 +15,8 @@ site directory:
 | `--site-dir <dir>` | `<dir>/engine/atlas/projects.json` |
 
 The file is operator configuration: it names repository paths and editor accounts, so it lives in the user's
-configuration directory and never in a repository. It is read on each use, so edits take effect without a restart.
+configuration directory and never in a repository. The workspace setting is captured when the Atlas site starts, so
+changing it requires a restart.
 If the file is missing, there are no projects.
 
 ## Format
@@ -30,6 +31,7 @@ If the file is missing, there are no projects.
 | `name` | yes | The map family, and the first part of its map keys (`name-version`). A map id: letters, digits, `_` or `-`, at most 64 characters. Unique in the file. |
 | `repo` | yes | Absolute path of the repository root. |
 | `store` | no | Directory in the repository, relative to it, that holds the family's records: `<store>/data/families`, `maps`, `rules` and `events`. `..` and absolute paths are refused. Without a store the project has no records. |
+| `workspace` | no | Absolute local working-tree path used only to check whether a work bubble's package has a `.upp` file. Read at Atlas startup; when absent, the diagram shows no local checks. |
 | `title` | no | The project's title. Defaults to `name`. |
 | `level` | no | `public`, `protected` or `private`. Default `private`. The level of a map is set when it is created in Atlas. |
 | `editors` | no | Account names that may edit this project's maps without the admin role. Matched without case. |

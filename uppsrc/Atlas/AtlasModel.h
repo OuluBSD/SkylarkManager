@@ -13,6 +13,15 @@ bool AtlasIdValid(const String& id);          // [A-Za-z0-9_-], 1..64
 bool AtlasKindValid(const String& kind);      // continent | block | place | sea
 // A package name in U++ style: CapitalCase letters and digits, starting with a capital. "" is allowed (no package).
 bool AtlasPkgValid(const String& pkg);
+
+struct AtlasLocalAtomCheck : Moveable<AtlasLocalAtomCheck> {
+	String status;
+	String path;
+};
+
+// Checks only package directory evidence for built:/realized: atoms. Other atoms are explicitly not checked.
+AtlasLocalAtomCheck AtlasCheckLocalAtom(const String& workspace, const String& atom);
+String AtlasPlacementReason(const Vector<String>& entry);
 bool AtlasStatusValid(const String& status);  // hot | active | planned | not-ready | future | settled | trouble
 bool AtlasRoadKindValid(const String& kind);  // progress | communication | dependency
 
@@ -331,6 +340,23 @@ struct AtlasFile : Moveable<AtlasFile> {
 // A relative path inside a source root: not empty, not absolute, no "..", no backslash, no control character.
 bool AtlasSafeSourcePath(const String& path);
 
+struct AtlasArtifactCheck : Moveable<AtlasArtifactCheck> {
+	String name;
+	String kind = "file"; // file | file_list
+	String status;   // OK | MISSING | BAD | NOT DECLARED
+	String path;     // the path inspected, or a declaration note
+	String reason;
+	int64  size = -1;
+	int64  files_found = 0;
+	int64  min_files = 0;
+	int64  undersized_files = 0;
+};
+
+// Checks only the named artifact atoms against roots and relative paths declared in a manifest. It never writes.
+bool AtlasCheckArtifactManifest(const Vector<String>& names, const String& manifest_path,
+                               Vector<AtlasArtifactCheck>& out, String& error);
+String AtlasArtifactSummaryLine(const Vector<AtlasArtifactCheck>& checks);
+
 // Splits text into lines on '\n'; "" is no lines, and a trailing newline adds no line.
 Vector<String> AtlasSplitLines(const String& text);
 
@@ -401,6 +427,11 @@ void AtlasRoadmapReport(const AtlasMap& head, const AtlasFamily& f, const AtlasR
                         Vector<AtlasRoadmapMessage>& out, Vector<Vector<String>>& worlds);
 // The stable id of a finding: FNV-1a over its rule, subject, version and text, as 16 hex digits.
 String AtlasWarningId(const AtlasRoadmapMessage& m);
+// The warning id syntax accepted by the API and local operator tools.
+bool AtlasWarningIdValid(const String& id);
+// Validates a current warning and builds the stored acknowledgement. http_status preserves the API's 400/404 result.
+bool AtlasBuildWarningAck(const Vector<AtlasRoadmapMessage>& findings, const String& id, const String& comment,
+                          const String& actor, const String& at, AtlasWarningAck& out, int& http_status, String& error);
 // Comments whose warning is no longer among the findings: the plan changed, or the finding was fixed.
 Vector<AtlasWarningAck> AtlasStaleAcks(const Vector<AtlasRoadmapMessage>& findings, const Vector<AtlasWarningAck>& acks);
 // The strictness pass: appends messages about the rules themselves: unit-of-work shape, unread outcomes, and

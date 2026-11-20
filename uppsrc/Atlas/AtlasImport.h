@@ -14,8 +14,8 @@ NAMESPACE_UPP
 // store is a directory in the repository, relative to it, that holds the family's records in the store layout
 // (store/data/families, maps, rules and events). Atlas reads and writes those files directly: the repository is the
 // source of truth, and there is no import. level is the visibility of the project's maps (public, protected or
-// private); editors may edit the project's maps without the admin role. The file is read on each use, so edits take
-// effect without a restart.
+// private); editors may edit the project's maps without the admin role. Workspace is snapshotted at site startup;
+// the other project settings continue to be read on each use.
 // A named root of a project's source code: the files a roadmap file refers to are read below it. path is absolute.
 struct AtlasSource : Moveable<AtlasSource> {
 	String alias;
@@ -26,6 +26,7 @@ struct AtlasProject : Moveable<AtlasProject> {
 	String             name;
 	String             repo;
 	String             store;
+	String             workspace;
 	String             title;
 	String             level;
 	Vector<String>     editors;
@@ -33,6 +34,9 @@ struct AtlasProject : Moveable<AtlasProject> {
 };
 
 bool AtlasLoadProjects(const String& data_root, Vector<AtlasProject>& out, String& error);
+// Snapshot project configuration during site startup; workspace settings are served from this snapshot.
+bool AtlasLoadProjectsAtStartup(const String& data_root, String& error);
+String AtlasStartupWorkspace(const String& data_root, const String& family);
 // The absolute root of a project's source alias, or "" when the project or the alias is not registered.
 String AtlasSourceRoot(const String& data_root, const String& family, const String& alias);
 // Index of the named project in all, or -1.

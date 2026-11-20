@@ -3,6 +3,10 @@
 
 NAMESPACE_UPP
 
+static Mutex s_project_config_mutex;
+static String s_project_config_root;
+static Vector<AtlasProject> s_startup_projects;
+
 static String ProjectsPath(const String& data_root)
 {
 	return AppendFileName(data_root, "projects.json");
@@ -26,6 +30,7 @@ static bool ProjectFromJson(const ValueMap& v, AtlasProject& p, String& error)
 	p.name = JsonString(v, "name");
 	p.repo = JsonString(v, "repo");
 	p.store = JsonString(v, "store");
+	p.workspace = JsonString(v, "workspace");
 	p.title = JsonString(v, "title");
 	p.level = JsonString(v, "level");
 	if(p.title.IsEmpty())
@@ -43,6 +48,10 @@ static bool ProjectFromJson(const ValueMap& v, AtlasProject& p, String& error)
 	}
 	if(p.store.GetCount() && !SafeRelativePath(p.store)) {
 		error = "project " + p.name + ": store must be a relative path inside the repository";
+		return false;
+	}
+	if(p.workspace.GetCount() && !IsFullPath(p.workspace)) {
+		error = "project " + p.name + ": workspace must be an absolute path";
 		return false;
 	}
 	if(!ContentLevelParse(p.level, level)) {
@@ -122,6 +131,30 @@ bool AtlasLoadProjects(const String& data_root, Vector<AtlasProject>& out, Strin
 		out.Add(pick(p));
 	}
 	return true;
+}
+
+bool AtlasLoadProjectsAtStartup(const String& data_root, String& error)
+{
+	Vector<AtlasProject> projects;
+	if(!AtlasLoadProjects(data_root, projects, error)) {
+		Mutex::Lock lock(s_project_config_mutex);
+		s_project_config_root = data_root;
+		s_startup_projects.Clear();
+		return false;
+	}
+	Mutex::Lock lock(s_project_config_mutex);
+	s_project_config_root = data_root;
+	s_startup_projects = pick(projects);
+	return true;
+}
+
+String AtlasStartupWorkspace(const String& data_root, const String& family)
+{
+	Mutex::Lock lock(s_project_config_mutex);
+	if(data_root != s_project_config_root)
+		return String();
+	int i = AtlasFindProject(s_startup_projects, family);
+	return i < 0 ? String() : s_startup_projects[i].workspace;
 }
 
 String AtlasSourceRoot(const String& data_root, const String& family, const String& alias)
