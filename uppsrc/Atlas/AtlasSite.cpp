@@ -425,6 +425,15 @@ bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEve
 	return true;
 }
 
+bool AtlasPutEventGuarded(const String& data_root, const String& family, const AtlasEvent& e,
+                         const AtlasMap& before, const AtlasMap& after, const Vector<AtlasEvent>& batch,
+                         const Vector<AtlasClaim>& claims, const String& actor, Time now, String& error)
+{
+	if(!AtlasValidateProtectedWrite(before, after, batch, claims, actor, now, error))
+		return false;
+	return AtlasPutEvent(data_root, family, e, error);
+}
+
 static String ClaimKey(const String& family, const String& element_id, const String& target_vid)
 {
 	return family + "." + element_id + "." + target_vid;
@@ -1306,7 +1315,8 @@ static void ElementView(WebRequest& r)
 	b << "<p><a href=\"" << Esc(base) << "\">Back to the map</a></p>";
 	b << "<dl class=\"facts\"><dt>Id</dt><dd>" << Esc(e.id) << "</dd><dt>Kind</dt><dd>" << Esc(e.kind)
 	  << "</dd><dt>Status</dt><dd><span class=\"status status-" << Esc(e.status) << "\">" << Esc(e.status)
-	  << "</span></dd><dt>Goal</dt><dd>" << (e.goal.picked ? "picked" : "not picked") << "</dd>"
+	  << "</span></dd><dt>Protection</dt><dd>" << (e.protected_block ? "protected" : "unprotected")
+	  << "</dd><dt>Goal</dt><dd>" << (e.goal.picked ? "picked" : "not picked") << "</dd>"
 	  << "<dt>Inside</dt><dd>" << AtlasChildCount(m, e.id) << " elements</dd>"
 	  << "<dt>Updated</dt><dd>" << Esc(e.updated_at) << "</dd></dl>";
 
@@ -1353,6 +1363,8 @@ static void ElementView(WebRequest& r)
 		  << "<label>Name <input name=\"name\" required value=\"" << Esc(e.name) << "\"></label>"
 		  << "<label>Kind <select name=\"kind\">" << KindOptions(e.kind) << "</select></label>"
 		  << "<label>Status <select name=\"status\">" << StatusOptions(e.status) << "</select></label>"
+		  << (e.protected_block ? String("<label><input type=\"checkbox\" checked disabled> Protected block (use an unlock event to clear)</label>")
+		                         : String("<label><input type=\"checkbox\" name=\"protected\" value=\"1\"> Protect this block</label>"))
 		  << "<label>Parent <select name=\"parent\">" << ParentOptions(m, e.parent) << "</select></label>"
 		  << "<label>x <input name=\"x\" type=\"number\" value=\"" << e.x << "\"></label>"
 		  << "<label>y <input name=\"y\" type=\"number\" value=\"" << e.y << "\"></label>"

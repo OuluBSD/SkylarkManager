@@ -533,6 +533,7 @@ String AtlasSubjectsView(WebRequest& r, const AtlasMap& head, const AtlasFamily&
 		  << hidden_vid << Field("Name", "name", "", "") << Field("Parent (optional id)", "parent", "", "")
 		  << "<label>Kind <select name=\"kind\">" << Options(KindNames, 4, "block") << "</select></label>"
 		  << "<label>Status <select name=\"status\">" << Options(StatusNames, 7, "planned") << "</select></label>"
+		  << "<label><input type=\"checkbox\" name=\"protected\" value=\"1\"> Protect this block</label>"
 		  << Field("x", "x", "0", "") << Field("y", "y", "0", "") << Field("w", "w", "180", "") << Field("h", "h", "100", "")
 		  << "<button class=\"ad-btn is-primary\" type=\"submit\">Add element</button></form></details>";
 		b << "<details class=\"ad-panel\"><summary>Connect two elements at " << AtlasEsc(VidLabel(f, vid)) << "</summary>"
@@ -593,6 +594,21 @@ String AtlasSubjectsView(WebRequest& r, const AtlasMap& head, const AtlasFamily&
 			t << "<p class=\"ad-empty\">No events for this subject up to this version.</p>";
 		if(edit) {
 			String subj = "<input type=\"hidden\" name=\"subject_kind\" value=\"" + AtlasEsc(st.kind) + "\"><input type=\"hidden\" name=\"subject_id\" value=\"" + AtlasEsc(st.id) + "\">";
+			if(st.kind == "element") {
+				t << "<div class=\"ad-form\"><strong>Worker claim</strong>"
+				  << ApiForm(Api(r, family, "/claim"), "ad-inline")
+				  << "<input type=\"hidden\" name=\"element_id\" value=\"" << AtlasEsc(st.id) << "\">" << hidden_vid
+				  << "<input type=\"hidden\" name=\"lease_seconds\" value=\"3600\"><button class=\"ad-btn\" type=\"submit\">Claim for one hour</button></form>"
+				  << ApiForm(Api(r, family, "/claim/release"), "ad-inline")
+				  << "<input type=\"hidden\" name=\"element_id\" value=\"" << AtlasEsc(st.id) << "\">" << hidden_vid
+				  << "<button class=\"ad-btn\" type=\"submit\">Release my claim</button></form>";
+				int head_index = head.FindElement(st.id);
+				if(head_index >= 0 && head.elements[head_index].protected_block)
+					t << ApiForm(Api(r, family, "/event/add"), "ad-inline") << subj << hidden_vid
+					  << "<input type=\"hidden\" name=\"type\" value=\"unlock\"><label>Unlock reason <input name=\"text\" required></label>"
+					  << "<button class=\"ad-btn\" type=\"submit\">Unlock protected block</button></form>";
+				t << "</div>";
+			}
 			t << ApiForm(Api(r, family, "/event/add")) << subj << hidden_vid << "<input type=\"hidden\" name=\"type\" value=\"note\">"
 			  << "<label>Add a note <textarea name=\"text\" class=\"ad-note-input\"></textarea></label>"
 			  << "<button class=\"ad-btn\" type=\"submit\">Add note</button></form>";

@@ -44,6 +44,9 @@ bool AtlasCreateFamily(const String& data_root, const String& family, const Atla
                        String& new_revision, String& error);
 bool AtlasLoadEvents(const String& data_root, const String& family, Vector<AtlasEvent>& out, String& error);
 bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEvent& e, String& error);
+bool AtlasPutEventGuarded(const String& data_root, const String& family, const AtlasEvent& e,
+                          const AtlasMap& before, const AtlasMap& after, const Vector<AtlasEvent>& batch,
+                          const Vector<AtlasClaim>& claims, const String& actor, Time now, String& error);
 // Claims are separate revisioned records, keyed by family, element id and target vid; they do not append events.
 bool AtlasLoadClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
                     AtlasClaim& out, String& error);

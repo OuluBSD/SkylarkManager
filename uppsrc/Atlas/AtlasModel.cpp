@@ -731,7 +731,7 @@ int AtlasStageRank(const String& stage)
 bool AtlasEventTypeValid(const String& subject_kind, const String& type)
 {
 	if(subject_kind == "element")
-		return type == "created" || type == "removed" || type == "stage" || type == "status" || type == "note";
+		return type == "created" || type == "removed" || type == "stage" || type == "status" || type == "note" || type == "unlock";
 	if(subject_kind == "road")
 		return type == "connected" || type == "disconnected" || type == "modified" || type == "note";
 	if(subject_kind == "task")
@@ -751,7 +751,7 @@ static bool NeedsHeadSubject(const String& subject_kind, const String& type)
 {
 	if(subject_kind == "task")
 		return false;
-	return type == "note" || type == "stage" || type == "status" || type == "modified";
+	return type == "note" || type == "stage" || type == "status" || type == "modified" || type == "unlock";
 }
 
 void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMap& head, AtlasCheck& out)
@@ -776,11 +776,99 @@ void AtlasValidateEvent(const AtlasEvent& e, const AtlasFamily& f, const AtlasMa
 		out.errors.Add("event " + e.id + ": unknown stage '" + e.stage + "'");
 	if(e.type == "status" && !AtlasStatusValid(e.status))
 		out.errors.Add("event " + e.id + ": unknown status '" + e.status + "'");
+	if(e.type == "unlock" && TrimBoth(e.text).IsEmpty())
+		out.errors.Add("unlock event " + e.id + " needs a reason");
 	if(e.type == "proposed" && f.Find(e.target) < 0)
 		out.errors.Add("task " + e.subject_id + " names an unknown target version: " + e.target);
 	if(e.subject_kind == "road" && (e.type == "connected" || e.type == "disconnected")
 	   && (e.from.IsEmpty() || e.to.IsEmpty()))
 		out.errors.Add("event " + e.id + ": a road event needs both endpoints in the snapshot");
+}
+
+bool AtlasValidateProtectedWrite(const AtlasMap& before, const AtlasMap& after, const Vector<AtlasEvent>& events,
+                                 const Vector<AtlasClaim>& claims, const String& actor, Time now, String& error)
+{
+	Vector<String> unlocked;
+	for(const AtlasEvent& event : events) {
+		if(event.type != "unlock")
+			continue;
+		if(event.subject_kind != "element" || event.actor != actor || TrimBoth(event.text).IsEmpty()) {
+			error = "unlock must name an element, the signed-in actor, and a reason";
+			return false;
+		}
+		int old_index = before.FindElement(event.subject_id);
+		int new_index = after.FindElement(event.subject_id);
+		if(old_index < 0 || !before.elements[old_index].protected_block
+		|| (new_index >= 0 && after.elements[new_index].protected_block)) {
+			error = "unlock requires a protected element and must clear its protected flag";
+			return false;
+		}
+		bool owns_claim = false;
+		for(const AtlasClaim& claim : claims)
+			if(claim.element_id == event.subject_id && claim.target_vid == event.vid && claim.owner == actor
+			&& AtlasClaimLeaseAlive(claim, now)) {
+				owns_claim = true;
+				break;
+			}
+		if(!owns_claim) {
+			error = "unlock requires the active claim for this element and version";
+			return false;
+		}
+		bool recorded = false;
+		for(const String& id : unlocked)
+			if(id == event.subject_id)
+				recorded = true;
+		if(!recorded)
+			unlocked.Add(event.subject_id);
+	}
+
+	for(const AtlasElement& old : before.elements) {
+		if(!old.protected_block)
+			continue;
+		int new_index = after.FindElement(old.id);
+		bool changed = new_index < 0 || StoreAsJson(old) != StoreAsJson(after.elements[new_index]);
+		bool touched = false;
+		for(const AtlasEvent& event : events)
+			if((event.subject_kind == "element" && event.subject_id == old.id)
+			|| (event.subject_kind == "road" && (event.from == old.id || event.to == old.id))) {
+				touched = true;
+				break;
+			}
+		bool has_unlock = false;
+		for(const String& id : unlocked)
+			if(id == old.id)
+				has_unlock = true;
+		if((changed || touched) && !has_unlock) {
+			error = "protected element " + old.id + " requires an authorized unlock event";
+			return false;
+		}
+	}
+
+	for(const AtlasClaim& claim : claims) {
+		if(claim.owner == actor || !AtlasClaimLeaseAlive(claim, now))
+			continue;
+		bool changed = false;
+		int old_index = before.FindElement(claim.element_id);
+		int new_index = after.FindElement(claim.element_id);
+		if(old_index >= 0)
+			changed = new_index < 0 || StoreAsJson(before.elements[old_index]) != StoreAsJson(after.elements[new_index]);
+		for(const AtlasEvent& event : events)
+			if((event.subject_kind == "element" && event.subject_id == claim.element_id && event.vid == claim.target_vid)
+			|| (event.subject_kind == "road" && event.vid == claim.target_vid
+			    && (event.from == claim.element_id || event.to == claim.element_id))
+			|| (event.subject_kind == "task" && event.vid == claim.target_vid
+			    && event.link == "element:" + claim.element_id)) {
+				changed = true;
+				break;
+			}
+		if(changed) {
+			error = "element " + claim.element_id + " is claimed by " + claim.owner + " for " + claim.target_vid;
+			return false;
+		}
+	}
+
+	error.Clear();
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1423,6 +1511,7 @@ AtlasElement AtlasCopyElement(const AtlasElement& e)
 	x.name = e.name;
 	x.parent = e.parent;
 	x.status = e.status;
+	x.protected_block = e.protected_block;
 	x.x = e.x;
 	x.y = e.y;
 	x.w = e.w;

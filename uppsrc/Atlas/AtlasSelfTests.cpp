@@ -2102,6 +2102,72 @@ static void ClaimStoreChecks(const String& scratch)
 	      "the claim list returns active per-element/version records");
 }
 
+static void ProtectedWriteChecks()
+{
+	String actor = "owner";
+	Time now = GetSysTime();
+	AtlasMap before = SmallMap();
+	AtlasMap after = SmallMap();
+	String id = before.elements[0].id;
+	before.elements[0].protected_block = true;
+	after.elements[0].protected_block = true;
+	after.elements[0].name = "Edited while protected";
+	AtlasMap round_trip;
+	Check(AtlasCopyElement(before.elements[0]).protected_block
+	      && LoadFromJson(round_trip, StoreAsJson(before)) && round_trip.elements[0].protected_block,
+	      "the protected flag survives element copying and map serialization");
+	Vector<AtlasEvent> events;
+	Vector<AtlasClaim> claims;
+	String error;
+	Check(!AtlasValidateProtectedWrite(before, after, events, claims, actor, now, error)
+	      && error.Find("protected element") >= 0,
+	      "a protected element edit is rejected without an unlock event");
+
+	after.elements[0].protected_block = false;
+	AtlasEvent unlock;
+	unlock.id = "unlock-1";
+	unlock.vid = "v1";
+	unlock.subject_kind = "element";
+	unlock.subject_id = id;
+	unlock.type = "unlock";
+	unlock.text = "Owner approved the edit";
+	unlock.actor = actor;
+	events.Add(pick(unlock));
+	AtlasClaim claim;
+	claim.element_id = id;
+	claim.target_vid = "v1";
+	claim.owner = actor;
+	claim.acquired_at = now;
+	claim.lease_seconds = 600;
+	claims.Add(claim);
+	Check(AtlasValidateProtectedWrite(before, after, events, claims, actor, now, error),
+	      "an active owner claim and named unlock permit the protected edit");
+
+	events.Clear();
+	AtlasEvent note;
+	note.subject_kind = "element";
+	note.subject_id = id;
+	note.vid = "v1";
+	note.type = "note";
+	note.actor = actor;
+	note.text = "note";
+	events.Add(pick(note));
+	Check(!AtlasValidateProtectedWrite(before, before, events, claims, actor, now, error)
+	      && error.Find("protected element") >= 0,
+	      "a new event on a protected element is rejected without unlock");
+
+	AtlasMap open = SmallMap();
+	AtlasMap changed = SmallMap();
+	changed.elements[0].name = "claimed edit";
+	AtlasClaim other_claim = claim;
+	other_claim.owner = "alice";
+	Vector<AtlasClaim> other_claims;
+	other_claims.Add(other_claim);
+	Check(!AtlasValidateProtectedWrite(open, changed, Vector<AtlasEvent>(), other_claims, "bob", now, error)
+	      && error.Find("claimed by alice") >= 0,
+	      "a different worker cannot edit an element with an active claim");
+}
+
 static void SourceChecks(const String& scratch)
 {
 	String outside = AppendFileName(scratch, "source-outside");
@@ -2395,6 +2461,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	FileStoreChecks(scratch_dir);
 	AckStoreChecks(scratch_dir);
 	ClaimStoreChecks(scratch_dir);
+	ProtectedWriteChecks();
 	SourceChecks(scratch_dir);
 	AtlasVersionToolChecks(scratch_dir);
 	ArtifactManifestChecks(scratch_dir);

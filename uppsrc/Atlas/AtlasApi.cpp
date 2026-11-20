@@ -203,6 +203,26 @@ static void ReplyFamily(WebRequest& r, const AtlasFamily& f, const String& rev)
 static void Commit(WebRequest& r, const AtlasFamily& f, const String& family, AtlasMap& head,
                    const String& hrev, Vector<AtlasEvent>& events, bool head_changed)
 {
+	AtlasMap before;
+	String current_revision, err;
+	if(!AtlasLoadMap(r.Site().data_root, f.head_key, before, current_revision, err)) {
+		ApiFail(r, 404, err);
+		return;
+	}
+	if(current_revision != hrev) {
+		ApiFail(r, 409, "the map changed before this write; read it again and retry");
+		return;
+	}
+	Vector<AtlasClaim> claims;
+	if(!AtlasLoadClaims(r.Site().data_root, family, claims, err)) {
+		ApiFail(r, 500, "could not read block claims: " + err);
+		return;
+	}
+	Time guard_time = GetSysTime();
+	if(!AtlasValidateProtectedWrite(before, head, events, claims, r.User().username, guard_time, err)) {
+		ApiFail(r, 423, err);
+		return;
+	}
 	AtlasCheck check;
 	if(head_changed)
 		AtlasValidate(head, check);
@@ -213,14 +233,14 @@ static void Commit(WebRequest& r, const AtlasFamily& f, const String& family, At
 		return;
 	}
 	String rev = hrev;
-	String err;
 	if(head_changed && !AtlasSaveMap(r.Site().data_root, f.head_key, head, hrev, rev, err)) {
 		ApiFail(r, err.Find("revision conflict") >= 0 ? 409 : 500, err);
 		return;
 	}
 	ValueArray ids;
 	for(const AtlasEvent& e : events) {
-		if(!AtlasPutEvent(r.Site().data_root, family, e, err)) {
+		if(!AtlasPutEventGuarded(r.Site().data_root, family, e, before, head, events, claims,
+		                         r.User().username, guard_time, err)) {
 			ApiFail(r, 500, "the map was saved but event " + e.id + " was not stored: " + err);
 			return;
 		}
@@ -1122,7 +1142,7 @@ static void EventsGet(WebRequest& r)
 // Writes: events on their own, and changes to the topology with their events.
 // ---------------------------------------------------------------------------
 
-// An event on an element or road: a note, a stage, or a status. Topology changes have their own routes.
+// An event on an element or road: a note, stage, status or protected-block unlock. Topology changes have their own routes.
 static void EventAdd(WebRequest& r)
 {
 	if(!ApiAuthFamily(r, r.PathArg(0)))
@@ -1138,15 +1158,24 @@ static void EventAdd(WebRequest& r)
 	String type = P(r, "type");
 	String kind = P(r, "subject_kind");
 	String subject = P(r, "subject_id");
-	// created and removed for an element already in the head record when it is present at a version (for
-	// example, a seed element that first appears in 0.0.1). New elements come from element/create.
+	// created, removed and unlock events apply to an element already in the head record. New elements come from element/create.
 	bool presence = kind == "element" && (type == "created" || type == "removed");
-	if(type != "note" && type != "stage" && type != "status" && !presence) {
-		ApiFail(r, 400, "event/add takes note, stage or status, and created or removed for an element of the head; connected, disconnected and modified come from the road routes, and new elements from element/create");
+	bool unlock = type == "unlock" && kind == "element";
+	if(type != "note" && type != "stage" && type != "status" && !presence && !unlock) {
+		ApiFail(r, 400, "event/add takes note, stage or status, created or removed, or unlock for a protected element");
 		return;
 	}
-	if(presence && head.FindElement(subject) < 0) {
+	int subject_index = head.FindElement(subject);
+	if(presence && subject_index < 0) {
 		ApiFail(r, 400, "element " + subject + " is not in the head map; new elements come from element/create");
+		return;
+	}
+	if(unlock && (subject_index < 0 || !head.elements[subject_index].protected_block)) {
+		ApiFail(r, 409, "element is not protected");
+		return;
+	}
+	if(unlock && TrimBoth(P(r, "text")).IsEmpty()) {
+		ApiFail(r, 400, "an unlock event needs a reason");
 		return;
 	}
 	AtlasRules rules;
@@ -1166,6 +1195,11 @@ static void EventAdd(WebRequest& r)
 		return;
 	}
 	bool head_changed = false;
+	if(unlock) {
+		head.elements[subject_index].protected_block = false;
+		head.elements[subject_index].updated_at = AtlasNowIso();
+		head_changed = true;
+	}
 	// A status at the head is also the head's visible status, so the head document follows it.
 	if(type == "status" && f.versions.GetCount() && vid == f.versions[f.Head()].vid && kind == "element") {
 		int i = head.FindElement(subject);
@@ -1200,6 +1234,7 @@ static void ElementCreate(WebRequest& r)
 	el.id = AtlasUniqueElementId(head, el.name);
 	el.kind = P(r, "kind");
 	el.status = P(r, "status");
+	el.protected_block = P(r, "protected") == "1" || P(r, "protected") == "true";
 	el.parent = P(r, "parent");
 	el.x = IntP(r, "x");
 	el.y = IntP(r, "y");
@@ -1236,6 +1271,7 @@ static void ElementUpdate(WebRequest& r)
 	AtlasElement& el = head.elements[i];
 	if(P(r, "name").GetCount()) el.name = P(r, "name");
 	if(P(r, "kind").GetCount()) el.kind = P(r, "kind");
+	if(P(r, "protected").GetCount()) el.protected_block = P(r, "protected") == "1" || P(r, "protected") == "true";
 	if(P(r, "parent").GetCount()) el.parent = P(r, "parent");
 	if(P(r, "x").GetCount()) el.x = IntP(r, "x");
 	if(P(r, "y").GetCount()) el.y = IntP(r, "y");
@@ -1715,18 +1751,18 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-events", "GET", "api/atlas/*/events", read,
 	        "json", "Events, filtered by subject or version", { "map:string:required", "subject_kind:string", "subject_id:string", "vid:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-event-add", "POST", "api/atlas/*/event/add", write,
-	        "json", "Add a note, stage or status event to an element or road, or created/removed for a head element (its presence at a version); action runs a named rule action",
+	        "json", "Add a note, stage, status, or protected-block unlock event, or created/removed for a head element",
 	        { "map:string:required", "subject_kind:string:required", "subject_id:string:required", "type:string:required",
 	          "vid:string", "stage:string", "status:string", "text:text", "requires:string", "effects:string",
 	          "action:string", "expected_revision:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-element-create", "POST", "api/atlas/*/element/create", write,
 	        "json", "Create an element at a version (writes a created event)",
 	        { "map:string:required", "name:string:required", "kind:string:required", "status:string:required",
-	          "parent:string", "x:int", "y:int", "w:int", "h:int", "vid:string", "text:text" }));
+	          "parent:string", "x:int", "y:int", "w:int", "h:int", "protected:string", "vid:string", "text:text" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-element-update", "POST", "api/atlas/*/element/update", write,
 	        "json", "Change an element's layout or description (no event)",
 	        { "map:string:required", "id:string:required", "name:string", "kind:string", "parent:string",
-	          "x:int", "y:int", "w:int", "h:int", "notes:text", "goal_picked:string", "goal_note:string" }));
+	          "x:int", "y:int", "w:int", "h:int", "protected:string", "notes:text", "goal_picked:string", "goal_note:string" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-element-remove", "POST", "api/atlas/*/element/remove", write,
 	        "json", "Remove an element (its roads are disconnected, with events)",
 	        { "map:string:required", "id:string:required", "vid:string", "text:text" }));

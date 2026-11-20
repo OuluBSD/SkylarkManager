@@ -49,6 +49,7 @@ struct AtlasElement : Moveable<AtlasElement> {
 	String    name;
 	String    parent;      // "" = directly on the world plane
 	String    status;
+	bool      protected_block = false; // writes need an authorized unlock event
 	int       x = 0, y = 0, w = 0, h = 0; // relative to the parent plane
 	AtlasGoal goal;
 	String    notes;
@@ -57,7 +58,7 @@ struct AtlasElement : Moveable<AtlasElement> {
 	Vector<AtlasUiAction> ui; // the user-interface block: what a user can do with the features this element delivers
 
 	void Jsonize(JsonIO& io) {
-		io("id", id)("kind", kind)("name", name)("parent", parent)("status", status)
+		io("id", id)("kind", kind)("name", name)("parent", parent)("status", status)("protected", protected_block)
 		  ("x", x)("y", y)("w", w)("h", h)("goal", goal)("notes", notes)("updated_at", updated_at)("pkg", pkg)("ui", ui);
 	}
 };
@@ -217,6 +218,8 @@ struct AtlasClaim : Moveable<AtlasClaim> {
 };
 
 bool AtlasClaimLeaseAlive(const AtlasClaim& claim, Time now);
+bool AtlasValidateProtectedWrite(const AtlasMap& before, const AtlasMap& after, const Vector<AtlasEvent>& events,
+                                 const Vector<AtlasClaim>& claims, const String& actor, Time now, String& error);
 
 // Stages, in the pull-request order: planned -> implementation_research -> implementation -> trials -> merge_to_master.
 bool AtlasStageValid(const String& stage);
