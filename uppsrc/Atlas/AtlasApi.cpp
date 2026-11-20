@@ -679,6 +679,24 @@ static void MergeBaseGet(WebRequest& r)
 	r.Json(out);
 }
 
+static ValueMap MergeRecordValue(const AtlasMergeRecord& record);
+
+static void MergeRecordGet(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	AtlasMergeRecord record;
+	String error;
+	if(!AtlasLoadMergeRecord(r.Site().data_root, family, P(r, "source_work_id"), record, error)) {
+		ApiFail(r, error == "merge record not found" ? 404 : 500, error);
+		return;
+	}
+	ValueMap out = MergeRecordValue(record);
+	out.Add("ok", true);
+	r.Json(out);
+}
+
 static ValueMap MergeRecordValue(const AtlasMergeRecord& record)
 {
 	ValueMap out;
@@ -1844,6 +1862,7 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/claim/release", ClaimReleasePost);
 	rt.Add("api/atlas/*/merge/base", MergeBaseGet);
 	rt.Add("POST", "api/atlas/*/merge/base", MergeBasePost);
+	rt.Add("api/atlas/*/merge/record", MergeRecordGet);
 	rt.Add("POST", "api/atlas/*/merge", MergePost);
 	rt.Add("api/atlas/*/check", CheckGet);
 	rt.Add("api/atlas/*/warnings", WarningsGet);
@@ -1964,6 +1983,9 @@ void InstallAtlasApi(EngineSite& site)
 	        { "map:string:required", "source_work_id:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-merge-base-get", "GET", "api/atlas/*/merge/base", write,
 	        "json", "Read the recorded base snapshot for a work item",
+	        { "map:string:required", "source_work_id:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-merge-record", "GET", "api/atlas/*/merge/record", write,
+	        "json", "Read the latest merge result and conflict resolutions for a work item",
 	        { "map:string:required", "source_work_id:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-merge", "POST", "api/atlas/*/merge", write,
 	        "json", "Three-way merge a work snapshot against current Atlas state",

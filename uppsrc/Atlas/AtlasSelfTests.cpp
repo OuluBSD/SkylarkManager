@@ -2188,6 +2188,11 @@ static void MergeApplyChecks(const String& scratch)
 	                      resolutions, merged, status, error)
 	      && status == 200 && merged.status == "merged" && merged.retries > 0,
 	      "merge apply rebases on a moved map revision and merges disjoint fields");
+	AtlasMergeRecord saved_merge;
+	Check(AtlasLoadMergeRecord(data, family.head_key, "work_disjoint", saved_merge, error)
+	      && saved_merge.source_work_id == "work_disjoint" && saved_merge.actor == "owner"
+	      && saved_merge.base_map_revision == base.base_map_revision && saved_merge.status == "merged",
+	      "the merge record retains source work ID, base revision and merge actor");
 	AtlasMap after;
 	String after_revision;
 	Check(AtlasLoadMap(data, family.head_key, after, after_revision, error)
@@ -2212,10 +2217,35 @@ static void MergeApplyChecks(const String& scratch)
 	      && status == 409 && conflict_record.status == "conflict" && conflict_record.conflicts.GetCount() == 1
 	      && conflict_record.conflicts[0].resolution == "none",
 	      "divergent edits return an unresolved conflict");
+	AtlasMergeRecord saved_conflict;
+	Check(AtlasLoadMergeRecord(data, family.head_key, "work_conflict", saved_conflict, error)
+	      && saved_conflict.status == "conflict" && saved_conflict.conflicts.GetCount() == 1
+	      && saved_conflict.conflicts[0].resolution == "none",
+	      "unresolved conflicts are persisted for owner review");
 	Check(AtlasLoadMap(data, family.head_key, after, after_revision, error)
 	      && after.elements[0].name == "Ours edit",
 	      "a conflicting merge does not save either side over the current head");
 
+	AtlasMergeResolution owner_choice;
+	owner_choice.path = "map/elements/" + ours_conflict.elements[0].id + "/name";
+	owner_choice.choice = "theirs";
+	resolutions.Clear();
+	resolutions.Add(pick(owner_choice));
+	AtlasMergeRecord resolved_merge;
+	Check(AtlasApplyMerge(data, family.head_key, "work_conflict", "owner", theirs_conflict,
+	                      conflict_base.base_family, resolutions, resolved_merge, status, error)
+	      && status == 200 && resolved_merge.status == "merged"
+	      && resolved_merge.conflicts.GetCount() == 1 && resolved_merge.conflicts[0].resolution == "theirs"
+	      && resolved_merge.conflicts[0].resolved_by == "owner",
+	      "an owner decision resolves and records the conflicting field choice");
+	Check(AtlasLoadMergeRecord(data, family.head_key, "work_conflict", saved_conflict, error)
+	      && saved_conflict.conflicts.GetCount() == 1 && saved_conflict.conflicts[0].resolution == "theirs",
+	      "the resolved conflict choice persists in the merge record");
+	Check(AtlasLoadMap(data, family.head_key, after, after_revision, error)
+	      && after.elements[0].name == "Theirs edit",
+	      "the owner-selected conflict value is saved to the head");
+
+	resolutions.Clear();
 	AtlasMergeBase invalid_base;
 	Check(AtlasCaptureMergeBase(data, family.head_key, "work_invalid", "agent_a", invalid_base, error),
 	      "a replay-validation work item captures its base");
@@ -2223,13 +2253,16 @@ static void MergeApplyChecks(const String& scratch)
 	LoadFromJson(invalid_theirs, StoreAsJson(after));
 	invalid_theirs.elements[0].parent = "missing-parent";
 	AtlasMergeRecord rejected;
-	Check(AtlasApplyMerge(data, family.head_key, "work_invalid", "owner", invalid_theirs,
-	                      invalid_base.base_family, resolutions, rejected, status, error)
-	      && status == 422 && rejected.status == "rejected",
+	bool invalid_merge_ok = AtlasApplyMerge(data, family.head_key, "work_invalid", "owner", invalid_theirs,
+	                                        invalid_base.base_family, resolutions, rejected, status, error);
+	if(!invalid_merge_ok || status != 422 || rejected.status != "rejected")
+		Cout() << "merge replay diagnostic: ok=" << invalid_merge_ok << " status=" << status
+		       << " record=" << rejected.status << " error=" << error << "\n";
+	Check(invalid_merge_ok && status == 422 && rejected.status == "rejected",
 	      "a merged head that breaks structural replay validation is refused");
 	AtlasMap still_current;
 	Check(AtlasLoadMap(data, family.head_key, still_current, after_revision, error)
-	      && still_current.elements[0].name == "Ours edit" && still_current.elements[0].parent.IsEmpty(),
+	      && still_current.elements[0].name == "Theirs edit" && still_current.elements[0].parent.IsEmpty(),
 	      "a rejected merge leaves the current head untouched");
 }
 

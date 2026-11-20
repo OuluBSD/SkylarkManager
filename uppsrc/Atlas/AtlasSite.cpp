@@ -416,6 +416,44 @@ bool AtlasCaptureMergeBase(const String& data_root, const String& family, const 
 	return true;
 }
 
+static String MergeRecordKey(const String& family, const String& source_work_id)
+{
+	return family + "." + source_work_id;
+}
+
+bool AtlasLoadMergeRecord(const String& data_root, const String& family, const String& source_work_id,
+                          AtlasMergeRecord& out, String& error)
+{
+	String json, revision;
+	StoreResult g = Merges(AtlasStoreRoot(data_root, family)).Get(MergeRecordKey(family, source_work_id), json, revision);
+	if(!g.ok) {
+		error = g.error == "record not found" ? String("merge record not found") : g.error;
+		return false;
+	}
+	if(!LoadFromJson(out, json) || out.source_work_id != source_work_id) {
+		error = "merge record is unreadable: " + source_work_id;
+		return false;
+	}
+	out.revision = revision;
+	return true;
+}
+
+bool AtlasSaveMergeRecord(const String& data_root, const String& family, const AtlasMergeRecord& record,
+                          const String& expected_revision, String& new_revision, String& error)
+{
+	if(!AtlasIdValid(family) || !AtlasIdValid(record.source_work_id) || record.actor.IsEmpty()) {
+		error = "merge record requires a valid source work ID and actor";
+		return false;
+	}
+	StoreResult p = Merges(AtlasStoreRoot(data_root, family)).Put(
+		MergeRecordKey(family, record.source_work_id), StoreAsJson(record), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
 static bool SameFinding(const AtlasRoadmapMessage& a, const AtlasRoadmapMessage& b)
 {
 	return a.severity == b.severity && a.rule == b.rule && a.subject_kind == b.subject_kind
@@ -462,10 +500,10 @@ static bool MergeRevisionConflict(const String& error)
 	return error.Find("revision conflict") >= 0 || error.Find("revision mismatch") >= 0 || error.Find("changed") >= 0;
 }
 
-bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
-                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
-                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
-                     int& http_status, String& error)
+static bool AtlasApplyMergeCore(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                                const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                                const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                                int& http_status, String& error)
 {
 	AtlasMergeBase base;
 	if(!AtlasLoadMergeBase(data_root, family, source_work_id, base, error)) {
@@ -649,6 +687,36 @@ bool AtlasApplyMerge(const String& data_root, const String& family, const String
 	http_status = 409;
 	out = pick(record);
 	error = out.error;
+	return true;
+}
+
+bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                     int& http_status, String& error)
+{
+	AtlasMergeRecord previous;
+	String expected_revision;
+	if(AtlasLoadMergeRecord(data_root, family, source_work_id, previous, error))
+		expected_revision = previous.revision;
+	else if(error == "merge record not found")
+		expected_revision = RecordAbsent();
+	else {
+		http_status = 500;
+		return false;
+	}
+
+	AtlasMergeRecord result;
+	if(!AtlasApplyMergeCore(data_root, family, source_work_id, actor, theirs_map, theirs_family,
+	                        resolutions, result, http_status, error))
+		return false;
+	String revision;
+	if(!AtlasSaveMergeRecord(data_root, family, result, expected_revision, revision, error)) {
+		http_status = 409;
+		return false;
+	}
+	result.revision = revision;
+	out = pick(result);
 	return true;
 }
 
