@@ -161,8 +161,18 @@ static int BytesPerPixel(const String& content_type)
 	return 0;
 }
 
+// A layer the frame lists as hidden is switched off for the frame, so its regions are not exported. A region
+// whose layer the frame does not list is exported as before; the store never writes one.
+static bool LayerHidden(const Vector<FrameLayer>& layers, const String& layer_id)
+{
+	for(const FrameLayer& l : layers)
+		if(l.id == layer_id)
+			return !l.visible;
+	return false;
+}
+
 bool ExportCrops(const String& frame_id, const String& raw, int width, int height,
-                 const String& content_type, const Vector<Region>& regions,
+                 const String& content_type, const Vector<FrameLayer>& layers, const Vector<Region>& regions,
                  Vector<CropResult>& crops, String& manifest_json, String& error)
 {
 	crops.Clear();
@@ -176,6 +186,8 @@ bool ExportCrops(const String& frame_id, const String& raw, int width, int heigh
 		return false;
 	}
 	for(const Region& rg : regions) {
+		if(LayerHidden(layers, rg.layer))
+			continue;
 		const AnnRect& r = rg.rect;
 		if(!RectInside(r, width, height)) {
 			error = "region " + rg.id + " lies outside the frame";

@@ -107,10 +107,10 @@ struct CropResult : Moveable<CropResult> {
 };
 
 // Crops every region of one raw frame. content_type selects the pixel size (1 or 3 bytes).
-// Each rectangle must lie inside the frame. The manifest is a JSON object with the frame id,
-// the frame checksum and one entry per crop.
+// Each rectangle must lie inside the frame. Regions on a layer the frame lists as hidden are skipped.
+// The manifest is a JSON object with the frame id, the frame checksum and one entry per crop.
 bool ExportCrops(const String& frame_id, const String& raw, int width, int height,
-                 const String& content_type, const Vector<Region>& regions,
+                 const String& content_type, const Vector<FrameLayer>& layers, const Vector<Region>& regions,
                  Vector<CropResult>& crops, String& manifest_json, String& error);
 
 // Store of window classes, frames and regions. Each is a JsonFileStore collection of the site.

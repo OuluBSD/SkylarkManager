@@ -106,7 +106,8 @@ CONSOLE_APP_MAIN
 	regions.Add(rg);
 	Vector<CropResult> crops;
 	String manifest;
-	Check(ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	Vector<FrameLayer> no_layers;
+	Check(ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error)
 	      && crops.GetCount() == 2 && crops[0].bytes == String("\x05\x06\x09\x0a", 4) && crops[0].byte_size == 4,
 	      "export: the 2x2 crop at (1,1) holds the pixels 5, 6, 9, 10 in row order");
 	Check(crops[1].bytes == String("\x00", 1) && crops[1].checksum == BlobStore::Checksum(String("\x00", 1)),
@@ -121,24 +122,24 @@ CONSOLE_APP_MAIN
 	regions.Clear();
 	rg.id = "bad"; rg.rect = AnnRect(3, 3, 2, 2); rg.label = "outside";
 	regions.Add(rg);
-	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error)
 	      && error.Find("outside the frame") >= 0,
 	      "export: a rectangle past the frame edge is refused");
 	// A large width or height must not wrap x + w (or y + h) negative and pass: the bounds test is a subtraction.
 	regions.Clear();
 	rg.id = "wide"; rg.rect = AnnRect(1, 0, 2147483647, 1); rg.label = "wide";
 	regions.Add(rg);
-	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error)
 	      && error.Find("outside the frame") >= 0,
 	      "export: a region at the far edge with a width of INT_MAX is refused, not wrapped into range");
 	regions.Clear();
 	rg.id = "tall"; rg.rect = AnnRect(0, 1, 1, 2147483647); rg.label = "tall";
 	regions.Add(rg);
-	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error)
 	      && error.Find("outside the frame") >= 0,
 	      "export: a region with a height of INT_MAX below the top edge is refused, not wrapped into range");
-	Check(!ExportCrops("f1", raw, 4, 4, "image/png", regions, crops, manifest, error)
-	      && !ExportCrops("f1", raw.Left(15), 4, 4, "application/x-raw-gray8", regions, crops, manifest, error),
+	Check(!ExportCrops("f1", raw, 4, 4, "image/png", no_layers, regions, crops, manifest, error)
+	      && !ExportCrops("f1", raw.Left(15), 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error),
 	      "export: an unsupported content type and a frame of the wrong size are refused");
 
 	// RGB frames use three bytes per pixel.
@@ -148,9 +149,32 @@ CONSOLE_APP_MAIN
 	regions.Clear();
 	rg.id = "p"; rg.rect = AnnRect(1, 0, 1, 2); rg.label = "column";
 	regions.Add(rg);
-	Check(ExportCrops("rgb", rgb, 2, 2, "application/x-raw-rgb8", regions, crops, manifest, error)
+	Check(ExportCrops("rgb", rgb, 2, 2, "application/x-raw-rgb8", no_layers, regions, crops, manifest, error)
 	      && crops[0].bytes == String("\x04\x05\x06\x0a\x0b\x0c", 6),
 	      "export: an rgb column crop takes three bytes per pixel");
+
+	// A hidden layer is switched off for the frame: its regions are neither cropped nor listed in the manifest.
+	Vector<FrameLayer> layers;
+	FrameLayer shown_layer;
+	shown_layer.id = "base"; shown_layer.name = "Base";
+	FrameLayer hidden_layer;
+	hidden_layer.id = "ghost"; hidden_layer.name = "Ghost"; hidden_layer.visible = false;
+	layers.Add(shown_layer);
+	layers.Add(hidden_layer);
+	regions.Clear();
+	Region on_shown;
+	on_shown.id = "shown"; on_shown.frame = "f1"; on_shown.layer = "base"; on_shown.rect = AnnRect(0, 0, 1, 1); on_shown.label = "visible";
+	regions.Add(on_shown);
+	Region on_hidden;
+	on_hidden.id = "secret"; on_hidden.frame = "f1"; on_hidden.layer = "ghost"; on_hidden.rect = AnnRect(2, 2, 1, 1); on_hidden.label = "hidden";
+	regions.Add(on_hidden);
+	Check(ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", layers, regions, crops, manifest, error)
+	      && crops.GetCount() == 1 && crops[0].region == "shown" && manifest.Find("secret") < 0
+	      && manifest.Find("visible") >= 0,
+	      "export: a region on a hidden layer is not exported and not listed in the manifest");
+	Check(ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", no_layers, regions, crops, manifest, error)
+	      && crops.GetCount() == 2,
+	      "export: with no layer list every region is exported, as before");
 
 	// Store: frames and regions are checked against their window class and layers.
 	String root = AppendFileName(GetCurrentDirectory(), "annotate-selftest-data");

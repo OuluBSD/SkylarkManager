@@ -294,7 +294,7 @@ static bool ExportFrame(WebRequest& r, const String& frame_id, String& manifest,
 	StoreResult lr = st.ListRegions(f.id, regions);
 	if(!lr) { error = lr.error; code = 400; return false; }
 	Vector<CropResult> crops;
-	if(!ExportCrops(f.id, bytes, meta.width, meta.height, f.content_type, regions, crops, manifest, error)) {
+	if(!ExportCrops(f.id, bytes, meta.width, meta.height, f.content_type, f.layers, regions, crops, manifest, error)) {
 		code = 400;
 		return false;
 	}
