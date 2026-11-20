@@ -158,6 +158,9 @@ if grep -q "src=\"http://127.0.0.1:$ATL_PORT/\"" "$T/shell_atlas.html"; then
 curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: 192.168.1.169:$MAIN" "$MAIN_URL/?app=atlas" -o "$T/shell_lan.html"
 if grep -q "src=\"http://192.168.1.169:$ATL_PORT/\"" "$T/shell_lan.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_lan.html"; then
 	pass "?app=atlas frames the Atlas site on the LAN host"; else fail "?app=atlas frames the Atlas site on the LAN host"; fi
+curl -s -H "Cookie: wf_auth_session=$SESSION" -H "Host: portal.example.test:$MAIN" "$MAIN_URL/?app=atlas" -o "$T/shell_portal.html"
+if grep -q "src=\"http://portal.example.test:$ATL_PORT/\"" "$T/shell_portal.html" && ! grep -q "127.0.0.1:$ATL_PORT" "$T/shell_portal.html"; then
+	pass "?app=atlas frames the Atlas site on portal.example.test"; else fail "?app=atlas frames the Atlas site on portal.example.test"; fi
 curl -s -b "$T/stock.jar" "$MAIN_URL/home" -o "$T/home.html"
 if grep -q 'wf-template-megamenu' "$T/home.html" && ! grep -q 'portal-frame' "$T/home.html" && ! grep -q 'Webapps' "$T/home.html"; then
 	pass "/home is the stock home standalone with no Webapps"; else fail "/home is the stock home standalone with no Webapps"; fi
@@ -465,10 +468,10 @@ curl -s -c "$T/atl.jar" -o "$T/atl_login" -H "Origin: $ATL_URL" -H "Accept: appl
 	--data "username=atlasadmin&password=pw-atl" "$ATL_URL/session/login"
 atl_csrf=$(curl -s -b "$T/atl.jar" "$ATL_URL/session/whoami" | sed -n 's/.*"csrf": *"\([^"]*\)".*/\1/p')
 check "atlas create refuses a missing csrf token" 403 "$ATL_URL/atlas/create" -b "$T/atl.jar" \
-	-H "Origin: $ATL_URL" --data "map=pkr&version=v0.0.1&title=PKR" -X POST
+	-H "Origin: $ATL_URL" --data "map=examplemap&version=v0.0.1&title=Example+map" -X POST
 check "atlas create a map version" 302 "$ATL_URL/atlas/create" -b "$T/atl.jar" -H "Origin: $ATL_URL" \
-	--data "map=pkr&version=v0.0.1&title=PKR+v0.0.1&__wf_csrf__=$atl_csrf" -X POST
-check "atlas map view renders the canvas" 200 "$ATL_URL/atlas/pkr-v0.0.1" -b "$T/atl.jar"
+	--data "map=examplemap&version=v0.0.1&title=Example+map+v0.0.1&__wf_csrf__=$atl_csrf" -X POST
+check "atlas map view renders the canvas" 200 "$ATL_URL/atlas/examplemap-v0.0.1" -b "$T/atl.jar"
 if grep -q 'id="atlas-canvas"' "$T/body" && grep -q "Edit (admin)" "$T/body"; then pass "atlas map view has the canvas and the admin panel"; else fail "atlas map view has the canvas and the admin panel"; fi
 
 # The command console (task 019): the meta site's console renders its
