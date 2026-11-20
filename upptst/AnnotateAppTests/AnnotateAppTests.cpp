@@ -37,6 +37,159 @@ static bool SameRect(const AnnRect& r, int x, int y, int w, int h)
 	return r.x == x && r.y == y && r.w == w && r.h == h;
 }
 
+// ---------------------------------------------------------------------------
+// HTTP level: the snap, rescale and extrapolate endpoints through a composed AnnotateApp site.
+// The host runs on a worker thread the way the program does (Run finalizes the Skylark views, which the
+// engine gateway needs). The stock port is a test port; the app keeps its own DefaultPort (18430).
+// ---------------------------------------------------------------------------
+
+static const int ANN_STOCK_PORT = 18321;
+static const int ANN_APP_PORT = 18430;
+static One<WebServerHost> *s_ann_host = nullptr;
+static void AnnHostMain() { (*s_ann_host)->Run(); }
+
+struct AnnReply {
+	int    status = 0;
+	String session_cookie;   // "name=value" of the wfs_ Set-Cookie
+	String body;
+};
+
+// Raw HTTP/1.1 exchange on loopback. The Host is the site public authority, which the gateway pins.
+static AnnReply AnnCall(const String& method, const String& path, const String& cookie, const String& csrf,
+                        const String& accept, const String& body, const String& ctype)
+{
+	AnnReply r;
+	for(int attempt = 0; attempt < 100 && r.status == 0; attempt++) {
+		TcpSocket s;
+		s.Timeout(10000);
+		if(!s.Connect("127.0.0.1", ANN_APP_PORT)) {
+			Sleep(100);
+			continue;
+		}
+		StringBuffer req;
+		req << method << ' ' << path << " HTTP/1.1\r\nHost: 192.168.1.50:" << ANN_APP_PORT << "\r\nConnection: close\r\n";
+		req << "Content-Type: " << ctype << "\r\n";
+		if(accept.GetCount())
+			req << "Accept: " << accept << "\r\n";
+		if(cookie.GetCount())
+			req << "Cookie: " << cookie << "\r\n";
+		if(csrf.GetCount())
+			req << "x-wf-csrf: " << csrf << "\r\n";
+		req << "Content-Length: " << body.GetCount() << "\r\n\r\n" << body;
+		s.Put(req);
+		StringBuffer all;
+		String data;
+		while((data = s.Get(4096)).GetCount())
+			all << data;
+		String text = all;
+		int q = text.Find("\r\n\r\n");
+		if(q < 0) {
+			Sleep(100);
+			continue;
+		}
+		r.body = text.Mid(q + 4);
+		Vector<String> lines = Split(text.Left(q), '\n');
+		if(lines.GetCount()) {
+			Vector<String> st = Split(lines[0], ' ');
+			if(st.GetCount() >= 2)
+				r.status = ScanInt(st[1]);
+		}
+		for(int i = 1; i < lines.GetCount(); i++) {
+			String line = TrimBoth(lines[i]);
+			int c = line.Find(':');
+			if(c < 0 || ToLower(TrimBoth(line.Left(c))) != "set-cookie")
+				continue;
+			String value = TrimBoth(line.Mid(c + 1));
+			if(value.StartsWith("wfs_") && r.session_cookie.IsEmpty())
+				r.session_cookie = value.Left(value.Find(';') < 0 ? value.GetCount() : value.Find(';'));
+		}
+	}
+	return r;
+}
+
+// True when the reply has the wanted status and a JSON body, which goes to out.
+static bool AnnJson(const AnnReply& r, int want, ValueMap& out)
+{
+	if(r.status != want)
+		return false;
+	try {
+		out = ParseJSON(r.body);
+	}
+	catch(Exc&) {
+		return false;
+	}
+	return true;
+}
+
+static void TestHttpOperations()
+{
+	String error;
+	String scratch = GetTempFileName("AnnotateAppHttp");
+	RealizeDirectory(scratch);
+	WebServer s;
+	s.Enable("AnnotateApp", error);
+	Vector<String> flags;
+	flags << "--port" << AsString(ANN_STOCK_PORT) << "--site-dir" << scratch << "--public-host" << "192.168.1.50";
+	if(!s.ParseArgs(flags, error)) {
+		Check(false, "http: flags parse (" + error + ")");
+		return;
+	}
+	s_ann_host = new One<WebServerHost>;
+	s_ann_host->Create();
+	Check(s.Compose(**s_ann_host, error), "http: AnnotateApp composes (" + error + ")");
+	Check(s.SetUser("AnnotateApp", "ann", "synthetic-password", error), "http: an annotator account is written");
+
+	EngineSite *site = TheWebEngine().FindSite("AnnotateApp");
+	if(!site) {
+		Check(false, "http: the site is composed under its id");
+		return;
+	}
+	AnnotateStore st(site->id, site->data_root);
+	Check((bool)st.PutWindowClass(Window("cls", 100, 100, AnnPoint(0, 0), AnnPoint(100, 0), AnnPoint(0, 100)), RecordAbsent()),
+	      "http: window class cls is stored for the operations");
+
+	static Thread host_thread; // lives to process exit: the listener keeps serving until _Exit
+	host_thread.Run(AnnHostMain);
+	const String form = "application/x-www-form-urlencoded";
+	const String json = "application/json";
+
+	AnnReply login = AnnCall("POST", "/session/login", "", "", json, "username=ann&password=synthetic-password", form);
+	ValueMap login_body;
+	Check(AnnJson(login, 200, login_body) && login.session_cookie.StartsWith("wfs_annotateapp=")
+	      && String(login_body["csrf"]).GetCount(),
+	      "http: the annotator signs in and gets a session cookie and a CSRF token");
+	String cookie = login.session_cookie;
+	String csrf = String(login_body["csrf"]);
+
+	// Predicted inputs: each must be refused with 400 and the name of the offending field.
+	AnnReply snap_big = AnnCall("POST", "/api/ops/snap", cookie, csrf, "", "{\"window_class\":\"cls\",\"x\":4294967301,\"y\":0,\"max_distance\":5}", json);
+	Check(snap_big.status == 400 && snap_big.body.Find("x must be a whole number") >= 0,
+	      "http: snap with x=4294967301 is refused with 400 and x named (status " + AsString(snap_big.status) + ")");
+	AnnReply rescale_big = AnnCall("POST", "/api/ops/rescale", cookie, csrf, "", "{\"from\":\"cls\",\"to\":\"cls\",\"rect\":{\"x\":4294967301,\"y\":0,\"w\":10,\"h\":10}}", json);
+	Check(rescale_big.status == 400 && rescale_big.body.Find("rect.x must be a whole number") >= 0,
+	      "http: rescale with rect.x=4294967301 is refused with 400 and rect.x named (status " + AsString(rescale_big.status) + ")");
+	AnnReply extrap_big = AnnCall("POST", "/api/ops/extrapolate", cookie, csrf, "", "{\"centre\":{\"x\":4294967296,\"y\":0},\"seed\":{\"x\":0,\"y\":0},\"step\":60,\"count\":6}", json);
+	Check(extrap_big.status == 400 && extrap_big.body.Find("centre.x must be a whole number") >= 0,
+	      "http: extrapolate with centre.x=4294967296 is refused with 400 and centre.x named (status " + AsString(extrap_big.status) + ")");
+	AnnReply extrap_step = AnnCall("POST", "/api/ops/extrapolate", cookie, csrf, "", "{\"centre\":{\"x\":0,\"y\":0},\"seed\":{\"x\":10,\"y\":0},\"step\":1e308,\"count\":4}", json);
+	Check(extrap_step.status == 400 && extrap_step.body.Find("step must be a finite angle") >= 0,
+	      "http: extrapolate with a step of 1e308 is refused with 400 and the step named");
+
+	// Normal requests still succeed.
+	ValueMap snap_ok, rescale_ok, extrap_ok;
+	AnnReply snap = AnnCall("POST", "/api/ops/snap", cookie, csrf, "", "{\"window_class\":\"cls\",\"x\":1,\"y\":1,\"max_distance\":5}", json);
+	Check(AnnJson(snap, 200, snap_ok) && (bool)snap_ok["snapped"] && (int)snap_ok["x"] == 0 && (int)snap_ok["y"] == 0,
+	      "http: a normal snap returns 200 with the anchor it snapped to");
+	AnnReply rescale = AnnCall("POST", "/api/ops/rescale", cookie, csrf, "", "{\"from\":\"cls\",\"to\":\"cls\",\"rect\":{\"x\":10,\"y\":10,\"w\":20,\"h\":20}}", json);
+	Check(AnnJson(rescale, 200, rescale_ok) && (int)rescale_ok["x"] == 10 && (int)rescale_ok["w"] == 20,
+	      "http: a normal rescale returns 200 with the rectangle");
+	AnnReply extrap = AnnCall("POST", "/api/ops/extrapolate", cookie, csrf, "", "{\"centre\":{\"x\":100,\"y\":100},\"seed\":{\"x\":200,\"y\":100},\"step\":90,\"count\":4}", json);
+	Check(AnnJson(extrap, 200, extrap_ok) && ValueArray(extrap_ok["slots"]).GetCount() == 4,
+	      "http: a normal extrapolate returns 200 with four slots");
+
+	DeleteFolderDeep(scratch);
+}
+
 CONSOLE_APP_MAIN
 {
 	// Window classes: a 200x100 source with anchors at its corners, and targets for the rescale tests.
@@ -286,6 +439,9 @@ CONSOLE_APP_MAIN
 	delete app;
 
 	DeleteFolderDeep(root);
+	TestHttpOperations();
 	Cout() << "\nchecks: " << checks << ", failures: " << failures << "\n";
-	SetExitCode(failures ? 1 : 0);
+	fflush(stdout);
+	// The listener thread keeps serving; exit without running static destructors under it.
+	_Exit(failures ? 1 : 0);
 }
