@@ -740,6 +740,11 @@ bool AtlasEventTypeValid(const String& subject_kind, const String& type)
 	return false;
 }
 
+bool AtlasClaimLeaseAlive(const AtlasClaim& claim, Time now)
+{
+	return claim.lease_seconds > 0 && now < claim.acquired_at + claim.lease_seconds;
+}
+
 // Whether the subject must exist in the head document. A removal, a disconnection, and the creation of
 // an element or road that later went away do not need it; a change to a live subject does.
 static bool NeedsHeadSubject(const String& subject_kind, const String& type)

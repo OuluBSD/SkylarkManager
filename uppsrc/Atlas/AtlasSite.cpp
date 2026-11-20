@@ -128,6 +128,7 @@ static const char *ATLAS_EVENT_COLLECTION = "events";
 static const char *ATLAS_RULES_COLLECTION = "rules";
 static const char *ATLAS_FILE_COLLECTION = "files";
 static const char *ATLAS_ACK_COLLECTION = "acks";
+static const char *ATLAS_CLAIM_COLLECTION = "claims";
 
 String AtlasNowIso()
 {
@@ -170,6 +171,11 @@ static IRecordCollection& Rules(const String& data_root)
 static IRecordCollection& Files(const String& data_root)
 {
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_FILE_COLLECTION);
+}
+
+static IRecordCollection& Claims(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_CLAIM_COLLECTION);
 }
 
 // A file record is keyed by its family and its id ("family.fileid"); family names have no dot, so the prefix is exact.
@@ -414,6 +420,132 @@ bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEve
 	StoreResult p = Events(AtlasStoreRoot(data_root, family)).Put(EventKey(family, e.id), StoreAsJson(e), String(), rev);
 	if(!p.ok) {
 		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+static String ClaimKey(const String& family, const String& element_id, const String& target_vid)
+{
+	return family + "." + element_id + "." + target_vid;
+}
+
+bool AtlasLoadClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                    AtlasClaim& out, String& error)
+{
+	String json, revision;
+	String key = ClaimKey(family, element_id, target_vid);
+	StoreResult g = Claims(AtlasStoreRoot(data_root, family)).Get(key, json, revision);
+	if(!g.ok) {
+		error = g.error == "record not found" ? String("claim not found") : g.error;
+		return false;
+	}
+	if(!LoadFromJson(out, json)) {
+		error = "claim record is unreadable: " + key;
+		return false;
+	}
+	if(out.element_id != element_id || out.target_vid != target_vid || out.owner.IsEmpty()) {
+		error = "claim record identity is invalid: " + key;
+		return false;
+	}
+	out.revision = revision;
+	return true;
+}
+
+bool AtlasLoadClaims(const String& data_root, const String& family, Vector<AtlasClaim>& out, String& error)
+{
+	out.Clear();
+	String root = AtlasStoreRoot(data_root, family);
+	Vector<String> ids;
+	StoreResult listed = Claims(root).List(ids);
+	if(!listed.ok) {
+		error = listed.error;
+		return false;
+	}
+	String prefix = family + ".";
+	for(const String& key : ids) {
+		if(!key.StartsWith(prefix))
+			continue;
+		String tail = key.Mid(prefix.GetCount());
+		int sep = tail.Find('.');
+		if(sep <= 0 || sep + 1 >= tail.GetCount()) {
+			error = "claim key is invalid: " + key;
+			return false;
+		}
+		AtlasClaim claim;
+		if(!AtlasLoadClaim(data_root, family, tail.Left(sep), tail.Mid(sep + 1), claim, error))
+			return false;
+		out.Add(pick(claim));
+	}
+	return true;
+}
+
+bool AtlasSaveClaim(const String& data_root, const String& family, const AtlasClaim& claim,
+                    const String& expected_revision, String& new_revision, String& error)
+{
+	if(!AtlasIdValid(family) || !AtlasIdValid(claim.element_id) || !AtlasIdValid(claim.target_vid)
+	|| claim.owner.IsEmpty() || claim.lease_seconds < 1 || claim.lease_seconds > 30 * 24 * 3600) {
+		error = "claim needs valid family, element, version, owner and lease seconds";
+		return false;
+	}
+	StoreResult p = Claims(AtlasStoreRoot(data_root, family)).Put(
+		ClaimKey(family, claim.element_id, claim.target_vid), StoreAsJson(claim), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasAcquireClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                       const String& owner, int lease_seconds, AtlasClaim& out, String& error)
+{
+	if(owner.IsEmpty() || lease_seconds < 1 || lease_seconds > 30 * 24 * 3600) {
+		error = "claim needs an owner and lease_seconds from 1 to 2592000";
+		return false;
+	}
+	AtlasClaim old;
+	String expected_revision;
+	if(AtlasLoadClaim(data_root, family, element_id, target_vid, old, error)) {
+		if(old.owner != owner && AtlasClaimLeaseAlive(old, GetSysTime())) {
+			error = "claim held by " + old.owner;
+			return false;
+		}
+		expected_revision = old.revision;
+	}
+	else if(error == "claim not found")
+		expected_revision = RecordAbsent();
+	else
+		return false;
+
+	AtlasClaim claim;
+	claim.element_id = element_id;
+	claim.target_vid = target_vid;
+	claim.owner = owner;
+	claim.acquired_at = GetSysTime();
+	claim.lease_seconds = lease_seconds;
+	String revision;
+	if(!AtlasSaveClaim(data_root, family, claim, expected_revision, revision, error))
+		return false;
+	claim.revision = revision;
+	out = pick(claim);
+	return true;
+}
+
+bool AtlasReleaseClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                       const String& owner, String& error)
+{
+	AtlasClaim claim;
+	if(!AtlasLoadClaim(data_root, family, element_id, target_vid, claim, error))
+		return false;
+	if(claim.owner != owner) {
+		error = "a claim can only be released by its owner";
+		return false;
+	}
+	StoreResult deleted = Claims(AtlasStoreRoot(data_root, family)).Delete(
+		ClaimKey(family, element_id, target_vid), claim.revision);
+	if(!deleted.ok) {
+		error = deleted.error;
 		return false;
 	}
 	return true;

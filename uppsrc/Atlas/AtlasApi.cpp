@@ -575,6 +575,114 @@ static void TaskReopen(WebRequest& r)  { TaskEvent(r, "reopened"); }
 static void TaskAssign(WebRequest& r)  { TaskEvent(r, "assigned"); }
 static void TaskNote(WebRequest& r)    { TaskEvent(r, "note"); }
 
+static ValueMap ClaimValue(const AtlasClaim& claim)
+{
+	ValueMap value;
+	value.Add("element_id", claim.element_id);
+	value.Add("target_vid", claim.target_vid);
+	value.Add("owner", claim.owner);
+	value.Add("acquired_at", claim.acquired_at);
+	value.Add("lease_seconds", claim.lease_seconds);
+	value.Add("revision", claim.revision);
+	value.Add("active", AtlasClaimLeaseAlive(claim, GetSysTime()));
+	return value;
+}
+
+static void ClaimsGet(WebRequest& r)
+{
+	if(!ApiAuthFamily(r, r.PathArg(0)))
+		return;
+	Vector<AtlasClaim> claims;
+	String error;
+	if(!AtlasLoadClaims(r.Site().data_root, r.PathArg(0), claims, error)) {
+		ApiFail(r, 500, error);
+		return;
+	}
+	ValueArray list;
+	for(const AtlasClaim& claim : claims)
+		list.Add(ClaimValue(claim));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("claims", list);
+	r.Json(out);
+}
+
+static void ClaimPost(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	AtlasFamily f;
+	String frev;
+	if(!LoadFamily(r, f, frev))
+		return;
+	String element_id = P(r, "element_id"), vid = P(r, "vid");
+	if(f.Find(vid) < 0) {
+		ApiFail(r, 400, "claim requires a known target vid");
+		return;
+	}
+	AtlasMap head;
+	String hrev;
+	if(!LoadHead(r, f, head, hrev))
+		return;
+	if(head.FindElement(element_id) < 0) {
+		ApiFail(r, 404, "claim element is not in the head map");
+		return;
+	}
+	int lease_seconds = IntP(r, "lease_seconds");
+	AtlasClaim claim;
+	String error;
+	if(!AtlasAcquireClaim(r.Site().data_root, family, element_id, vid, r.User().username, lease_seconds,
+	                      claim, error)) {
+		int status = error.StartsWith("claim held by") || error.Find("revision conflict") >= 0 ? 409 : 400;
+		ApiFail(r, status, error);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("claim", ClaimValue(claim));
+	r.Json(out);
+}
+
+static void ClaimReleasePost(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	String error;
+	if(!AtlasReleaseClaim(r.Site().data_root, family, P(r, "element_id"), P(r, "vid"),
+	                      r.User().username, error)) {
+		int status = error == "claim not found" ? 404 : error.Find("only be released by its owner") >= 0 ? 403
+		           : error.Find("revision conflict") >= 0 ? 409 : 400;
+		ApiFail(r, status, error);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("released", true);
+	r.Json(out);
+}
+
+static void ClaimListGet(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	Vector<AtlasClaim> claims;
+	String error;
+	if(!AtlasLoadClaims(r.Site().data_root, family, claims, error)) {
+		ApiFail(r, 500, error);
+		return;
+	}
+	ValueArray list;
+	for(const AtlasClaim& claim : claims)
+		list.Add(ClaimValue(claim));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("claims", list);
+	r.Json(out);
+}
+
 // The warnings of the roadmap, each with its comment if it has one, and the comments that no longer match a
 // finding. Every finding is listed here, whatever the cut-off of the checks.
 static void WarningsGet(WebRequest& r)
@@ -1562,6 +1670,9 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("POST", "api/atlas/*/task/reopen", TaskReopen);
 	rt.Add("POST", "api/atlas/*/task/assign", TaskAssign);
 	rt.Add("POST", "api/atlas/*/task/note", TaskNote);
+	rt.Add("api/atlas/*/claims", ClaimListGet);
+	rt.Add("POST", "api/atlas/*/claim", ClaimPost);
+	rt.Add("POST", "api/atlas/*/claim/release", ClaimReleasePost);
 	rt.Add("api/atlas/*/check", CheckGet);
 	rt.Add("api/atlas/*/warnings", WarningsGet);
 	rt.Add("POST", "api/atlas/*/warning/ack", WarningAck);
@@ -1669,6 +1780,13 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-task-note", "POST", "api/atlas/*/task/note", write,
 	        "json", "Add a note to a task's thread (markdown)",
 	        { "map:string:required", "id:string:required", "text:text", "vid:string" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-claims", "GET", "api/atlas/*/claims", write,
+	        "json", "List worker claims with owner, target version, lease and revision", { "map:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-claim", "POST", "api/atlas/*/claim", write,
+	        "json", "Claim an element for one target version (lease is in seconds)",
+	        { "map:string:required", "element_id:string:required", "vid:string:required", "lease_seconds:int:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-claim-release", "POST", "api/atlas/*/claim/release", write,
+	        "json", "Release the signed-in owner's claim", { "map:string:required", "element_id:string:required", "vid:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-check", "GET", "api/atlas/*/check", read,
 	        "json", "The roadmap findings: contract, requires, constraint, stage and dependency messages (never refuses)",
 	        { "map:string:required", "vid:string" }));

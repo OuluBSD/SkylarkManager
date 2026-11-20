@@ -44,6 +44,16 @@ bool AtlasCreateFamily(const String& data_root, const String& family, const Atla
                        String& new_revision, String& error);
 bool AtlasLoadEvents(const String& data_root, const String& family, Vector<AtlasEvent>& out, String& error);
 bool AtlasPutEvent(const String& data_root, const String& family, const AtlasEvent& e, String& error);
+// Claims are separate revisioned records, keyed by family, element id and target vid; they do not append events.
+bool AtlasLoadClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                    AtlasClaim& out, String& error);
+bool AtlasLoadClaims(const String& data_root, const String& family, Vector<AtlasClaim>& out, String& error);
+bool AtlasSaveClaim(const String& data_root, const String& family, const AtlasClaim& claim,
+                    const String& expected_revision, String& new_revision, String& error);
+bool AtlasAcquireClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                       const String& owner, int lease_seconds, AtlasClaim& out, String& error);
+bool AtlasReleaseClaim(const String& data_root, const String& family, const String& element_id, const String& target_vid,
+                       const String& owner, String& error);
 
 // Access for the API: the role check, the map's content policy, and per-element visibility.
 bool AtlasCanEdit(WebRequest& r);

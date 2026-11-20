@@ -2062,6 +2062,46 @@ static void AckStoreChecks(const String& scratch)
 	Check(AtlasLoadAcks(data, "ackfam", back, err) && back.IsEmpty(), "an unacknowledged warning comment no longer reads back");
 }
 
+static void ClaimStoreChecks(const String& scratch)
+{
+	String data = AppendFileName(scratch, "claim-data");
+	RealizeDirectory(data);
+	String err;
+	AtlasClaim alice;
+	Check(AtlasAcquireClaim(data, "claimfam", "block_a", "v1", "alice", 3600, alice, err)
+	      && alice.owner == "alice" && alice.lease_seconds == 3600 && !alice.revision.IsEmpty(),
+	      "a worker can claim an element/version pair and receive its revision");
+	AtlasClaim bob;
+	Check(!AtlasAcquireClaim(data, "claimfam", "block_a", "v1", "bob", 3600, bob, err)
+	      && err.Find("claim held by alice") >= 0,
+	      "a live claim is refused to a different owner");
+	Check(!AtlasReleaseClaim(data, "claimfam", "block_a", "v1", "bob", err)
+	      && err.Find("only be released by its owner") >= 0,
+	      "only the claim owner can release a claim");
+	Check(AtlasReleaseClaim(data, "claimfam", "block_a", "v1", "alice", err)
+	      && !AtlasLoadClaim(data, "claimfam", "block_a", "v1", bob, err),
+	      "the owner can release a claim record");
+	Check(AtlasAcquireClaim(data, "claimfam", "block_a", "v1", "bob", 3600, bob, err)
+	      && bob.owner == "bob",
+	      "a released claim can be acquired by another worker");
+
+	AtlasClaim expired;
+	expired.element_id = "block_b";
+	expired.target_vid = "v1";
+	expired.owner = "alice";
+	expired.acquired_at = GetSysTime() - 120;
+	expired.lease_seconds = 60;
+	String revision;
+	Check(AtlasSaveClaim(data, "claimfam", expired, String(), revision, err),
+	      "a stale claim can be represented in the scratch store");
+	Check(AtlasAcquireClaim(data, "claimfam", "block_b", "v1", "bob", 3600, bob, err)
+	      && bob.owner == "bob" && bob.revision != revision,
+	      "an expired lease can be claimed by another worker with a new revision");
+	Vector<AtlasClaim> claims;
+	Check(AtlasLoadClaims(data, "claimfam", claims, err) && claims.GetCount() == 2,
+	      "the claim list returns active per-element/version records");
+}
+
 static void SourceChecks(const String& scratch)
 {
 	String outside = AppendFileName(scratch, "source-outside");
@@ -2354,6 +2394,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	FileChecks();
 	FileStoreChecks(scratch_dir);
 	AckStoreChecks(scratch_dir);
+	ClaimStoreChecks(scratch_dir);
 	SourceChecks(scratch_dir);
 	AtlasVersionToolChecks(scratch_dir);
 	ArtifactManifestChecks(scratch_dir);

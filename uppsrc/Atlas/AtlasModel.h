@@ -201,6 +201,23 @@ struct AtlasEvent : Moveable<AtlasEvent> {
 	}
 };
 
+// A short-lived worker claim is a separate revisioned record, not an AtlasEvent.
+struct AtlasClaim : Moveable<AtlasClaim> {
+	String element_id;
+	String target_vid;
+	String owner;
+	Time   acquired_at;
+	int    lease_seconds = 0;
+	String revision; // WebStorage envelope revision; not part of the JSON payload
+
+	void Jsonize(JsonIO& io) {
+		io("element_id", element_id)("target_vid", target_vid)("owner", owner)
+		  ("acquired_at", acquired_at)("lease_seconds", lease_seconds);
+	}
+};
+
+bool AtlasClaimLeaseAlive(const AtlasClaim& claim, Time now);
+
 // Stages, in the pull-request order: planned -> implementation_research -> implementation -> trials -> merge_to_master.
 bool AtlasStageValid(const String& stage);
 int  AtlasStageRank(const String& stage);     // position in the order, -1 when not a stage
