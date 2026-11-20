@@ -40,7 +40,7 @@ static void BlobUpload(WebRequest& r, String collection, int64 max_bytes, String
 		r.Json(ErrorBody("blob exceeds the upload limit"), 413);
 		return;
 	}
-	String content_type = r.Header("Content-Type");
+	String content_type = r.Header("content-type");
 	int width = r.Param("width").IsEmpty() ? 0 : r.IntParam("width");
 	int height = r.Param("height").IsEmpty() ? 0 : r.IntParam("height");
 	String revision = r.Param("revision");

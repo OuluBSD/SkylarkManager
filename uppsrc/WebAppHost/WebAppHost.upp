@@ -6,6 +6,7 @@ uses
 	Skylark,
 	WebEngine,
 	WebStorage,
+	WebsiteTemplates,
 	WebAccounts,
 	WebBroker,
 	Channels;
@@ -13,4 +14,5 @@ uses
 file
 	WebAppHost.h,
 	WebAppHost.cpp,
-	BlobRoutes.cpp;
+	BlobRoutes.cpp,
+	WebAppPage.cpp;

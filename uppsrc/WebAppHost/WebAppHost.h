@@ -52,6 +52,12 @@ WebApp*        CreateWebapp(const String& name);   // nullptr when the name is n
 void InstallBlobRoutes(EngineSite& site, const String& collection, int64 max_bytes,
                        const String& write_roles, const String& read_roles);
 
+// Shared page shell for generic webapps (admin shell with theme controls). The body is HTML that the
+// caller escapes with WebAppEscape. WebAppSignInHint is the note for pages that need a signed-in role.
+String WebAppEscape(const String& s);
+void   WebAppRenderPage(WebRequest& r, const String& brand, const String& title, const String& body);
+String WebAppSignInHint(WebRequest& r);
+
 // The engine host with the listener settings WebServer sets (SkylarkApp keeps them protected).
 class WebServerHost : public WebEngineHost {
 public:
