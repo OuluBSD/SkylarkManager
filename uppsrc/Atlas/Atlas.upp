@@ -12,6 +12,7 @@ file
 	AGENTS.md,
 	AtlasModel.h,
 	AtlasModel.cpp,
+	AtlasMerge.cpp,
 	AtlasDiagram.h,
 	AtlasDiagram.cpp,
 	AtlasSite.h,

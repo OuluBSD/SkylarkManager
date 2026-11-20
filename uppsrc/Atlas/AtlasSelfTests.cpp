@@ -2138,6 +2138,84 @@ static void MergeBaseChecks(const String& scratch)
 	      "a work item cannot silently replace its recorded base");
 }
 
+static void AtlasThreeWayMergeChecks()
+{
+	AtlasMap base_map = SmallMap();
+	AtlasFamily base_family;
+	base_family.head_key = base_map.map;
+	AtlasVersion version;
+	version.vid = "v1";
+	version.code = 1;
+	version.requires.Add("gate_alpha");
+	base_family.versions.Add(pick(version));
+	AtlasMergeBase base;
+	LoadFromJson(base.base_map, StoreAsJson(base_map));
+	LoadFromJson(base.base_family, StoreAsJson(base_family));
+	String element_id = base_map.elements[0].id;
+
+	AtlasMap ours_map, theirs_map, merged_map;
+	AtlasFamily ours_family, theirs_family, merged_family;
+	LoadFromJson(ours_map, StoreAsJson(base_map));
+	LoadFromJson(theirs_map, StoreAsJson(base_map));
+	LoadFromJson(ours_family, StoreAsJson(base_family));
+	LoadFromJson(theirs_family, StoreAsJson(base_family));
+	ours_map.elements[0].name = "Agent A name";
+	theirs_map.elements[0].status = "active";
+	ours_family.versions[0].requires.Add("gate_beta");
+	theirs_family.versions[0].requires.Add("gate_gamma");
+	Vector<AtlasMergeResolution> resolutions;
+	Vector<AtlasMergeConflict> conflicts;
+	String error;
+	Check(AtlasThreeWayMerge(base, ours_map, ours_family, theirs_map, theirs_family, resolutions,
+	                         "owner", "2026-11-20T12:00:00Z", merged_map, merged_family, conflicts, error)
+	      && conflicts.IsEmpty() && merged_map.elements[0].name == "Agent A name"
+	      && merged_map.elements[0].status == "active"
+	      && HasAtom(merged_family.versions[0].requires, "gate_beta")
+	      && HasAtom(merged_family.versions[0].requires, "gate_gamma"),
+	      "three-way merge combines disjoint element fields and contract literals");
+
+	LoadFromJson(ours_map, StoreAsJson(base_map));
+	LoadFromJson(theirs_map, StoreAsJson(base_map));
+	ours_map.elements[0].name = "Same edit";
+	theirs_map.elements[0].name = "Same edit";
+	conflicts.Clear();
+	Check(AtlasThreeWayMerge(base, ours_map, base_family, theirs_map, base_family, resolutions,
+	                         "owner", "2026-11-20T12:01:00Z", merged_map, merged_family, conflicts, error)
+	      && conflicts.IsEmpty() && merged_map.elements[0].name == "Same edit",
+	      "identical edits from both branches coalesce without conflict");
+
+	LoadFromJson(ours_map, StoreAsJson(base_map));
+	LoadFromJson(theirs_map, StoreAsJson(base_map));
+	LoadFromJson(ours_family, StoreAsJson(base_family));
+	LoadFromJson(theirs_family, StoreAsJson(base_family));
+	ours_map.elements[0].name = "Agent A edit";
+	theirs_map.elements[0].name = "Agent B edit";
+	ours_family.versions[0].requires[0] = "!gate_alpha";
+	theirs_family.versions[0].requires.Clear();
+	conflicts.Clear();
+	Check(AtlasThreeWayMerge(base, ours_map, ours_family, theirs_map, theirs_family, resolutions,
+	                         "owner", "2026-11-20T12:02:00Z", merged_map, merged_family, conflicts, error)
+	      && conflicts.GetCount() == 2 && merged_map.elements[0].name == "Agent A edit",
+	      "different changes to one field and one contract literal are returned as unresolved conflicts");
+	bool name_conflict = false, gate_conflict = false;
+	for(const AtlasMergeConflict& conflict : conflicts) {
+		name_conflict |= conflict.path == "map/elements/" + element_id + "/name" && conflict.resolution == "none";
+		gate_conflict |= conflict.path == "family/versions/v1/requires/gate_alpha" && conflict.resolution == "none";
+	}
+	Check(name_conflict && gate_conflict, "merge conflict paths identify the element field and contract literal");
+
+	AtlasMergeResolution choose_theirs;
+	choose_theirs.path = "map/elements/" + element_id + "/name";
+	choose_theirs.choice = "theirs";
+	resolutions.Add(pick(choose_theirs));
+	conflicts.Clear();
+	Check(AtlasThreeWayMerge(base, ours_map, base_family, theirs_map, base_family, resolutions,
+	                         "owner", "2026-11-20T12:03:00Z", merged_map, merged_family, conflicts, error)
+	      && merged_map.elements[0].name == "Agent B edit" && conflicts.GetCount() == 1
+	      && conflicts[0].resolution == "theirs" && conflicts[0].resolved_by == "owner",
+	      "an explicit owner choice is applied and recorded on the conflict");
+}
+
 static void ProtectedWriteChecks()
 {
 	String actor = "owner";
@@ -2501,6 +2579,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	AckStoreChecks(scratch_dir);
 	ClaimStoreChecks(scratch_dir);
 	MergeBaseChecks(scratch_dir);
+	AtlasThreeWayMergeChecks();
 	ProtectedWriteChecks();
 	SourceChecks(scratch_dir);
 	AtlasVersionToolChecks(scratch_dir);

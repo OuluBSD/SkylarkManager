@@ -328,6 +328,34 @@ struct AtlasMergeBase : Moveable<AtlasMergeBase> {
 	}
 };
 
+struct AtlasMergeResolution : Moveable<AtlasMergeResolution> {
+	String path;
+	String choice; // ours | theirs
+};
+
+struct AtlasMergeConflict : Moveable<AtlasMergeConflict> {
+	String path;
+	String base_value;
+	String ours_value;
+	String theirs_value;
+	String resolution; // none | ours | theirs
+	String resolved_by;
+	String resolved_at;
+
+	void Jsonize(JsonIO& io) {
+		io("path", path)("base", base_value)("ours", ours_value)("theirs", theirs_value)
+		  ("resolution", resolution)("resolved_by", resolved_by)("resolved_at", resolved_at);
+	}
+};
+
+// A pure three-way merge of the family head map and version contracts. Unresolved conflicts keep ours in
+// the candidate and are returned for owner review; the caller must not save while any resolution is "none".
+bool AtlasThreeWayMerge(const AtlasMergeBase& base, const AtlasMap& ours_map, const AtlasFamily& ours_family,
+                        const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                        const Vector<AtlasMergeResolution>& resolutions, const String& actor, const String& at,
+                        AtlasMap& merged_map, AtlasFamily& merged_family, Vector<AtlasMergeConflict>& conflicts,
+                        String& error);
+
 // A file of the project's repository that the roadmap refers to. Its text is read live from the source root
 // (see AtlasFiles.cpp); the record keeps what the roadmap says about it. spans say which lines of the baseline text
 // evidence an element, or which lines the element will write (role destination). edits are a patch series: each
