@@ -206,6 +206,77 @@ bool JsonFileStore::WriteAtomic(const String& final_path, const String& data, St
 #endif
 }
 
+bool JsonFileStore::WriteFileDurable(const String& path, const String& data, String& error)
+{
+#ifdef PLATFORM_WIN32
+	HANDLE h = CreateFileW(ToSystemCharsetW(path), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+	                       FILE_ATTRIBUTE_NORMAL, NULL);
+	if(h == INVALID_HANDLE_VALUE || h == NULL) {
+		error = "cannot create file " + path;
+		return false;
+	}
+	dword written = 0;
+	bool ok = WriteFile(h, ~data, data.GetCount(), &written, NULL) && written == (dword)data.GetCount()
+	          && FlushFileBuffers(h);
+	CloseHandle(h);
+	if(!ok) {
+		DeleteFileW((const wchar_t *)~ToSystemCharsetW(path));
+		error = "cannot write file " + path;
+		return false;
+	}
+	return true;
+#else
+	int f = open(~path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+	if(f < 0) {
+		error = "cannot create file " + path + " (" + AsString(errno) + ")";
+		return false;
+	}
+	const char* p = ~data;
+	size_t remaining = data.GetCount();
+	while(remaining > 0) {
+		ssize_t n = write(f, p, remaining);
+		if(n < 0) {
+			if(errno == EINTR)
+				continue;
+			close(f);
+			DeleteFile(~path);
+			error = "cannot write file " + path + " (" + AsString(errno) + ")";
+			return false;
+		}
+		p += n;
+		remaining -= (size_t)n;
+	}
+	if(fsync(f) != 0) {
+		close(f);
+		DeleteFile(~path);
+		error = "cannot fsync file " + path + " (" + AsString(errno) + ")";
+		return false;
+	}
+	close(f);
+	return true;
+#endif
+}
+
+bool JsonFileStore::RenameFile(const String& from, const String& to, String& error)
+{
+#ifdef PLATFORM_WIN32
+	if(!MoveFileExW((const wchar_t *)~ToSystemCharsetW(from), (const wchar_t *)~ToSystemCharsetW(to),
+	                MOVEFILE_REPLACE_EXISTING)) {
+		DeleteFileW((const wchar_t *)~ToSystemCharsetW(from));
+		error = "cannot replace file " + to;
+		return false;
+	}
+	return true;
+#else
+	if(rename(~from, ~to) != 0) {
+		DeleteFile(~from);
+		error = "cannot replace file " + to + " (" + AsString(errno) + ")";
+		return false;
+	}
+	return true;
+#endif
+}
+
 bool JsonFileStore::ValidId(const String& id)
 {
 	if(id.IsEmpty() || id.GetCount() > 200)
@@ -809,18 +880,35 @@ StoreResult BlobStore::Put(const String& id, const String& bytes, const String& 
 		return "checksum mismatch for blob " + id + ": declared " + expected_checksum
 		       + ", computed " + rec.checksum;
 
-	// The metadata write and the bytes write happen under one store lock. The metadata
-	// is written first, so a revision conflict leaves the existing bytes untouched.
+	// Order under one store lock: the new bytes go to a temp file first, then the metadata is committed
+	// (a revision conflict or a failed temp write leaves the previous blob untouched), then the temp file
+	// replaces the bytes. If that rename fails, the previous metadata is restored, so the metadata never
+	// points at bytes that were not written. Readers outside the lock may see the window between the
+	// metadata commit and the rename as a checksum mismatch, which Get refuses.
 	JsonFileStore::Txn txn(meta_store);
 	if(!txn.Ok())
 		return txn.Error();
+	String old_json, old_revision, err;
+	bool existed = txn.Get(id, old_json, old_revision).ok;
+
+	String tmp = BytesPath(id) + ".tmp";
+	if(!JsonFileStore::WriteFileDurable(tmp, bytes, err))
+		return "cannot write bytes of blob " + id + ": " + err;
 	String new_revision;
 	StoreResult r = txn.Put(id, StoreAsJson(rec), expected_revision, new_revision);
-	if(!r)
+	if(!r) {
+		DeleteFile(tmp);
 		return r;
-	String err;
-	if(!JsonFileStore::WriteAtomic(BytesPath(id), bytes, err))
-		return "cannot write bytes of blob " + id + ": " + err;
+	}
+	if(!JsonFileStore::RenameFile(tmp, BytesPath(id), err)) {
+		String restored_revision;
+		StoreResult undo = existed ? txn.Put(id, old_json, new_revision, restored_revision)
+		                           : txn.Delete(id, new_revision);
+		String failure = "cannot write bytes of blob " + id + ": " + err;
+		if(!undo)
+			failure << "; restoring the previous metadata failed: " << undo.error;
+		return failure;
+	}
 	stored = rec;
 	return true;
 }

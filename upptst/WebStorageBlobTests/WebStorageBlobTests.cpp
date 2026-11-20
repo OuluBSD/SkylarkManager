@@ -109,6 +109,39 @@ CONSOLE_APP_MAIN
 	BlobRecord mm;
 	Check(!store.Get("never-stored", missing, mm), "read: a missing blob is refused");
 
+	// Failed byte writes. A directory at the temp path makes the temp write fail; the store must then leave
+	// the previous blob and its metadata exactly as they were.
+	String blobs_dir = AppendFileName(AppendFileName(AppendFileName(root, "data"), "blobs"), "");
+	String keep_old = Bytes(64, 5), keep_new = Bytes(64, 6);
+	BlobRecord keep_rec;
+	Check(store.Put("img-keep", keep_old, "image/png", 8, 8, "", RecordAbsent(), keep_rec).ok,
+	      "failed write setup: a blob is stored before the write is obstructed");
+	String temp_blocked = AppendFileName(blobs_dir, "img-keep.blob.tmp");
+	RealizeDirectory(temp_blocked);
+	BlobRecord keep_rec2;
+	StoreResult failed = store.Put("img-keep", keep_new, "image/png", 8, 8, "", "", keep_rec2);
+	String kept;
+	BlobRecord kept_meta;
+	Check(!failed && failed.error.Find("cannot write bytes") >= 0 && store.Get("img-keep", kept, kept_meta)
+	      && kept == keep_old && kept_meta.checksum == BlobStore::Checksum(keep_old),
+	      "failed byte write: the previous blob stays readable with its own metadata");
+	DeleteFolderDeep(temp_blocked);
+
+	// A failed rename after the metadata commit restores the metadata. The target is a directory, so the
+	// rename of the new bytes onto it fails; a blob that did not exist before must not be left behind.
+	String fresh_blocked = AppendFileName(blobs_dir, "img-fresh.blob");
+	RealizeDirectory(fresh_blocked);
+	BlobRecord fresh_rec;
+	StoreResult fresh = store.Put("img-fresh", keep_new, "image/png", 8, 8, "", RecordAbsent(), fresh_rec);
+	Check(!fresh && fresh.error.Find("cannot write bytes") >= 0 && !store.Meta("img-fresh", meta),
+	      "failed rename of a new blob: its metadata is rolled back and nothing is left behind");
+	DeleteFolderDeep(fresh_blocked);
+
+	BlobRecord keep_rec3;
+	Check(store.Put("img-keep", keep_new, "image/png", 8, 8, "", "", keep_rec3)
+	      && store.Get("img-keep", kept, kept_meta) && kept == keep_new,
+	      "failed write retry: once the obstruction is gone the overwrite stores and reads back");
+
 	DeleteFolderDeep(root);
 	Cout() << "\nchecks: " << checks << ", failures: " << failures << "\n";
 	SetExitCode(failures ? 1 : 0);

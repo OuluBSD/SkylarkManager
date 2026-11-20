@@ -121,6 +121,10 @@ public:
 	};
 
 	static bool WriteAtomic(const String& final_path, const String& data, String& error);
+	// The two halves of a blob write, with the path named by the caller: WriteFileDurable writes and flushes
+	// one file; RenameFile moves it over the target. On failure the temp file is removed.
+	static bool WriteFileDurable(const String& path, const String& data, String& error);
+	static bool RenameFile(const String& from, const String& to, String& error);
 	static bool ValidId(const String& id);
 
 	// Multi-record transaction. Holds the in-process mutex and the inter-process
