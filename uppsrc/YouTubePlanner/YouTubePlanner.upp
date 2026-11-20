@@ -5,9 +5,13 @@ uses
 	Core,
 	Skylark,
 	WebAccounts,
-	WebEngine;
+	WebEngine,
+	WebAppHost;
 
 file
 	AGENTS.md,
 	YouTubePlannerSite.h,
-	YouTubePlannerSite.cpp;
+	YouTubePlannerSite.cpp,
+	YouTubePlannerApp.h,
+	YouTubePlannerApp.cpp,
+	YouTubePlannerApp.icpp;

@@ -7,9 +7,13 @@ uses
 	WebStorage,
 	WebAccounts,
 	WebEngine,
-	WebBroker;
+	WebBroker,
+	WebAppHost;
 
 file
 	AGENTS.md,
 	FinancialsSite.h,
-	FinancialsSite.cpp;
+	FinancialsSite.cpp,
+	FinancialsApp.h,
+	FinancialsApp.cpp,
+	FinancialsApp.icpp;

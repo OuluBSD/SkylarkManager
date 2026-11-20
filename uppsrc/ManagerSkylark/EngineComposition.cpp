@@ -342,41 +342,6 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallCommandConsole(ch);
 	host.BindSite(cfg.channels_port, "channels");
 
-	// The financials site: the read-only window over the Company money flows,
-	// through the broker only. Roles: viewer (aggregates) and finance (rows).
-	String fin_root = AppendFileName(engine_root, "financials");
-	RealizeDirectory(fin_root);
-	EngineSite& fin = TheWebEngine().AddSite("financials", "Financials",
-		origins.Get("financials"), fin_root);
-	fin.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallFinancialsSite(fin);
-	InstallSessionRoutes(fin);
-	InstallContentPolicyRoutes(fin, true);
-	InstallCommandConsole(fin);
-	host.BindSite(cfg.financials_port, "financials");
-
-	// The atlas site: the topological map of the project (task 029). Its own
-	// accounts; the admin role edits, every other role reads.
-	String atlas_root = AppendFileName(engine_root, "atlas");
-	RealizeDirectory(atlas_root);
-	EngineSite& atl = TheWebEngine().AddSite("atlas", "Atlas",
-		origins.Get("atlas"), atlas_root);
-	atl.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallAtlasSite(atl);
-	InstallSessionRoutes(atl);
-	InstallContentPolicyRoutes(atl, true);
-	InstallCommandConsole(atl);
-	host.BindSite(cfg.atlas_port, "atlas");
-	// The YouTubePlanner stub: the six planning levels, read-only (task 040). No data, no YouTube calls.
-	String ytp_root = AppendFileName(engine_root, "youtubeplanner");
-	RealizeDirectory(ytp_root);
-	EngineSite& ytp = TheWebEngine().AddSite("youtubeplanner", "YouTubePlanner",
-		origins.Get("youtubeplanner"), ytp_root);
-	ytp.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallYouTubePlannerSite(ytp);
-	InstallSessionRoutes(ytp);
-	InstallCommandConsole(ytp);
-	host.BindSite(cfg.youtubeplanner_port, "youtubeplanner");
 	// The Company webapp: proposals, work items, reviews and the ledger over the
 	// same store the broker serves. Its session and console come from the engine.
 	String company_site_root = AppendFileName(engine_root, "company-site");
@@ -388,18 +353,41 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	InstallSessionRoutes(co);
 	InstallCommandConsole(co);
 	host.BindSite(cfg.company_port, "company");
-	String multiatlas_root = AppendFileName(engine_root, "multiatlas");
-	RealizeDirectory(multiatlas_root);
-	EngineSite& matl = TheWebEngine().AddSite("multiatlas", "MultiAtlas",
-		origins.Get("multiatlas"), multiatlas_root);
-	matl.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallMultiAtlasSite(matl);
-	InstallSessionRoutes(matl);
-	InstallContentPolicyRoutes(matl, true);
-	InstallCommandConsole(matl);
-	host.BindSite(cfg.multiatlas_port, "multiatlas");
 	RegisterComposedBrokerCommands();
 	return true;
+}
+
+// The simple sites (Atlas, MultiAtlas, Financials, YouTubePlanner) are registered
+// webapps (their <Name>App.icpp). WebServer composes them on the same ports,
+// origins and trusted peers as ComposeEngineSites did, and on the shared grant store.
+// The backends the sites use stay in their own packages.
+bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_port, const String& site_dir,
+                    const EngineComposition& cfg, String& error)
+{
+	VectorMap<String, String> origins;
+	if(!ResolveExternalOrigins(origins, cfg, error))
+		return false;
+	Vector<String> trusted_proxy_peers;
+	if(!ResolveTrustedProxyPeers(trusted_proxy_peers, error))
+		return false;
+
+	owned.webapps.Create();
+	WebServer& ws = *owned.webapps;
+	ws.port = stock_port;
+	ws.site_dir = site_dir;
+	ws.public_host = cfg.public_host;
+	ws.trusted_proxy_peers <<= trusted_proxy_peers;
+	for(const char *id : { "atlas", "multiatlas", "financials", "youtubeplanner" })
+		ws.origins.GetAdd(id) = origins.Get(id);
+	ws.SetAppPort("atlas", cfg.atlas_port);
+	ws.SetAppPort("multiatlas", cfg.multiatlas_port);
+	ws.SetAppPort("financials", cfg.financials_port);
+	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
+	ws.UseGrants(~owned.grants);
+	for(const char *id : { "atlas", "multiatlas", "financials", "youtubeplanner" })
+		if(!ws.Enable(id, error))
+			return false;
+	return ws.Compose(host, error);
 }
 
 // Creates an account on a composed site, or resets its password when it exists.

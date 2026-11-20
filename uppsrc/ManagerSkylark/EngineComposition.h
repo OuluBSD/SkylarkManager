@@ -16,6 +16,7 @@
 #include <YouTubePlanner/YouTubePlannerSite.h>
 #include <Company/CompanyComposed.h>
 #include <Company/CompanySite.h>
+#include <WebAppHost/WebAppHost.h>
 #include "PrivateHubService.h"
 
 NAMESPACE_UPP
@@ -58,6 +59,7 @@ struct EngineSiteBackends {
 	One<WebGrants>                  grants;
 	One<CompanyComposedModule>      company;
 	One<TaskFoundryService>         taskfoundry;
+	One<WebServer>                  webapps;   // the registered webapps composed by ComposeWebApps
 };
 
 // Creates the PrivateHub, Science, TaskFoundry and MetaAccount engine sites,
@@ -68,6 +70,11 @@ struct EngineSiteBackends {
 // opened.
 bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
                         const EngineComposition& cfg, String& error);
+// Composes the registered webapps (atlas, multiatlas, financials, youtubeplanner) through
+// WebServer, after ComposeEngineSites: same ports, origins, trusted peers and grant store.
+// stock_port is the stock listener; the cfg ports are the --<site>-port values.
+bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_port, const String& site_dir,
+                    const EngineComposition& cfg, String& error);
 // Resolves the address other machines use to reach this host: the flag value,
 // else MANAGERSKYLARK_PUBLIC_HOST, else the detected LAN IPv4. Loopback is refused.
 bool ResolvePublicHost(const String& flag_value, String& host, String& error);

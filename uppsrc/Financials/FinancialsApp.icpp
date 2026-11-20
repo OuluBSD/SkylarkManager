@@ -1,0 +1,9 @@
+#include "FinancialsApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<FinancialsApp>("financials");
+}
+
+END_UPP_NAMESPACE

@@ -4,7 +4,8 @@ uses
 	Core,
 	WebEngine,
 	WebFramework,
-	WebStorage;
+	WebStorage,
+	WebAppHost;
 
 file
 	MultiAtlasSite.h,
@@ -34,7 +35,10 @@ file
 	MultiAtlasWarningLedger.h,
 	MultiAtlasWarningLedger.cpp,
 	MultiAtlasStore.h,
-	MultiAtlasStore.cpp;
+	MultiAtlasStore.cpp,
+	MultiAtlasApp.h,
+	MultiAtlasApp.cpp,
+	MultiAtlasApp.icpp;
 
 mainconfig
 	"" = "MT";

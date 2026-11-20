@@ -96,6 +96,16 @@ void WebServer::SetAgentIpc(const AgentIpcConfig& cfg)
 	has_agentipc = true;
 }
 
+void WebServer::SetAppPort(const String& id, int listen_port)
+{
+	app_ports.GetAdd(id) = listen_port;
+}
+
+void WebServer::UseGrants(WebGrants* shared)
+{
+	shared_grants = shared;
+}
+
 bool WebServer::ParseArgs(const Vector<String>& args, String& error)
 {
 	for(int i = 0; i < args.GetCount(); i++) {
@@ -251,7 +261,7 @@ bool WebServer::InstallOrder(Vector<String>& ids, String& error) const
 	return true;
 }
 
-bool WebServer::Compose(WebServerHost& host, String& error)
+bool WebServer::Compose(WebEngineHost& host, String& error)
 {
 	Vector<String> order;
 	if(!InstallOrder(order, error))
@@ -265,19 +275,20 @@ bool WebServer::Compose(WebServerHost& host, String& error)
 		return false;
 	}
 
-	host.Listen(port, "0.0.0.0", 2);
 	TheWebEngine().SetHostPort(port);
 
 	String engine_root = AppendFileName(site_dir, "engine");
 	RealizeDirectory(engine_root);
-	String grants_root = AppendFileName(engine_root, "grants");
-	RealizeDirectory(grants_root);
-	grants.Create("meta", grants_root);
+	if(!shared_grants) {
+		String grants_root = AppendFileName(engine_root, "grants");
+		RealizeDirectory(grants_root);
+		grants.Create("meta", grants_root);
+	}
 
 	WebAppContext ctx;
 	ctx.site_dir = site_dir;
 	ctx.public_host = public_host;
-	ctx.grants = ~grants;
+	ctx.grants = shared_grants ? shared_grants : ~grants;
 	ctx.broker = &TheWebEngine().Broker();
 	ctx.agentipc = has_agentipc ? &agentipc : nullptr;
 
@@ -289,11 +300,15 @@ bool WebServer::Compose(WebServerHost& host, String& error)
 		}
 		String root = ctx.SiteRoot(id);
 		RealizeDirectory(root);
-		EngineSite& site = TheWebEngine().AddSite(id, app->Title(), PublicOrigin(public_host, PortFor(id)), root);
+		int oi = origins.Find(id);
+		String origin = oi >= 0 ? origins[oi] : PublicOrigin(public_host, PortFor(id));
+		EngineSite& site = TheWebEngine().AddSite(id, app->Title(), origin, root);
+		site.trusted_proxy_peers <<= trusted_proxy_peers;
 		app->Install(site, ctx);
 		app->RegisterBroker(ctx);
 		InstallSessionRoutes(site);
-		InstallContentPolicyRoutes(site, true);
+		if(app->ContentPolicy())
+			InstallContentPolicyRoutes(site, true);
 		InstallCommandConsole(site);
 		host.BindSite(PortFor(id), id);
 	}
@@ -340,6 +355,7 @@ int WebServer::Run(const Vector<String>& args)
 	}
 	One<WebServerHost> host;
 	host.Create();
+	host->Listen(port, "0.0.0.0", 2);
 	if(!Compose(*host, error)) {
 		Cerr() << "Webapp composition failed: " << error << "\n";
 		return 1;

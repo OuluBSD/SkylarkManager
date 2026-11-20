@@ -312,6 +312,10 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 			Cerr() << "Engine composition failed: " << compose_error << "\n";
 			return false;
 		}
+		if(!ComposeWebApps(*this, engine_backends, port, site_dir, cfg, compose_error)) {
+			Cerr() << "Webapp composition failed: " << compose_error << "\n";
+			return false;
+		}
 		engine_composed = true;
 
 		String ma_user = cla.GetArg("set-multiatlas-user");

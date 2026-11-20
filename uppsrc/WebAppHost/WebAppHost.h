@@ -35,6 +35,7 @@ public:
 	virtual void           AddArgs(CommandLineArguments& cla) const {}  // app-specific flags
 	virtual void           Install(EngineSite& site, WebAppContext& ctx) = 0;
 	virtual void           RegisterBroker(WebAppContext& ctx) {}        // called after Install
+	virtual bool           ContentPolicy() const { return true; }       // false: no content policy routes
 };
 
 // Registry: an app class registers under a name from an INITBLOCK in an .icpp file.
@@ -66,6 +67,8 @@ public:
 	bool           Enable(const String& name, String& error);  // registry name; refused when unknown
 	Vector<String> EnabledIds() const;
 	void           SetAgentIpc(const AgentIpcConfig& cfg);
+	void           SetAppPort(const String& id, int listen_port);   // overrides DefaultPort(), as --<id>-port does
+	void           UseGrants(WebGrants* shared);                    // borrowed grant store; not created or owned here
 
 	// Reads --port/-p, --site-dir, --public-host, --enable NAME[,NAME], --<id>-port, --set-<id>-user
 	// and each enabled app's own flags. --enable names are enabled before the flag set is built.
@@ -78,8 +81,9 @@ public:
 	String SetUserFor(const String& id) const;   // username from --set-<id>-user, or empty
 
 	// Creates each enabled app's site in install order: AddSite, Install, RegisterBroker,
-	// InstallSessionRoutes, InstallContentPolicyRoutes, InstallCommandConsole, BindSite.
-	bool Compose(WebServerHost& host, String& error);
+	// InstallSessionRoutes, InstallContentPolicyRoutes (unless ContentPolicy() is false),
+	// InstallCommandConsole, BindSite. The caller owns the listener (see Run).
+	bool Compose(WebEngineHost& host, String& error);
 	// Creates or resets an account on a composed app's site.
 	bool SetUser(const String& id, const String& username, const String& password, String& error);
 
@@ -89,6 +93,8 @@ public:
 	int    port = 8081;                 // stock listener
 	String site_dir;
 	String public_host;
+	VectorMap<String, String> origins;  // external origin per id; default http://public_host:<port>
+	Vector<String>            trusted_proxy_peers; // copied to every composed site
 
 private:
 	WebApp* FindApp(const String& id) const;
@@ -98,6 +104,7 @@ private:
 	VectorMap<String, int>    app_ports;
 	VectorMap<String, String> set_users;
 	One<WebGrants>            grants;
+	WebGrants*                shared_grants = nullptr;
 	AgentIpcConfig            agentipc;
 	bool                      has_agentipc = false;
 };

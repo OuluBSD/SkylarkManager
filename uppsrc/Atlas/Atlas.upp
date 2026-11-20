@@ -6,7 +6,8 @@ uses
 	WebStorage,
 	WebAccounts,
 	WebEngine,
-	WebsiteTemplates;
+	WebsiteTemplates,
+	WebAppHost;
 
 file
 	AGENTS.md,
@@ -24,4 +25,7 @@ file
 	AtlasClient.cpp,
 	AtlasRoadmapPages.cpp,
 	AtlasDemo.cpp,
-	AtlasSelfTests.cpp;
+	AtlasSelfTests.cpp,
+	AtlasApp.h,
+	AtlasApp.cpp,
+	AtlasApp.icpp;

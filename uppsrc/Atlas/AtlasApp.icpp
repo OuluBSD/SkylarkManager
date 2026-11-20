@@ -1,0 +1,9 @@
+#include "AtlasApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<AtlasApp>("atlas");
+}
+
+END_UPP_NAMESPACE

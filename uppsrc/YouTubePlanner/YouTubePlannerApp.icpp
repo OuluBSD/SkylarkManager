@@ -1,0 +1,9 @@
+#include "YouTubePlannerApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<YouTubePlannerApp>("youtubeplanner");
+}
+
+END_UPP_NAMESPACE

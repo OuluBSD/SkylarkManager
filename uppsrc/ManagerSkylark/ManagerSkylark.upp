@@ -29,7 +29,8 @@ uses
 	GitHubForge,
 	ForgeCore,
 	SourceForgeForge,
-	WebFramework;
+	WebFramework,
+	WebAppHost;
 
 file
 	AGENTS.md,
