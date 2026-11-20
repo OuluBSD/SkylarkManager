@@ -2102,6 +2102,42 @@ static void ClaimStoreChecks(const String& scratch)
 	      "the claim list returns active per-element/version records");
 }
 
+static void MergeBaseChecks(const String& scratch)
+{
+	String data = AppendFileName(scratch, "merge-base-data");
+	RealizeDirectory(data);
+	AtlasFamily family;
+	family.head_key = "mergefam";
+	AtlasVersion version;
+	version.vid = "v1";
+	version.code = 1000000;
+	family.versions.Add(pick(version));
+	String family_revision, map_revision, rules_revision, error;
+	Check(AtlasCreateFamily(data, family.head_key, family, family_revision, error),
+	      "a merge-base test family can be initialized");
+	AtlasMap map = SmallMap();
+	map.map = family.head_key;
+	map.version = "1.0.0";
+	Check(AtlasSaveMap(data, map.map, map, String(), map_revision, error),
+	      "a merge-base test head map can be stored");
+	AtlasRules rules;
+	Check(AtlasSaveRules(data, family.head_key, rules, String(), rules_revision, error),
+	      "a merge-base test rules document can be stored");
+
+	AtlasMergeBase base;
+	Check(AtlasCaptureMergeBase(data, family.head_key, "work_1", "alice", base, error)
+	      && base.base_map_revision == map_revision && base.base_family_revision == family_revision
+	      && base.base_rules_revision == rules_revision && base.actor == "alice" && !base.revision.IsEmpty(),
+	      "capturing a work base stores map/rules revisions, source work and actor");
+	AtlasMergeBase loaded;
+	Check(AtlasLoadMergeBase(data, family.head_key, "work_1", loaded, error)
+	      && loaded.source_work_id == "work_1" && loaded.base_map.map == family.head_key,
+	      "a recorded work base reloads with its map snapshot");
+	AtlasMergeBase duplicate;
+	Check(!AtlasCaptureMergeBase(data, family.head_key, "work_1", "bob", duplicate, error),
+	      "a work item cannot silently replace its recorded base");
+}
+
 static void ProtectedWriteChecks()
 {
 	String actor = "owner";
@@ -2464,6 +2500,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	FileStoreChecks(scratch_dir);
 	AckStoreChecks(scratch_dir);
 	ClaimStoreChecks(scratch_dir);
+	MergeBaseChecks(scratch_dir);
 	ProtectedWriteChecks();
 	SourceChecks(scratch_dir);
 	AtlasVersionToolChecks(scratch_dir);

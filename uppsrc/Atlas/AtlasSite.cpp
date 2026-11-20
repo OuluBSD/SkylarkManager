@@ -126,6 +126,7 @@ bool AtlasSaveMap(const String& data_root, const String& key, const AtlasMap& m,
 static const char *ATLAS_FAMILY_COLLECTION = "families";
 static const char *ATLAS_EVENT_COLLECTION = "events";
 static const char *ATLAS_RULES_COLLECTION = "rules";
+static const char *ATLAS_MERGE_BASE_COLLECTION = "merge_bases";
 static const char *ATLAS_FILE_COLLECTION = "files";
 static const char *ATLAS_ACK_COLLECTION = "acks";
 static const char *ATLAS_CLAIM_COLLECTION = "claims";
@@ -166,6 +167,11 @@ static IRecordCollection& Events(const String& data_root)
 static IRecordCollection& Rules(const String& data_root)
 {
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_RULES_COLLECTION);
+}
+
+static IRecordCollection& MergeBases(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_MERGE_BASE_COLLECTION);
 }
 
 static IRecordCollection& Files(const String& data_root)
@@ -332,6 +338,75 @@ bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRu
 		error = p.error;
 		return false;
 	}
+	return true;
+}
+
+static String MergeBaseKey(const String& family, const String& source_work_id)
+{
+	return family + "." + source_work_id;
+}
+
+bool AtlasLoadMergeBase(const String& data_root, const String& family, const String& source_work_id,
+                        AtlasMergeBase& out, String& error)
+{
+	String json, revision;
+	StoreResult g = MergeBases(AtlasStoreRoot(data_root, family)).Get(MergeBaseKey(family, source_work_id), json, revision);
+	if(!g.ok) {
+		error = g.error;
+		return false;
+	}
+	if(!LoadFromJson(out, json) || out.source_work_id != source_work_id || out.actor.IsEmpty()) {
+		error = "merge base is unreadable: " + source_work_id;
+		return false;
+	}
+	out.revision = revision;
+	return true;
+}
+
+bool AtlasSaveMergeBase(const String& data_root, const String& family, const AtlasMergeBase& base,
+                        const String& expected_revision, String& new_revision, String& error)
+{
+	if(!AtlasIdValid(family) || !AtlasIdValid(base.source_work_id) || base.actor.IsEmpty()) {
+		error = "merge base requires a valid source work ID and actor";
+		return false;
+	}
+	StoreResult p = MergeBases(AtlasStoreRoot(data_root, family)).Put(
+		MergeBaseKey(family, base.source_work_id), StoreAsJson(base), expected_revision, new_revision);
+	if(!p.ok) {
+		error = p.error;
+		return false;
+	}
+	return true;
+}
+
+bool AtlasCaptureMergeBase(const String& data_root, const String& family, const String& source_work_id,
+                           const String& actor, AtlasMergeBase& out, String& error)
+{
+	if(!AtlasIdValid(source_work_id) || actor.IsEmpty()) {
+		error = "merge base requires a valid source work ID and signed-in actor";
+		return false;
+	}
+	AtlasMergeBase base;
+	AtlasFamily f;
+	if(!AtlasLoadFamily(data_root, family, f, base.base_family_revision, error))
+		return false;
+	if(f.Head() < 0) {
+		error = "family has no versions to use as a merge base";
+		return false;
+	}
+	if(!AtlasLoadMap(data_root, f.head_key, base.base_map, base.base_map_revision, error))
+		return false;
+	if(!AtlasLoadRules(data_root, family, base.base_rules, base.base_rules_revision, error))
+		return false;
+	base.source_work_id = source_work_id;
+	base.actor = actor;
+	base.captured_at = AtlasNowIso();
+	base.base_family = pick(f);
+	String revision;
+	if(!AtlasSaveMergeBase(data_root, family, base, RecordAbsent(), revision, error))
+		return false;
+	base.revision = revision;
+	out = pick(base);
 	return true;
 }
 

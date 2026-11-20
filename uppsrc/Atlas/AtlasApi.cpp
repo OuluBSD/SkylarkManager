@@ -626,6 +626,30 @@ static void ClaimsGet(WebRequest& r)
 	r.Json(out);
 }
 
+static void MergeBasePost(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	String source_work_id = P(r, "source_work_id");
+	AtlasMergeBase base;
+	String error;
+	if(!AtlasCaptureMergeBase(r.Site().data_root, family, source_work_id, r.User().username, base, error)) {
+		ApiFail(r, error.Find("already exists") >= 0 || error.Find("revision conflict") >= 0 ? 409 : 400, error);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("source_work_id", base.source_work_id);
+	out.Add("actor", base.actor);
+	out.Add("captured_at", base.captured_at);
+	out.Add("base_map_revision", base.base_map_revision);
+	out.Add("base_family_revision", base.base_family_revision);
+	out.Add("base_rules_revision", base.base_rules_revision);
+	out.Add("revision", base.revision);
+	r.Json(out);
+}
+
 static void ClaimPost(WebRequest& r)
 {
 	String family = r.PathArg(0);
@@ -1708,6 +1732,7 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("api/atlas/*/claims", ClaimListGet);
 	rt.Add("POST", "api/atlas/*/claim", ClaimPost);
 	rt.Add("POST", "api/atlas/*/claim/release", ClaimReleasePost);
+	rt.Add("POST", "api/atlas/*/merge/base", MergeBasePost);
 	rt.Add("api/atlas/*/check", CheckGet);
 	rt.Add("api/atlas/*/warnings", WarningsGet);
 	rt.Add("POST", "api/atlas/*/warning/ack", WarningAck);
@@ -1822,6 +1847,9 @@ void InstallAtlasApi(EngineSite& site)
 	        { "map:string:required", "element_id:string:required", "vid:string:required", "lease_seconds:int:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-claim-release", "POST", "api/atlas/*/claim/release", write,
 	        "json", "Release the signed-in owner's claim", { "map:string:required", "element_id:string:required", "vid:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-merge-base", "POST", "api/atlas/*/merge/base", write,
+	        "json", "Capture the map, family and rules revisions/snapshot for a work item",
+	        { "map:string:required", "source_work_id:string:required" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-check", "GET", "api/atlas/*/check", read,
 	        "json", "The roadmap findings: contract, requires, constraint, stage and dependency messages (never refuses)",
 	        { "map:string:required", "vid:string" }));

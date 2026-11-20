@@ -69,6 +69,13 @@ bool AtlasElementVisibleTo(WebRequest& r, const String& head_key, const String& 
 bool AtlasLoadRules(const String& data_root, const String& family, AtlasRules& rules, String& revision, String& error);
 bool AtlasSaveRules(const String& data_root, const String& family, const AtlasRules& rules,
                     const String& expected_revision, String& new_revision, String& error);
+// Merge bases are immutable snapshots associated with one source work ID.
+bool AtlasLoadMergeBase(const String& data_root, const String& family, const String& source_work_id,
+                        AtlasMergeBase& out, String& error);
+bool AtlasSaveMergeBase(const String& data_root, const String& family, const AtlasMergeBase& base,
+                        const String& expected_revision, String& new_revision, String& error);
+bool AtlasCaptureMergeBase(const String& data_root, const String& family, const String& source_work_id,
+                           const String& actor, AtlasMergeBase& out, String& error);
 // The roadmap's file records of a family, one per file, stored with the family's other records.
 bool AtlasLoadFile(const String& data_root, const String& family, const String& file_id, AtlasFile& f,
                    String& revision, String& error);

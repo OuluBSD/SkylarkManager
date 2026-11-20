@@ -307,6 +307,27 @@ struct AtlasRules : Moveable<AtlasRules> {
 	int FindConstraint(const String& id) const;
 };
 
+// A snapshot of the family state an out-of-order work item was based on.
+struct AtlasMergeBase : Moveable<AtlasMergeBase> {
+	String    source_work_id;
+	String    actor;
+	String    captured_at;
+	String    base_map_revision;
+	String    base_family_revision;
+	String    base_rules_revision;
+	AtlasMap  base_map;
+	AtlasFamily base_family;
+	AtlasRules base_rules;
+	String    revision; // WebStorage envelope revision, not part of the JSON payload
+
+	void Jsonize(JsonIO& io) {
+		io("source_work_id", source_work_id)("actor", actor)("captured_at", captured_at)
+		  ("base_map_revision", base_map_revision)("base_family_revision", base_family_revision)
+		  ("base_rules_revision", base_rules_revision)("base_map", base_map)
+		  ("base_family", base_family)("base_rules", base_rules);
+	}
+};
+
 // A file of the project's repository that the roadmap refers to. Its text is read live from the source root
 // (see AtlasFiles.cpp); the record keeps what the roadmap says about it. spans say which lines of the baseline text
 // evidence an element, or which lines the element will write (role destination). edits are a patch series: each
