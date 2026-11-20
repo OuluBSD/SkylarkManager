@@ -277,36 +277,131 @@ static void OpExtrapolate(WebRequest& r)
 }
 
 // Crops every region of a frame from its raw image, stores each crop as a blob "crop-<region>"
-// of the same site, and returns the manifest.
-static void FrameExport(WebRequest& r)
+// of the same site, and returns the manifest. code is the HTTP status for a failure.
+static bool ExportFrame(WebRequest& r, const String& frame_id, String& manifest, int& code, String& error)
 {
-	if(!RequireRole(r)) return;
 	AnnotateStore st(r.Site().id, r.Site().data_root);
 	Frame f;
-	StoreResult s = st.GetFrame(r.PathArg(0), f);
-	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
-	if(f.image_blob.IsEmpty()) { r.Json(Err("frame has no image"), 400); return; }
+	StoreResult s = st.GetFrame(frame_id, f);
+	if(!s) { error = s.error; code = ErrorCode(s); return false; }
+	if(f.image_blob.IsEmpty()) { error = "frame has no image"; code = 400; return false; }
 	BlobStore blobs(r.Site().id, r.Site().data_root, BlobCollection, BlobStore::DefaultMaxBytes);
 	String bytes;
 	BlobRecord meta;
 	StoreResult g = blobs.Get(f.image_blob, bytes, meta);
-	if(!g) { r.Json(Err(g.error), ErrorCode(g)); return; }
+	if(!g) { error = g.error; code = ErrorCode(g); return false; }
 	Vector<Region> regions;
 	StoreResult lr = st.ListRegions(f.id, regions);
-	if(!lr) { r.Json(Err(lr.error), 400); return; }
+	if(!lr) { error = lr.error; code = 400; return false; }
 	Vector<CropResult> crops;
-	String manifest, error;
 	if(!ExportCrops(f.id, bytes, meta.width, meta.height, f.content_type, regions, crops, manifest, error)) {
-		r.Json(Err(error), 400);
-		return;
+		code = 400;
+		return false;
 	}
 	for(const CropResult& c : crops) {
 		BlobRecord stored;
 		StoreResult w = blobs.Put("crop-" + c.region, c.bytes, f.content_type, c.rect.w, c.rect.h,
 		                          c.checksum, String(), stored);
-		if(!w) { r.Json(Err(w.error), 400); return; }
+		if(!w) { error = w.error; code = 400; return false; }
 	}
+	return true;
+}
+
+static void FrameExport(WebRequest& r)
+{
+	if(!RequireRole(r)) return;
+	String manifest, error;
+	int code = 400;
+	if(!ExportFrame(r, r.PathArg(0), manifest, code, error)) { r.Json(Err(error), code); return; }
 	r.Plain(manifest, "application/json; charset=UTF-8");
+}
+
+// ---- Pages: the window and frame list, the frame detail, and the export form ----
+
+static const char *AnnotateBrand = "Annotation";
+
+static bool PageGate(WebRequest& r, const String& title)
+{
+	if(HasRole(r))
+		return true;
+	WebAppRenderPage(r, AnnotateBrand, title, "<p>An annotator or admin role is required.</p>" + WebAppSignInHint(r));
+	return false;
+}
+
+static void PageIndex(WebRequest& r)
+{
+	if(!PageGate(r, "Frames"))
+		return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Vector<WindowClass> windows;
+	Vector<Frame> frames;
+	StoreResult a = st.ListWindowClasses(windows);
+	StoreResult b = st.ListFrames(frames);
+	if(!a || !b) {
+		WebAppRenderPage(r, AnnotateBrand, "Frames", "<p>" + WebAppEscape(a ? b.error : a.error) + "</p>");
+		return;
+	}
+	String h;
+	h << "<h2>Window classes</h2><table><tr><th>Id</th><th>Name</th><th>Size</th></tr>";
+	for(const WindowClass& wc : windows)
+		h << "<tr><td>" << WebAppEscape(wc.id) << "</td><td>" << WebAppEscape(wc.name) << "</td><td>"
+		  << wc.width << " x " << wc.height << "</td></tr>";
+	h << "</table><h2>Frames</h2><table><tr><th>Frame</th><th>Window class</th><th>Content type</th></tr>";
+	for(const Frame& f : frames)
+		h << "<tr><td><a href=\"" << WebAppEscape(r.Site().Url("frame/" + f.id)) << "\">" << WebAppEscape(f.id)
+		  << "</a></td><td>" << WebAppEscape(f.window_class) << "</td><td>" << WebAppEscape(f.content_type) << "</td></tr>";
+	h << "</table>";
+	WebAppRenderPage(r, AnnotateBrand, "Frames", h);
+}
+
+static void PageFrame(WebRequest& r)
+{
+	if(!PageGate(r, "Frame"))
+		return;
+	AnnotateStore st(r.Site().id, r.Site().data_root);
+	Frame f;
+	StoreResult s = st.GetFrame(r.PathArg(0), f);
+	if(!s) {
+		r.Status(404, "Not found");
+		WebAppRenderPage(r, AnnotateBrand, "Frame", "<p>" + WebAppEscape(s.error) + "</p>");
+		return;
+	}
+	Vector<Region> regions;
+	st.ListRegions(f.id, regions);
+	String h;
+	h << "<dl><dt>Window class</dt><dd>" << WebAppEscape(f.window_class) << "</dd>"
+	  << "<dt>Image blob</dt><dd>" << WebAppEscape(f.image_blob) << "</dd>"
+	  << "<dt>Content type</dt><dd>" << WebAppEscape(f.content_type) << "</dd>"
+	  << "<dt>Layers</dt><dd>";
+	for(const FrameLayer& l : f.layers)
+		h << WebAppEscape(l.name) << " (" << WebAppEscape(l.id) << (l.visible ? "" : ", hidden") << ") ";
+	h << "</dd></dl><h2>Regions</h2><table><tr><th>Id</th><th>Layer</th><th>Rect</th><th>Label</th>"
+	     "<th>Slot group</th><th>Text hint</th></tr>";
+	for(const Region& rg : regions)
+		h << "<tr><td>" << WebAppEscape(rg.id) << "</td><td>" << WebAppEscape(rg.layer) << "</td><td>"
+		  << rg.rect.x << "," << rg.rect.y << " " << rg.rect.w << "x" << rg.rect.h << "</td><td>"
+		  << WebAppEscape(rg.label) << "</td><td>" << WebAppEscape(rg.slot_group) << "</td><td>"
+		  << WebAppEscape(rg.text_hint) << "</td></tr>";
+	h << "</table>";
+	h << "<form method=\"post\" action=\"" << WebAppEscape(r.Site().Url("export")) << "\">"
+	  << "<input type=\"hidden\" name=\"__wf_csrf__\" value=\"" << WebAppEscape(r.CsrfToken()) << "\">"
+	  << "<input type=\"hidden\" name=\"frame\" value=\"" << WebAppEscape(f.id) << "\">"
+	  << "<button type=\"submit\">Export crops</button></form>";
+	WebAppRenderPage(r, AnnotateBrand, "Frame " + f.id, h);
+}
+
+static void PageExport(WebRequest& r)
+{
+	if(!PageGate(r, "Export"))
+		return;
+	String id = r.Param("frame"), manifest, error;
+	int code = 400;
+	if(!ExportFrame(r, id, manifest, code, error)) {
+		WebAppRenderPage(r, AnnotateBrand, "Export refused", "<p>" + WebAppEscape(error) + "</p>");
+		return;
+	}
+	WebAppRenderPage(r, AnnotateBrand, "Export of " + id,
+	                 "<p>Crops were stored as blobs named crop-&lt;region&gt;.</p><pre>" + WebAppEscape(manifest) + "</pre>");
 }
 
 class AnnotateWebApp : public WebApp {
@@ -317,6 +412,9 @@ public:
 	Vector<String> Roles() const override { Vector<String> v; v.Add("annotator"); v.Add("admin"); return v; }
 
 	void Install(EngineSite& site, WebAppContext& ctx) override {
+		site.Router().Add("GET", "", PageIndex);
+		site.Router().Add("GET", "frame/*", PageFrame);
+		site.Router().Add("POST", "export", PageExport);
 		site.Router().Add("GET", "api/window-classes", WindowsList);
 		site.Router().Add("POST", "api/window-classes", WindowPut);
 		site.Router().Add("GET", "api/frames", FramesList);
