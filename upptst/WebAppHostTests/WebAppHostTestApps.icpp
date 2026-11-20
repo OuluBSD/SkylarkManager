@@ -107,6 +107,17 @@ public:
 	int DefaultPort() const override { return 8081; }
 };
 
+class BlobTestApp : public WebApp {
+public:
+	String Id() const override { return "blobtest"; }
+	String Title() const override { return "Blob test"; }
+	int DefaultPort() const override { return 18315; }
+	Vector<String> Roles() const override { Vector<String> r; r.Add("editor"); return r; }
+	void Install(EngineSite& site, WebAppContext& ctx) override {
+		InstallBlobRoutes(site, "blobs", 1024 * 1024, "editor", "editor");
+	}
+};
+
 INITBLOCK {
 	RegisterWebapp<AlphaApp>("AlphaApp");
 	RegisterWebapp<BetaApp>("BetaApp");
@@ -120,6 +131,7 @@ INITBLOCK {
 	RegisterWebapp<PortOneApp>("PortOneApp");
 	RegisterWebapp<PortTwoApp>("PortTwoApp");
 	RegisterWebapp<StockPortApp>("StockPortApp");
+	RegisterWebapp<BlobTestApp>("BlobTestApp");
 }
 
 END_UPP_NAMESPACE

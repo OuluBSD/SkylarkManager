@@ -66,6 +66,19 @@ static void BlobUpload(WebRequest& r, String collection, int64 max_bytes, String
 	r.Json(out, 201);
 }
 
+// Uploads are client bytes under a client type. Only these types are rendered inline; any other stored
+// type (text/html, image/svg+xml, ...) would run as markup on the site origin, so it is served as an
+// attachment of octet-stream instead.
+static bool InlineSafeBlobType(const String& content_type)
+{
+	static const char *safe[] = { "image/png", "image/jpeg", "image/gif", "image/webp" };
+	String type = ToLower(content_type);
+	for(const char *s : safe)
+		if(type == s)
+			return true;
+	return false;
+}
+
 static void BlobRead(WebRequest& r, String collection, int64 max_bytes, String read_roles)
 {
 	r.SetHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -82,7 +95,14 @@ static void BlobRead(WebRequest& r, String collection, int64 max_bytes, String r
 		return;
 	}
 	r.SetHeader("ETag", "\"" + rec.checksum + "\"");
-	r.Plain(bytes, ~rec.content_type);
+	r.SetHeader("X-Content-Type-Options", "nosniff");
+	r.SetHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+	if(InlineSafeBlobType(rec.content_type))
+		r.Plain(bytes, ~ToLower(rec.content_type));
+	else {
+		r.SetHeader("Content-Disposition", "attachment");
+		r.Plain(bytes, "application/octet-stream");
+	}
 }
 
 void InstallBlobRoutes(EngineSite& site, const String& collection, int64 max_bytes,

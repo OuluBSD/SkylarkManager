@@ -1,4 +1,5 @@
 #include <WebAppHost/WebAppHost.h>
+#include <WebStorage/WebStorage.h>
 #include <initializer_list>
 
 using namespace Upp;
@@ -182,16 +183,153 @@ static void TestCompose()
 	DeleteFolderDeep(scratch);
 }
 
+struct BlobReply {
+	int    status = 0;
+	String content_type;
+	String nosniff;
+	String disposition;
+	String csp;
+	String session_cookie;   // "name=value" of the first Set-Cookie of a wfs_ cookie
+	String body;
+};
+
+// Raw HTTP/1.1 client for one exchange (Connection: close). The Host is the site public authority, which the
+// engine gateway pins; the socket connects to loopback. Retries while the listener comes up.
+static BlobReply BlobCall(int port, const String& method, const String& path, const String& cookie,
+                          const String& body, const char *ctype)
+{
+	BlobReply r;
+	for(int attempt = 0; attempt < 100 && r.status == 0; attempt++) {
+		TcpSocket s;
+		s.Timeout(10000);
+		if(!s.Connect("127.0.0.1", port)) {
+			Sleep(100);
+			continue;
+		}
+		StringBuffer req;
+		req << method << ' ' << path << " HTTP/1.1\r\nHost: 192.168.1.50:" << port << "\r\nConnection: close\r\n";
+		req << "Content-Type: " << ctype << "\r\n";
+		if(cookie.GetCount())
+			req << "Cookie: " << cookie << "\r\n";
+		if(body.GetCount())
+			req << "Content-Length: " << body.GetCount() << "\r\n";
+		req << "\r\n" << body;
+		s.Put(req);
+		StringBuffer all;
+		String data;
+		while((data = s.Get(4096)).GetCount())
+			all << data;
+		String text = all;
+		int q = text.Find("\r\n\r\n");
+		if(q < 0) {
+			Sleep(100);
+			continue;
+		}
+		r.body = text.Mid(q + 4);
+		Vector<String> lines = Split(text.Left(q), '\n');
+		if(lines.GetCount()) {
+			Vector<String> st = Split(lines[0], ' ');
+			if(st.GetCount() >= 2)
+				r.status = ScanInt(st[1]);
+		}
+		for(int i = 1; i < lines.GetCount(); i++) {
+			String line = TrimBoth(lines[i]);
+			int c = line.Find(':');
+			if(c < 0)
+				continue;
+			String key = ToLower(TrimBoth(line.Left(c)));
+			String value = TrimBoth(line.Mid(c + 1));
+			if(key == "content-type")
+				r.content_type = value;
+			else if(key == "x-content-type-options")
+				r.nosniff = value;
+			else if(key == "content-disposition")
+				r.disposition = value;
+			else if(key == "content-security-policy")
+				r.csp = value;
+			else if(key == "set-cookie" && value.StartsWith("wfs_") && r.session_cookie.IsEmpty())
+				r.session_cookie = TrimBoth(value.Left(value.Find(';') < 0 ? value.GetCount() : value.Find(';')));
+		}
+	}
+	return r;
+}
+
+// The blob test runs the host the way the program does: Run() finalizes the Skylark views (the engine
+// gateway is one of them) and starts the listeners on a worker thread. Its stock port is a test port,
+// never the live portal port.
+static const int BLOB_STOCK_PORT = 18320;
+static One<WebServerHost> *s_blob_host = nullptr;   // kept for the life of the process; see main
+static void BlobHostMain() { (*s_blob_host)->Run(); }
+
+static void TestBlobRoutes()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostBlobs");
+	RealizeDirectory(scratch);
+	WebServer s;
+	s.Enable("BlobTestApp", error);
+	Check(s.ParseArgs(Words({ "--port", AsString(BLOB_STOCK_PORT), "--site-dir", scratch, "--public-host", "192.168.1.50" }), error),
+	      "blob: flags for a scratch site parse");
+	s_blob_host = new One<WebServerHost>;
+	s_blob_host->Create();
+	Check(s.Compose(**s_blob_host, error), "blob: the blob test app composes (" + error + ")");
+	Check(s.SetUser("blobtest", "ed", "synthetic-password", error), "blob: an editor account is written");
+
+	EngineSite *site = TheWebEngine().FindSite("blobtest");
+	Check(site != nullptr, "blob: the site is composed under its id");
+	if(!site)
+		return;
+	// Bytes an editor could upload: markup, a vector image and a PNG, stored through the same store the route uses.
+	BlobStore store(site->id, site->data_root, "blobs", 1024 * 1024);
+	BlobRecord rec;
+	String none = String(RecordAbsent());
+	StoreResult a = store.Put("page", "<script>alert(document.cookie)</script>", "text/html", 0, 0, "", none, rec);
+	StoreResult b = store.Put("vec", "<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "image/svg+xml", 0, 0, "", none, rec);
+	StoreResult c = store.Put("pic", "\x89PNG\r\n\x1a\n-bytes", "image/png", 1, 1, "", none, rec);
+	Check(a.ok && b.ok && c.ok, "blob: html, svg and png blobs are stored");
+
+	static Thread host_thread; // lives to process exit: the listener thread keeps serving until _Exit
+	host_thread.Run(BlobHostMain);
+	const int port = 18315;
+	BlobReply login = BlobCall(port, "POST", "/session/login", "", "username=ed&password=synthetic-password",
+	                           "application/x-www-form-urlencoded");
+	Check(login.session_cookie.StartsWith("wfs_blobtest="), "blob: the editor signs in and gets a site cookie");
+
+	BlobReply anon = BlobCall(port, "GET", "/blobs/page", "", "", "text/plain");
+	Check(anon.status == 401, "blob: an anonymous read of an uploaded html blob is refused (status " + AsString(anon.status) + ")");
+
+	BlobReply html = BlobCall(port, "GET", "/blobs/page", login.session_cookie, "", "text/plain");
+	Check(html.status == 200 && html.content_type == "application/octet-stream" && html.disposition == "attachment",
+	      "blob: an uploaded html blob is served as an attachment, not as text/html");
+	Check(!ToLower(html.content_type).StartsWith("text/html"), "blob: the html blob never carries a text/html type");
+	Check(html.nosniff == "nosniff", "blob: the html blob carries X-Content-Type-Options: nosniff");
+	Check(html.csp.Find("default-src 'none'") >= 0 && html.csp.Find("sandbox") >= 0,
+	      "blob: the html blob carries a default-src 'none'; sandbox policy");
+
+	BlobReply svg = BlobCall(port, "GET", "/blobs/vec", login.session_cookie, "", "text/plain");
+	Check(svg.status == 200 && svg.content_type == "application/octet-stream" && svg.disposition == "attachment",
+	      "blob: an uploaded svg blob is served as an attachment, not as image/svg+xml");
+
+	BlobReply png = BlobCall(port, "GET", "/blobs/pic", login.session_cookie, "", "text/plain");
+	Check(png.status == 200 && png.content_type == "image/png" && png.disposition.IsEmpty(),
+	      "blob: a png blob is still served inline as image/png");
+	Check(png.nosniff == "nosniff", "blob: the png blob carries X-Content-Type-Options: nosniff");
+	DeleteFolderDeep(scratch);
+}
+
 CONSOLE_APP_MAIN
 {
 	TestRegistry();
 	TestOrderAndRefusals();
 	TestFlags();
 	TestCompose();
+	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";
 	if(failures) {
 		Cout() << "WebAppHost self-tests FAILED\n";
 		fflush(stdout);
-		exit(1);
+		_Exit(1);
 	}
+	fflush(stdout);
+	_Exit(0);
 }
