@@ -56,12 +56,11 @@ static void ApiFail(WebRequest& r, int code, const String& error)
 
 static bool ApiAuthFamily(WebRequest& r, const String& family)
 {
-	if(!r.HasUser()) {
-		ApiFail(r, 401, "not signed in");
-		return false;
-	}
-	if(!AtlasCanEditFamily(r, family)) {
-		ApiFail(r, 403, "editing needs the admin role, or to be an editor of this map's project");
+	bool authenticated = r.HasUser();
+	bool can_edit = authenticated && AtlasCanEditFamily(r, family);
+	if(!AtlasClaimWriteAuthorized(authenticated, can_edit)) {
+		ApiFail(r, authenticated ? 403 : 401, authenticated ? "editing needs the admin role, or to be an editor of this map's project"
+		                                                : "not signed in");
 		return false;
 	}
 	return true;

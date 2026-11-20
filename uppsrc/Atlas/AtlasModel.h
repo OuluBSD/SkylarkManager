@@ -218,6 +218,7 @@ struct AtlasClaim : Moveable<AtlasClaim> {
 };
 
 bool AtlasClaimLeaseAlive(const AtlasClaim& claim, Time now);
+bool AtlasClaimWriteAuthorized(bool authenticated, bool can_edit);
 bool AtlasValidateProtectedWrite(const AtlasMap& before, const AtlasMap& after, const Vector<AtlasEvent>& events,
                                  const Vector<AtlasClaim>& claims, const String& actor, Time now, String& error);
 

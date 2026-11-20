@@ -2166,6 +2166,9 @@ static void ProtectedWriteChecks()
 	Check(!AtlasValidateProtectedWrite(open, changed, Vector<AtlasEvent>(), other_claims, "bob", now, error)
 	      && error.Find("claimed by alice") >= 0,
 	      "a different worker cannot edit an element with an active claim");
+	Check(!AtlasClaimWriteAuthorized(false, true) && !AtlasClaimWriteAuthorized(true, false)
+	      && AtlasClaimWriteAuthorized(true, true),
+	      "anonymous or non-editor writes are refused while an authenticated editor is allowed");
 }
 
 static void SourceChecks(const String& scratch)
