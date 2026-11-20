@@ -10,6 +10,7 @@ headless) can use it.
 | File | Role |
 |------|------|
 | `WebStorage.h/.cpp` | `StoreResult`, `RecordEnvelope`, `IRecordCollection`, `JsonFileStore` (per-record JSON files, inter-process lock, atomic writes, quarantine), `MemoryStore`, `SchemaRegistry`, `StoreManager` |
+| `WebStorage.h/.cpp` (`BlobStore`) | Binary blobs beside the JSON records: metadata (`BlobRecord`: id, SHA-256, byte size, width, height, content type) in the collection, bytes in `<collection>/<id>.blob`; upload limit; checksum checked on read |
 
 ## Invariants
 

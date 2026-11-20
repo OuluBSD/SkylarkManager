@@ -5,10 +5,12 @@ uses
 	Core/SSL,
 	Skylark,
 	WebEngine,
+	WebStorage,
 	WebAccounts,
 	WebBroker,
 	Channels;
 
 file
 	WebAppHost.h,
-	WebAppHost.cpp;
+	WebAppHost.cpp,
+	BlobRoutes.cpp;

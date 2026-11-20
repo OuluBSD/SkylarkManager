@@ -744,6 +744,129 @@ bool SchemaRegistry::Validate(const String& schema_id, const ValueMap& doc, Stri
 }
 
 // ---------------------------------------------------------------------------
+// BlobStore
+// ---------------------------------------------------------------------------
+
+BlobStore::BlobStore(const String& site_id, const String& data_root, const String& collection, int64 limit)
+	: meta_store(site_id, data_root, collection), max_bytes(limit)
+{
+	ASSERT_(max_bytes > 0, "blob upload limit must be positive");
+}
+
+String BlobStore::Checksum(const String& bytes)
+{
+	byte digest[32];
+	SHA256(digest, bytes);
+	return ToLower(HexString(digest, 32));
+}
+
+bool BlobStore::ValidContentType(const String& ct)
+{
+	if(ct.GetCount() < 3 || ct.GetCount() > 100)
+		return false;
+	int slash = ct.Find('/');
+	if(slash <= 0 || slash != ct.ReverseFind('/') || slash == ct.GetCount() - 1)
+		return false;
+	for(int i = 0; i < ct.GetCount(); i++) {
+		int c = ct[i];
+		bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '+' || c == '-' || c == '/';
+		if(!ok)
+			return false;
+	}
+	return true;
+}
+
+String BlobStore::BytesPath(const String& id) const
+{
+	return AppendFileName(meta_store.CollectionDir(), id + ".blob");
+}
+
+StoreResult BlobStore::Put(const String& id, const String& bytes, const String& content_type,
+                           int width, int height, const String& expected_checksum,
+                           const String& expected_revision, BlobRecord& stored)
+{
+	if(!JsonFileStore::ValidId(id))
+		return "invalid blob id: " + id;
+	if(bytes.IsEmpty())
+		return "blob is empty: " + id;
+	if(bytes.GetCount() > max_bytes)
+		return "blob " + id + " is " + AsString(bytes.GetCount()) + " bytes, over the upload limit of "
+		       + AsString((int)max_bytes) + " bytes";
+	if(!ValidContentType(content_type))
+		return "invalid content type: " + content_type;
+	if(width < 0 || height < 0 || width > MaxDimension || height > MaxDimension)
+		return "invalid blob dimensions: " + AsString(width) + "x" + AsString(height);
+
+	BlobRecord rec;
+	rec.id = id;
+	rec.checksum = Checksum(bytes);
+	rec.byte_size = bytes.GetCount();
+	rec.width = width;
+	rec.height = height;
+	rec.content_type = content_type;
+
+	if(expected_checksum.GetCount() && ToLower(expected_checksum) != rec.checksum)
+		return "checksum mismatch for blob " + id + ": declared " + expected_checksum
+		       + ", computed " + rec.checksum;
+
+	// The metadata write and the bytes write happen under one store lock. The metadata
+	// is written first, so a revision conflict leaves the existing bytes untouched.
+	JsonFileStore::Txn txn(meta_store);
+	if(!txn.Ok())
+		return txn.Error();
+	String new_revision;
+	StoreResult r = txn.Put(id, StoreAsJson(rec), expected_revision, new_revision);
+	if(!r)
+		return r;
+	String err;
+	if(!JsonFileStore::WriteAtomic(BytesPath(id), bytes, err))
+		return "cannot write bytes of blob " + id + ": " + err;
+	stored = rec;
+	return true;
+}
+
+StoreResult BlobStore::Meta(const String& id, BlobRecord& meta)
+{
+	if(!JsonFileStore::ValidId(id))
+		return "invalid blob id: " + id;
+	String json, revision;
+	StoreResult r = meta_store.Get(id, json, revision);
+	if(!r)
+		return r;
+	BlobRecord rec;
+	try {
+		LoadFromJson(rec, json);
+	}
+	catch(Exc& e) {
+		return "blob metadata is corrupt for " + id + ": " + e;
+	}
+	if(rec.id != id)
+		return "blob metadata does not match id " + id;
+	meta = rec;
+	return true;
+}
+
+StoreResult BlobStore::Get(const String& id, String& bytes, BlobRecord& meta)
+{
+	BlobRecord rec;
+	StoreResult m = Meta(id, rec);
+	if(!m)
+		return m;
+	String path = BytesPath(id);
+	if(!FileExists(path))
+		return "blob bytes are missing: " + id;
+	String raw = LoadFile(path);
+	if(raw.GetCount() != rec.byte_size)
+		return "blob size mismatch for " + id + ": metadata " + AsString(rec.byte_size)
+		       + ", stored " + AsString(raw.GetCount());
+	if(Checksum(raw) != rec.checksum)
+		return "blob checksum mismatch for " + id + ": the stored bytes are refused";
+	bytes = raw;
+	meta = rec;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // StoreManager
 // ---------------------------------------------------------------------------
 

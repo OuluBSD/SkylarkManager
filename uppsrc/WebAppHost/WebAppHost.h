@@ -46,6 +46,12 @@ template <class T> void RegisterWebapp(const char* name) { WebAppFactories().Get
 Vector<String> WebappNames();
 WebApp*        CreateWebapp(const String& name);   // nullptr when the name is not registered
 
+// Blob routes for one site: POST blobs/<id> (upload, with the write roles) and GET blobs/<id> (read, with
+// the read roles). Bytes live in the site's <collection> blob store, capped at max_bytes per upload.
+// write_roles and read_roles are comma-separated role names; an empty list admits nobody.
+void InstallBlobRoutes(EngineSite& site, const String& collection, int64 max_bytes,
+                       const String& write_roles, const String& read_roles);
+
 // The engine host with the listener settings WebServer sets (SkylarkApp keeps them protected).
 class WebServerHost : public WebEngineHost {
 public:

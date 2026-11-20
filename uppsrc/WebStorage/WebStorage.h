@@ -166,6 +166,66 @@ private:
 	String      schema_id, schema_version, workspace_id, record_kind, visibility, provenance_ref;
 };
 
+// ---------------------------------------------------------------------------
+// BlobStore: binary payloads (images, uploads) kept beside the JSON records of
+// one collection.
+//
+// The metadata of blob <id> is a JSON record in <collection> (JsonFileStore,
+// so it has revisions and the same lock). The bytes are <collection dir>/<id>.blob,
+// written atomically under the same lock. Reads recheck the byte size and the
+// SHA-256 checksum recorded in the metadata, so damaged bytes are refused.
+// ---------------------------------------------------------------------------
+struct BlobRecord {
+	String id;
+	String checksum;          // lowercase hex SHA-256 of the bytes
+	int64  byte_size = 0;
+	int    width = 0;         // pixels; 0 when not an image
+	int    height = 0;
+	String content_type;      // e.g. "image/png"
+
+	void Jsonize(JsonIO& io) {
+		io("id", id)
+		  ("checksum", checksum)
+		  ("byte_size", byte_size)
+		  ("width", width)
+		  ("height", height)
+		  ("content_type", content_type)
+		;
+	}
+};
+
+class BlobStore {
+public:
+	static const int64 DefaultMaxBytes = 8 * 1024 * 1024;
+	static const int   MaxDimension = 65535;
+
+	BlobStore(const String& site_id, const String& data_root, const String& collection,
+	          int64 max_bytes = DefaultMaxBytes);
+
+	// Stores bytes under id. expected_checksum, when not empty, must equal the SHA-256 of bytes
+	// (a client-declared checksum); a mismatch is refused and nothing is written.
+	// expected_revision has the JsonFileStore meaning (RecordAbsent(), a revision, or empty).
+	StoreResult Put(const String& id, const String& bytes, const String& content_type,
+	                int width, int height, const String& expected_checksum,
+	                const String& expected_revision, BlobRecord& stored);
+
+	// Reads the metadata and the bytes; refuses bytes whose size or checksum disagree with the metadata.
+	StoreResult Get(const String& id, String& bytes, BlobRecord& meta);
+
+	// Metadata only.
+	StoreResult Meta(const String& id, BlobRecord& meta);
+
+	int64        MaxBytes() const { return max_bytes; }
+	static String Checksum(const String& bytes);
+	static bool   ValidContentType(const String& content_type);
+
+private:
+	String BytesPath(const String& id) const;
+
+	JsonFileStore meta_store;
+	int64         max_bytes;
+};
+
 // Simple in-memory store for tests and ephemeral state.
 class MemoryStore : public IRecordCollection {
 public:

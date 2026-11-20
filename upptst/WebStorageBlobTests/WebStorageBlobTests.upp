@@ -1,0 +1,8 @@
+description "Blob store self-test: store and read back, checksum and size refusals, upload limit, id and revision refusals\377";
+
+uses
+	Core,
+	WebStorage;
+
+file
+	WebStorageBlobTests.cpp;
