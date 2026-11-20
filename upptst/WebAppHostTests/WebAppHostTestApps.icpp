@@ -1,0 +1,125 @@
+#include <WebAppHost/WebAppHost.h>
+
+NAMESPACE_UPP
+
+Vector<String>& WebAppTestLog()
+{
+	static Vector<String> log;
+	return log;
+}
+
+class TestWebApp : public WebApp {
+public:
+	void Install(EngineSite& site, WebAppContext& ctx) override {
+		if(!ctx.grants || !ctx.broker)
+			WebAppTestLog().Add("missing-context");
+		WebAppTestLog().Add(Id());
+	}
+};
+
+class AlphaApp : public TestWebApp {
+public:
+	String Id() const override { return "alpha"; }
+	String Title() const override { return "Alpha"; }
+	int DefaultPort() const override { return 18301; }
+	Vector<String> Roles() const override { Vector<String> r; r.Add("viewer"); r.Add("admin"); return r; }
+};
+
+class BetaApp : public TestWebApp {
+public:
+	String Id() const override { return "beta"; }
+	String Title() const override { return "Beta"; }
+	int DefaultPort() const override { return 18302; }
+	Vector<String> Requires() const override { Vector<String> r; r.Add("alpha"); return r; }
+};
+
+class GammaApp : public TestWebApp {
+public:
+	String Id() const override { return "gamma"; }
+	String Title() const override { return "Gamma"; }
+	int DefaultPort() const override { return 18303; }
+	Vector<String> Requires() const override { Vector<String> r; r.Add("beta"); return r; }
+};
+
+class ZetaApp : public TestWebApp {
+public:
+	String Id() const override { return "zeta"; }
+	String Title() const override { return "Zeta"; }
+	int DefaultPort() const override { return 18304; }
+};
+
+class CycleOneApp : public TestWebApp {
+public:
+	String Id() const override { return "cycle-one"; }
+	String Title() const override { return "Cycle one"; }
+	int DefaultPort() const override { return 18305; }
+	Vector<String> Requires() const override { Vector<String> r; r.Add("cycle-two"); return r; }
+};
+
+class CycleTwoApp : public TestWebApp {
+public:
+	String Id() const override { return "cycle-two"; }
+	String Title() const override { return "Cycle two"; }
+	int DefaultPort() const override { return 18306; }
+	Vector<String> Requires() const override { Vector<String> r; r.Add("cycle-one"); return r; }
+};
+
+class MissingReqApp : public TestWebApp {
+public:
+	String Id() const override { return "missing-req"; }
+	String Title() const override { return "Missing"; }
+	int DefaultPort() const override { return 18307; }
+	Vector<String> Requires() const override { Vector<String> r; r.Add("nowhere"); return r; }
+};
+
+class DupIdA : public TestWebApp {
+public:
+	String Id() const override { return "dup"; }
+	String Title() const override { return "Dup A"; }
+	int DefaultPort() const override { return 18308; }
+};
+
+class DupIdB : public TestWebApp {
+public:
+	String Id() const override { return "dup"; }
+	String Title() const override { return "Dup B"; }
+	int DefaultPort() const override { return 18309; }
+};
+
+class PortOneApp : public TestWebApp {
+public:
+	String Id() const override { return "port-one"; }
+	String Title() const override { return "Port one"; }
+	int DefaultPort() const override { return 18310; }
+};
+
+class PortTwoApp : public TestWebApp {
+public:
+	String Id() const override { return "port-two"; }
+	String Title() const override { return "Port two"; }
+	int DefaultPort() const override { return 18310; }
+};
+
+class StockPortApp : public TestWebApp {
+public:
+	String Id() const override { return "stock"; }
+	String Title() const override { return "Stock"; }
+	int DefaultPort() const override { return 8081; }
+};
+
+INITBLOCK {
+	RegisterWebapp<AlphaApp>("AlphaApp");
+	RegisterWebapp<BetaApp>("BetaApp");
+	RegisterWebapp<GammaApp>("GammaApp");
+	RegisterWebapp<ZetaApp>("ZetaApp");
+	RegisterWebapp<CycleOneApp>("CycleOneApp");
+	RegisterWebapp<CycleTwoApp>("CycleTwoApp");
+	RegisterWebapp<MissingReqApp>("MissingReqApp");
+	RegisterWebapp<DupIdA>("DupIdA");
+	RegisterWebapp<DupIdB>("DupIdB");
+	RegisterWebapp<PortOneApp>("PortOneApp");
+	RegisterWebapp<PortTwoApp>("PortTwoApp");
+	RegisterWebapp<StockPortApp>("StockPortApp");
+}
+
+END_UPP_NAMESPACE

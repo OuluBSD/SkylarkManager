@@ -1,0 +1,14 @@
+description "Reusable web server: registrable webapps (WebApp), a name registry, and WebServer composing enabled apps on WebEngine\377";
+
+uses
+	Core,
+	Core/SSL,
+	Skylark,
+	WebEngine,
+	WebAccounts,
+	WebBroker,
+	Channels;
+
+file
+	WebAppHost.h,
+	WebAppHost.cpp;

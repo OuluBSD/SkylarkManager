@@ -1,0 +1,12 @@
+description "Self-test host for WebAppHost: registry, install order, flag parsing and composition on WebEngine\377";
+
+uses
+	Core,
+	Core/SSL,
+	Skylark,
+	WebEngine,
+	WebAppHost;
+
+file
+	WebAppHostTests.cpp,
+	WebAppHostTestApps.icpp;
