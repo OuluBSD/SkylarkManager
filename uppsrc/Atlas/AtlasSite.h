@@ -76,6 +76,23 @@ bool AtlasSaveMergeBase(const String& data_root, const String& family, const Atl
                         const String& expected_revision, String& new_revision, String& error);
 bool AtlasCaptureMergeBase(const String& data_root, const String& family, const String& source_work_id,
                            const String& actor, AtlasMergeBase& out, String& error);
+bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                     int& http_status, String& error);
+bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                     int& status, String& error);
+bool AtlasLoadMergeRecord(const String& data_root, const String& family, const String& source_work_id,
+                          AtlasMergeRecord& out, String& error);
+bool AtlasSaveMergeRecord(const String& data_root, const String& family, const AtlasMergeRecord& record,
+                          const String& expected_revision, String& new_revision, String& error);
+// Captures current state on every retry; conflicts return a persisted record without applying a partial merge.
+bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                     int& http_status, String& error);
 // The roadmap's file records of a family, one per file, stored with the family's other records.
 bool AtlasLoadFile(const String& data_root, const String& family, const String& file_id, AtlasFile& f,
                    String& revision, String& error);

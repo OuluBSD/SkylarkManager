@@ -127,6 +127,7 @@ static const char *ATLAS_FAMILY_COLLECTION = "families";
 static const char *ATLAS_EVENT_COLLECTION = "events";
 static const char *ATLAS_RULES_COLLECTION = "rules";
 static const char *ATLAS_MERGE_BASE_COLLECTION = "merge_bases";
+static const char *ATLAS_MERGE_COLLECTION = "merges";
 static const char *ATLAS_FILE_COLLECTION = "files";
 static const char *ATLAS_ACK_COLLECTION = "acks";
 static const char *ATLAS_CLAIM_COLLECTION = "claims";
@@ -172,6 +173,11 @@ static IRecordCollection& Rules(const String& data_root)
 static IRecordCollection& MergeBases(const String& data_root)
 {
 	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_MERGE_BASE_COLLECTION);
+}
+
+static IRecordCollection& Merges(const String& data_root)
+{
+	return TheStoreManager().JsonCollection("atlas", data_root, ATLAS_MERGE_COLLECTION);
 }
 
 static IRecordCollection& Files(const String& data_root)
@@ -407,6 +413,242 @@ bool AtlasCaptureMergeBase(const String& data_root, const String& family, const 
 		return false;
 	base.revision = revision;
 	out = pick(base);
+	return true;
+}
+
+static bool SameFinding(const AtlasRoadmapMessage& a, const AtlasRoadmapMessage& b)
+{
+	return a.severity == b.severity && a.rule == b.rule && a.subject_kind == b.subject_kind
+	    && a.subject_id == b.subject_id && a.vid == b.vid && a.text == b.text;
+}
+
+static void AddMergeFailure(AtlasMergeRecord& record, const String& path, const String& base,
+	                        const String& ours, const String& theirs, const String& reason)
+{
+	AtlasMergeConflict conflict;
+	conflict.path = path;
+	conflict.base_value = base;
+	conflict.ours_value = ours;
+	conflict.theirs_value = theirs;
+	conflict.resolution = "none";
+	conflict.resolved_by.Clear();
+	conflict.resolved_at.Clear();
+	record.conflicts.Add(pick(conflict));
+	record.error = reason;
+}
+
+static bool MergeFamilyShapeValid(const AtlasFamily& family, const String& expected_head, String& error)
+{
+	if(family.head_key != expected_head || family.versions.IsEmpty()) {
+		error = "merged family has the wrong head key or no versions";
+		return false;
+	}
+	Index<String> vids;
+	int previous_code = -1;
+	for(const AtlasVersion& version : family.versions) {
+		if(!AtlasIdValid(version.vid) || !AtlasVersionValid(version.code) || vids.Find(version.vid) >= 0
+		|| version.code <= previous_code) {
+			error = "merged family has invalid, duplicate, or unordered versions";
+			return false;
+		}
+		vids.Add(version.vid);
+		previous_code = version.code;
+	}
+	return true;
+}
+
+static bool MergeRevisionConflict(const String& error)
+{
+	return error.Find("revision conflict") >= 0 || error.Find("revision mismatch") >= 0 || error.Find("changed") >= 0;
+}
+
+bool AtlasApplyMerge(const String& data_root, const String& family, const String& source_work_id, const String& actor,
+                     const AtlasMap& theirs_map, const AtlasFamily& theirs_family,
+                     const Vector<AtlasMergeResolution>& resolutions, AtlasMergeRecord& out,
+                     int& http_status, String& error)
+{
+	AtlasMergeBase base;
+	if(!AtlasLoadMergeBase(data_root, family, source_work_id, base, error)) {
+		http_status = 404;
+		return false;
+	}
+	AtlasMergeRecord record;
+	record.source_work_id = source_work_id;
+	record.base_map_revision = base.base_map_revision;
+	record.base_family_revision = base.base_family_revision;
+	record.base_rules_revision = base.base_rules_revision;
+	record.actor = actor;
+	for(int attempt = 0; attempt < 3; attempt++) {
+		AtlasFamily ours_family;
+		String family_revision;
+		if(!AtlasLoadFamily(data_root, family, ours_family, family_revision, error)) {
+			http_status = 500;
+			return false;
+		}
+		AtlasMap ours_map;
+		String map_revision;
+		if(!AtlasLoadMap(data_root, ours_family.head_key, ours_map, map_revision, error)) {
+			http_status = 500;
+			return false;
+		}
+		AtlasRules rules;
+		String rules_revision;
+		if(!AtlasLoadRules(data_root, family, rules, rules_revision, error)) {
+			http_status = 500;
+			return false;
+		}
+
+		record.merged_at = AtlasNowIso();
+		record.retries = attempt + ((map_revision != base.base_map_revision || family_revision != base.base_family_revision) ? 1 : 0);
+		record.conflicts.Clear();
+		record.error.Clear();
+		if(rules_revision != base.base_rules_revision) {
+			AddMergeFailure(record, "rules/revision", base.base_rules_revision, rules_revision,
+			                "not supplied", "rules changed since the work base; capture a new base before merging");
+			record.status = "conflict";
+			http_status = 409;
+			out = pick(record);
+			error = out.error;
+			return true;
+		}
+
+		AtlasMap merged_map;
+		AtlasFamily merged_family;
+		if(!AtlasThreeWayMerge(base, ours_map, ours_family, theirs_map, theirs_family,
+		                       resolutions, actor, record.merged_at, merged_map, merged_family,
+		                       record.conflicts, error)) {
+			http_status = 400;
+			return false;
+		}
+		bool unresolved = false;
+		for(const AtlasMergeConflict& conflict : record.conflicts)
+			unresolved |= conflict.resolution == "none";
+		if(unresolved) {
+			record.status = "conflict";
+			record.error = "merge has unresolved conflicts; owner decisions are required";
+			http_status = 409;
+			out = pick(record);
+			error = out.error;
+			return true;
+		}
+		if(merged_map.map != ours_family.head_key || !MergeFamilyShapeValid(merged_family, ours_family.head_key, error)) {
+			if(error.IsEmpty()) error = "merged map key does not match the family head";
+			record.status = "rejected";
+			record.error = error;
+			http_status = 422;
+			out = pick(record);
+			return true;
+		}
+
+		AtlasCheck structural;
+		AtlasValidate(merged_map, structural);
+		if(!structural.errors.IsEmpty()) {
+			record.status = "rejected";
+			record.error = structural.errors[0];
+			AddMergeFailure(record, "validation/map", "valid base", "valid current", record.error, record.error);
+			http_status = 422;
+			out = pick(record);
+			error = out.error;
+			return true;
+		}
+
+		Vector<AtlasEvent> events;
+		if(!AtlasLoadEvents(data_root, family, events, error)) {
+			http_status = 500;
+			return false;
+		}
+		Vector<AtlasRoadmapMessage> before_findings, after_findings;
+		Vector<Vector<String>> worlds;
+		AtlasRoadmapFindings(ours_map, ours_family, rules, events, before_findings, worlds);
+		AtlasRoadmapFindings(merged_map, merged_family, rules, events, after_findings, worlds);
+		for(const AtlasRoadmapMessage& finding : after_findings) {
+			if(finding.severity != "error")
+				continue;
+			bool existed = false;
+			for(const AtlasRoadmapMessage& old : before_findings)
+				if(old.severity == "error" && SameFinding(finding, old)) {
+					existed = true;
+					break;
+				}
+			if(!existed) {
+				record.status = "rejected";
+				record.error = "merged replay introduces an error: " + finding.text;
+				AddMergeFailure(record, "strictness/" + finding.rule + "/" + finding.vid + "/" + finding.subject_id,
+				                "no error", "current replay", finding.text, record.error);
+				http_status = 422;
+				out = pick(record);
+				error = out.error;
+				return true;
+			}
+		}
+
+		AtlasFamily latest_family;
+		String latest_family_revision;
+		AtlasMap latest_map;
+		String latest_map_revision;
+		AtlasRules latest_rules;
+		String latest_rules_revision;
+		if(!AtlasLoadFamily(data_root, family, latest_family, latest_family_revision, error)
+		|| !AtlasLoadMap(data_root, latest_family.head_key, latest_map, latest_map_revision, error)
+		|| !AtlasLoadRules(data_root, family, latest_rules, latest_rules_revision, error)) {
+			http_status = 500;
+			return false;
+		}
+		if(latest_family_revision != family_revision || latest_map_revision != map_revision
+		|| latest_rules_revision != rules_revision) {
+			record.retries++;
+			continue;
+		}
+
+		bool map_changed = StoreAsJson(merged_map) != StoreAsJson(ours_map);
+		bool family_changed = StoreAsJson(merged_family) != StoreAsJson(ours_family);
+		String final_map_revision = map_revision, final_family_revision = family_revision;
+		bool map_saved = false;
+		if(map_changed && !AtlasSaveMap(data_root, ours_family.head_key, merged_map, map_revision,
+		                               final_map_revision, error)) {
+			if(MergeRevisionConflict(error)) {
+				record.retries++;
+				continue;
+			}
+			http_status = 500;
+			return false;
+		}
+		map_saved = map_changed;
+		if(family_changed && !AtlasSaveFamily(data_root, family, merged_family, family_revision,
+		                                     final_family_revision, error)) {
+			if(map_saved) {
+				String rollback_revision, rollback_error;
+				if(!AtlasSaveMap(data_root, ours_family.head_key, ours_map, final_map_revision,
+				                 rollback_revision, rollback_error)) {
+					record.status = "partial";
+					record.error = "family save failed and map rollback failed: " + rollback_error;
+					http_status = 500;
+					out = pick(record);
+					error = out.error;
+					return true;
+				}
+			}
+			if(MergeRevisionConflict(error)) {
+				record.retries++;
+				continue;
+			}
+			http_status = 500;
+			return false;
+		}
+		record.status = "merged";
+		record.result_map_revision = final_map_revision;
+		record.result_family_revision = final_family_revision;
+		record.error.Clear();
+		http_status = 200;
+		out = pick(record);
+		error.Clear();
+		return true;
+	}
+	record.status = "stale";
+	record.error = "family or map revision moved repeatedly during merge; retry from the latest head";
+	http_status = 409;
+	out = pick(record);
+	error = out.error;
 	return true;
 }
 

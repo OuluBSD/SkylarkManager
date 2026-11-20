@@ -2138,6 +2138,101 @@ static void MergeBaseChecks(const String& scratch)
 	      "a work item cannot silently replace its recorded base");
 }
 
+static bool InitMergeApplyStore(const String& data, AtlasFamily& family, AtlasMap& map, String& error)
+{
+	RealizeDirectory(data);
+	family.head_key = "mergeapply";
+	AtlasVersion version;
+	version.vid = "v1";
+	version.code = 1;
+	family.versions.Add(pick(version));
+	String frev, mrev, rrev;
+	if(!AtlasCreateFamily(data, family.head_key, family, frev, error))
+		return false;
+	map = SmallMap();
+	map.map = family.head_key;
+	map.version = "0.0.1";
+	if(!AtlasSaveMap(data, map.map, map, String(), mrev, error))
+		return false;
+	AtlasRules rules;
+	return AtlasSaveRules(data, family.head_key, rules, String(), rrev, error);
+}
+
+static void MergeApplyChecks(const String& scratch)
+{
+	String data = AppendFileName(scratch, "merge-apply-data");
+	AtlasFamily family;
+	AtlasMap initial;
+	String error;
+	bool initialized = InitMergeApplyStore(data, family, initial, error);
+	Check(initialized, "merge-apply scratch store can be initialized");
+	if(!initialized)
+		return;
+	AtlasMergeBase base;
+	Check(AtlasCaptureMergeBase(data, family.head_key, "work_disjoint", "agent_a", base, error),
+	      "merge apply captures the work base");
+
+	AtlasMap ours;
+	LoadFromJson(ours, StoreAsJson(initial));
+	ours.elements[0].status = "active";
+	String mrev;
+	Check(AtlasSaveMap(data, family.head_key, ours, base.base_map_revision, mrev, error),
+	      "a concurrent disjoint edit advances the current map revision");
+	AtlasMap theirs;
+	LoadFromJson(theirs, StoreAsJson(initial));
+	theirs.elements[0].name = "Agent patch";
+	AtlasMergeRecord merged;
+	int status = 0;
+	Vector<AtlasMergeResolution> resolutions;
+	Check(AtlasApplyMerge(data, family.head_key, "work_disjoint", "owner", theirs, base.base_family,
+	                      resolutions, merged, status, error)
+	      && status == 200 && merged.status == "merged" && merged.retries > 0,
+	      "merge apply rebases on a moved map revision and merges disjoint fields");
+	AtlasMap after;
+	String after_revision;
+	Check(AtlasLoadMap(data, family.head_key, after, after_revision, error)
+	      && after.elements[0].name == "Agent patch" && after.elements[0].status == "active",
+	      "the rebased merge preserves both disjoint changes");
+
+	AtlasMergeBase conflict_base;
+	Check(AtlasCaptureMergeBase(data, family.head_key, "work_conflict", "agent_a", conflict_base, error),
+	      "a second merge work item captures its base");
+	AtlasMap ours_conflict;
+	LoadFromJson(ours_conflict, StoreAsJson(after));
+	ours_conflict.elements[0].name = "Ours edit";
+	String ours_revision;
+	Check(AtlasSaveMap(data, family.head_key, ours_conflict, after_revision, ours_revision, error),
+	      "the current side advances for conflict testing");
+	AtlasMap theirs_conflict;
+	LoadFromJson(theirs_conflict, StoreAsJson(after));
+	theirs_conflict.elements[0].name = "Theirs edit";
+	AtlasMergeRecord conflict_record;
+	Check(AtlasApplyMerge(data, family.head_key, "work_conflict", "owner", theirs_conflict,
+	                      conflict_base.base_family, resolutions, conflict_record, status, error)
+	      && status == 409 && conflict_record.status == "conflict" && conflict_record.conflicts.GetCount() == 1
+	      && conflict_record.conflicts[0].resolution == "none",
+	      "divergent edits return an unresolved conflict");
+	Check(AtlasLoadMap(data, family.head_key, after, after_revision, error)
+	      && after.elements[0].name == "Ours edit",
+	      "a conflicting merge does not save either side over the current head");
+
+	AtlasMergeBase invalid_base;
+	Check(AtlasCaptureMergeBase(data, family.head_key, "work_invalid", "agent_a", invalid_base, error),
+	      "a replay-validation work item captures its base");
+	AtlasMap invalid_theirs;
+	LoadFromJson(invalid_theirs, StoreAsJson(after));
+	invalid_theirs.elements[0].parent = "missing-parent";
+	AtlasMergeRecord rejected;
+	Check(AtlasApplyMerge(data, family.head_key, "work_invalid", "owner", invalid_theirs,
+	                      invalid_base.base_family, resolutions, rejected, status, error)
+	      && status == 422 && rejected.status == "rejected",
+	      "a merged head that breaks structural replay validation is refused");
+	AtlasMap still_current;
+	Check(AtlasLoadMap(data, family.head_key, still_current, after_revision, error)
+	      && still_current.elements[0].name == "Ours edit" && still_current.elements[0].parent.IsEmpty(),
+	      "a rejected merge leaves the current head untouched");
+}
+
 static void AtlasThreeWayMergeChecks()
 {
 	AtlasMap base_map = SmallMap();
@@ -2579,6 +2674,7 @@ bool RunAtlasSelfTests(const String& scratch_dir)
 	AckStoreChecks(scratch_dir);
 	ClaimStoreChecks(scratch_dir);
 	MergeBaseChecks(scratch_dir);
+	MergeApplyChecks(scratch_dir);
 	AtlasThreeWayMergeChecks();
 	ProtectedWriteChecks();
 	SourceChecks(scratch_dir);

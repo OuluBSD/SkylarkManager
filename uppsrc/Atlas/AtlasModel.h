@@ -331,6 +331,8 @@ struct AtlasMergeBase : Moveable<AtlasMergeBase> {
 struct AtlasMergeResolution : Moveable<AtlasMergeResolution> {
 	String path;
 	String choice; // ours | theirs
+
+	void Jsonize(JsonIO& io) { io("path", path)("choice", choice); }
 };
 
 struct AtlasMergeConflict : Moveable<AtlasMergeConflict> {
@@ -345,6 +347,30 @@ struct AtlasMergeConflict : Moveable<AtlasMergeConflict> {
 	void Jsonize(JsonIO& io) {
 		io("path", path)("base", base_value)("ours", ours_value)("theirs", theirs_value)
 		  ("resolution", resolution)("resolved_by", resolved_by)("resolved_at", resolved_at);
+	}
+};
+
+struct AtlasMergeRecord : Moveable<AtlasMergeRecord> {
+	String source_work_id;
+	String base_map_revision;
+	String base_family_revision;
+	String base_rules_revision;
+	String actor;
+	String merged_at;
+	String status; // conflict | rejected | merged | stale | partial
+	String error;
+	String result_map_revision;
+	String result_family_revision;
+	int    retries = 0;
+	Vector<AtlasMergeConflict> conflicts;
+	String revision; // WebStorage envelope revision, not part of JSON
+
+	void Jsonize(JsonIO& io) {
+		io("source_work_id", source_work_id)("base_map_revision", base_map_revision)
+		  ("base_family_revision", base_family_revision)("base_rules_revision", base_rules_revision)
+		  ("actor", actor)("merged_at", merged_at)("status", status)("error", error)
+		  ("result_map_revision", result_map_revision)("result_family_revision", result_family_revision)
+		  ("retries", retries)("conflicts", conflicts);
 	}
 };
 

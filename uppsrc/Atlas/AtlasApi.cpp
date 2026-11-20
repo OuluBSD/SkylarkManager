@@ -647,7 +647,117 @@ static void MergeBasePost(WebRequest& r)
 	out.Add("base_family_revision", base.base_family_revision);
 	out.Add("base_rules_revision", base.base_rules_revision);
 	out.Add("revision", base.revision);
+	out.Add("base_map", ParseJSON(StoreAsJson(base.base_map)));
+	out.Add("base_family", ParseJSON(StoreAsJson(base.base_family)));
+	out.Add("base_rules", ParseJSON(StoreAsJson(base.base_rules)));
 	r.Json(out);
+}
+
+static void MergeBaseGet(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	AtlasMergeBase base;
+	String error;
+	if(!AtlasLoadMergeBase(r.Site().data_root, family, P(r, "source_work_id"), base, error)) {
+		ApiFail(r, error == "record not found" ? 404 : 500, error);
+		return;
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("source_work_id", base.source_work_id);
+	out.Add("actor", base.actor);
+	out.Add("captured_at", base.captured_at);
+	out.Add("base_map_revision", base.base_map_revision);
+	out.Add("base_family_revision", base.base_family_revision);
+	out.Add("base_rules_revision", base.base_rules_revision);
+	out.Add("revision", base.revision);
+	out.Add("base_map", ParseJSON(StoreAsJson(base.base_map)));
+	out.Add("base_family", ParseJSON(StoreAsJson(base.base_family)));
+	out.Add("base_rules", ParseJSON(StoreAsJson(base.base_rules)));
+	r.Json(out);
+}
+
+static ValueMap MergeRecordValue(const AtlasMergeRecord& record)
+{
+	ValueMap out;
+	out.Add("source_work_id", record.source_work_id);
+	out.Add("base_map_revision", record.base_map_revision);
+	out.Add("base_family_revision", record.base_family_revision);
+	out.Add("base_rules_revision", record.base_rules_revision);
+	out.Add("actor", record.actor);
+	out.Add("merged_at", record.merged_at);
+	out.Add("status", record.status);
+	out.Add("error", record.error);
+	out.Add("result_map_revision", record.result_map_revision);
+	out.Add("result_family_revision", record.result_family_revision);
+	out.Add("retries", record.retries);
+	out.Add("revision", record.revision);
+	ValueArray conflicts;
+	for(const AtlasMergeConflict& conflict : record.conflicts) {
+		ValueMap item;
+		item.Add("path", conflict.path);
+		item.Add("base", conflict.base_value);
+		item.Add("ours", conflict.ours_value);
+		item.Add("theirs", conflict.theirs_value);
+		item.Add("resolution", conflict.resolution);
+		item.Add("resolved_by", conflict.resolved_by);
+		item.Add("resolved_at", conflict.resolved_at);
+		conflicts.Add(item);
+	}
+	out.Add("conflicts", conflicts);
+	return out;
+}
+
+static void MergePost(WebRequest& r)
+{
+	String family = r.PathArg(0);
+	if(!ApiAuthFamily(r, family))
+		return;
+	ValueMap body = ApiBody(r);
+	Value theirs_map_value = body.Get("theirs_map");
+	Value theirs_family_value = body.Get("theirs_family");
+	if(!theirs_map_value.Is<ValueMap>() || !theirs_family_value.Is<ValueMap>()) {
+		ApiFail(r, 400, "merge requires theirs_map and theirs_family objects");
+		return;
+	}
+	AtlasMap theirs_map;
+	AtlasFamily theirs_family;
+	try {
+		LoadFromJsonValue(theirs_map, theirs_map_value);
+		LoadFromJsonValue(theirs_family, theirs_family_value);
+	}
+	catch(Exc& e) {
+		ApiFail(r, 400, String("invalid merge snapshot: ") + e);
+		return;
+	}
+	Vector<AtlasMergeResolution> resolutions;
+	Value resolutions_value = body.Get("resolutions");
+	if(!resolutions_value.IsNull()) {
+		if(!resolutions_value.Is<ValueArray>()) {
+			ApiFail(r, 400, "resolutions must be an array");
+			return;
+		}
+		try {
+			LoadFromJsonValue(resolutions, resolutions_value);
+		}
+		catch(Exc& e) {
+			ApiFail(r, 400, String("invalid merge resolutions: ") + e);
+			return;
+		}
+	}
+	AtlasMergeRecord record;
+	int status = 500;
+	String error;
+	if(!AtlasApplyMerge(r.Site().data_root, family, P(r, "source_work_id"), r.User().username,
+	                    theirs_map, theirs_family, resolutions, record, status, error)) {
+		ApiFail(r, status, error);
+		return;
+	}
+	ValueMap out = MergeRecordValue(record);
+	out.Add("ok", record.status == "merged");
+	r.Json(out, status);
 }
 
 static void ClaimPost(WebRequest& r)
@@ -1732,7 +1842,9 @@ void InstallAtlasApi(EngineSite& site)
 	rt.Add("api/atlas/*/claims", ClaimListGet);
 	rt.Add("POST", "api/atlas/*/claim", ClaimPost);
 	rt.Add("POST", "api/atlas/*/claim/release", ClaimReleasePost);
+	rt.Add("api/atlas/*/merge/base", MergeBaseGet);
 	rt.Add("POST", "api/atlas/*/merge/base", MergeBasePost);
+	rt.Add("POST", "api/atlas/*/merge", MergePost);
 	rt.Add("api/atlas/*/check", CheckGet);
 	rt.Add("api/atlas/*/warnings", WarningsGet);
 	rt.Add("POST", "api/atlas/*/warning/ack", WarningAck);
@@ -1850,6 +1962,13 @@ void InstallAtlasApi(EngineSite& site)
 	cm.Add(site.id, site.title, HttpCommand("atlas-merge-base", "POST", "api/atlas/*/merge/base", write,
 	        "json", "Capture the map, family and rules revisions/snapshot for a work item",
 	        { "map:string:required", "source_work_id:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-merge-base-get", "GET", "api/atlas/*/merge/base", write,
+	        "json", "Read the recorded base snapshot for a work item",
+	        { "map:string:required", "source_work_id:string:required" }));
+	cm.Add(site.id, site.title, HttpCommand("atlas-merge", "POST", "api/atlas/*/merge", write,
+	        "json", "Three-way merge a work snapshot against current Atlas state",
+	        { "map:string:required", "source_work_id:string:required", "theirs_map:json:required",
+	          "theirs_family:json:required", "resolutions:json" }));
 	cm.Add(site.id, site.title, HttpCommand("atlas-check", "GET", "api/atlas/*/check", read,
 	        "json", "The roadmap findings: contract, requires, constraint, stage and dependency messages (never refuses)",
 	        { "map:string:required", "vid:string" }));
