@@ -21,9 +21,10 @@ SiteAccounts::SiteAccounts(const String& site_id, const String& data_root, int s
 
 String SiteAccounts::CookieNameFor(const String& site_id)
 {
-	// Cookie names must be filesystem/HTTP safe; site ids are restricted ids.
+	// Cookie names must be filesystem/HTTP safe; site ids are restricted ids. Lowercase: the request
+	// parser stores cookie names lowercase, so a mixed-case name could never be found again.
 	StringBuffer sb;
-	sb << site_id;
+	sb << ToLower(site_id);
 	for(int i = 0; i < sb.GetCount(); i++)
 		if(!IsAlpha(sb[i]) && !IsDigit(sb[i]) && sb[i] != '_' && sb[i] != '-')
 			sb[i] = '_';
