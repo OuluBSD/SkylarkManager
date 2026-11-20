@@ -22,6 +22,14 @@ static bool InsideWindow(const WindowClass& wc, AnnPoint p)
 	return p.x >= 0 && p.y >= 0 && p.x <= wc.width && p.y <= wc.height;
 }
 
+// True when a non-empty rectangle lies inside a width x height area. The test is written as a subtraction:
+// x and w come from client JSON and may be near INT_MAX, so x + w could wrap negative and pass a sum check.
+static bool RectInside(const AnnRect& r, int64 width, int64 height)
+{
+	return r.w > 0 && r.h > 0 && r.x >= 0 && r.y >= 0
+	    && (int64)r.w <= width - (int64)r.x && (int64)r.h <= height - (int64)r.y;
+}
+
 bool ValidateWindowClass(const WindowClass& wc, String& error)
 {
 	if(!JsonFileStore::ValidId(wc.id)) {
@@ -169,7 +177,7 @@ bool ExportCrops(const String& frame_id, const String& raw, int width, int heigh
 	}
 	for(const Region& rg : regions) {
 		const AnnRect& r = rg.rect;
-		if(r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > width || r.y + r.h > height) {
+		if(!RectInside(r, width, height)) {
 			error = "region " + rg.id + " lies outside the frame";
 			return false;
 		}
@@ -335,7 +343,7 @@ StoreResult AnnotateStore::PutRegion(const Region& rg, const String& expected_re
 	if(!GetWindowClass(f.window_class, wc))
 		return "frame " + rg.frame + " has an unknown window class";
 	const AnnRect& r = rg.rect;
-	if(r.w <= 0 || r.h <= 0 || r.x < 0 || r.y < 0 || r.x + r.w > wc.width || r.y + r.h > wc.height)
+	if(!RectInside(r, wc.width, wc.height))
 		return "region " + rg.id + " lies outside the window class";
 	if(rg.label.IsEmpty() || rg.label.GetCount() > 200)
 		return "region label is required (at most 200 bytes)";

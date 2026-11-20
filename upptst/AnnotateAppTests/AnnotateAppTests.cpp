@@ -124,6 +124,19 @@ CONSOLE_APP_MAIN
 	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
 	      && error.Find("outside the frame") >= 0,
 	      "export: a rectangle past the frame edge is refused");
+	// A large width or height must not wrap x + w (or y + h) negative and pass: the bounds test is a subtraction.
+	regions.Clear();
+	rg.id = "wide"; rg.rect = AnnRect(1, 0, 2147483647, 1); rg.label = "wide";
+	regions.Add(rg);
+	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	      && error.Find("outside the frame") >= 0,
+	      "export: a region at the far edge with a width of INT_MAX is refused, not wrapped into range");
+	regions.Clear();
+	rg.id = "tall"; rg.rect = AnnRect(0, 1, 1, 2147483647); rg.label = "tall";
+	regions.Add(rg);
+	Check(!ExportCrops("f1", raw, 4, 4, "application/x-raw-gray8", regions, crops, manifest, error)
+	      && error.Find("outside the frame") >= 0,
+	      "export: a region with a height of INT_MAX below the top edge is refused, not wrapped into range");
 	Check(!ExportCrops("f1", raw, 4, 4, "image/png", regions, crops, manifest, error)
 	      && !ExportCrops("f1", raw.Left(15), 4, 4, "application/x-raw-gray8", regions, crops, manifest, error),
 	      "export: an unsupported content type and a frame of the wrong size are refused");
@@ -170,6 +183,10 @@ CONSOLE_APP_MAIN
 	Region r3 = r1;
 	r3.id = "a3"; r3.rect = AnnRect(90, 90, 20, 20);
 	Check(!store.PutRegion(r3, RecordAbsent()), "store: a region past the window edge is refused");
+	Region r3w = r1;
+	r3w.id = "a3w"; r3w.rect = AnnRect(1, 10, 2147483647, 20);
+	Check(!store.PutRegion(r3w, RecordAbsent()) && !store.GetRegion("a3w", r3w),
+	      "store: a region with a width of INT_MAX at the far edge is refused, not wrapped into range");
 	Region r4 = r1;
 	r4.id = "a4"; r4.label = "";
 	Check(!store.PutRegion(r4, RecordAbsent()), "store: a region without a label is refused");
