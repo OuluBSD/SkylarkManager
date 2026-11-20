@@ -22,7 +22,7 @@ how the parts connect.
    for spatial structure, status and connections. Atlas does not read or
    write Manager v2 data and has no cross-app links in v1.
 2. **One document per map version.** The key is `<map>-<version>` (for
-   example `pkr-v0.0.1`). The elements marked into a version's map are that
+   example `demo-v0.0.1`). The elements marked into a version's map are that
    version's picked goals.
 3. **Revision-checked writes.** Every mutation carries the revision the form
    was rendered from. A stale revision is refused (409), never merged. Every

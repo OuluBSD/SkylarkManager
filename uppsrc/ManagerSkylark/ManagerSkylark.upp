@@ -87,6 +87,7 @@ file
 	DocsPortalSelfTests.cpp,
 	V2CalendarSelfTests.cpp,
 	MarkdownSelfTests.cpp,
+	DomainWordSelfTests.cpp,
 	Executable host, app setup, and composition readonly separator,
 	ManagerSkylark.h,
 	ManagerSkylark.cpp,

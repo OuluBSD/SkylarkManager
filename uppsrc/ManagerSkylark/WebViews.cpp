@@ -41,7 +41,7 @@ SKYLARK(HomePage, "home")
 	if(local_repo_count == 0) local_repo_count = 116;
 
 	String b;
-	// Hero / Ecosystem Command Center Banner
+	// Ecosystem Command Center banner
 	b << "<div class=\"card\" style=\"background: linear-gradient(135deg, rgba(24,32,48,0.95), rgba(28,32,47,0.95)); border: 1px solid var(--wf-accent-focus, #00a1c5); box-shadow: 0 4px 20px rgba(0,161,197,0.15); margin-bottom: 1.5rem;\">\n"
 	  << "  <div style=\"display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;\">\n"
 	  << "    <div>\n"

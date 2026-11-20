@@ -136,6 +136,7 @@ bool RunMetaInboxSelfTests(const String& scratch_dir);
 bool RunDocsPortalSelfTests(const String& scratch_dir);
 bool RunV2CalendarSelfTests(const String& scratch_dir);
 bool RunMarkdownSelfTests();
+bool RunDomainWordSelfTests();
 bool RunAtlasSelfTests(const String& scratch_dir);
 
 // Portal shell (tasks 033, 034): the descriptors, the meta-shell frame and the stock tree.
@@ -561,6 +562,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunMarkdownSelfTests()) {
 		Cerr() << "FAILED: markdown pipeline static tests\n";
+		return false;
+	}
+	if(!RunDomainWordSelfTests()) {
+		Cerr() << "FAILED: domain-word scan (strict separation) found a hit\n";
 		return false;
 	}
 	if(!RunAtlasSelfTests(AppendFileName(fixture.path, "atlas"))) {
