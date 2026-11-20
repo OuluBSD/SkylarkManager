@@ -1,0 +1,187 @@
+#include "ReviewApp.h"
+#include <WebAppHost/WebAppHost.h>
+
+NAMESPACE_UPP
+
+// WebApp "ReviewApp": JSON routes over ReviewQueue and the site's blob store.
+// Reads need a reviewer or admin role; writes need the admin role, except decisions, which need reviewer or admin.
+
+static Vector<String> ReviewerRoles()
+{
+	Vector<String> v;
+	v.Add("reviewer");
+	v.Add("admin");
+	return v;
+}
+
+static Vector<String> AdminRoles()
+{
+	Vector<String> v;
+	v.Add("admin");
+	return v;
+}
+
+static bool HasRole(WebRequest& r, const Vector<String>& roles)
+{
+	if(!r.HasUser())
+		return false;
+	for(const String& role : roles)
+		if(FindIndex(r.User().roles, role) >= 0)
+			return true;
+	return false;
+}
+
+static ValueMap Err(const String& error)
+{
+	ValueMap e;
+	e.Add("ok", false);
+	e.Add("error", error);
+	return e;
+}
+
+static int ErrorCode(const StoreResult& r)
+{
+	if(r.conflict)
+		return 409;
+	if(r.error.Find("not found") >= 0)
+		return 404;
+	return 400;
+}
+
+static ValueMap ItemValue(const ReviewItem& it)
+{
+	ValueMap m;
+	m.Add("id", it.id);
+	m.Add("image_blob", it.image_blob);
+	m.Add("source_ref", it.source_ref);
+	m.Add("proposed_label", it.proposed_label);
+	m.Add("status", it.status);
+	m.Add("label", it.label);
+	m.Add("text", it.text);
+	m.Add("reviewer", it.reviewer);
+	m.Add("revision", it.revision);
+	return m;
+}
+
+static void ItemsList(WebRequest& r)
+{
+	if(!HasRole(r, ReviewerRoles())) { r.Json(Err("reviewer role required"), r.HasUser() ? 403 : 401); return; }
+	int offset = r.Param("offset").IsEmpty() ? 0 : r.IntParam("offset");
+	int limit = r.Param("limit").IsEmpty() ? 20 : r.IntParam("limit");
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewPage page;
+	StoreResult s = q.Page(r.Param("status"), offset, limit, page);
+	if(!s) { r.Json(Err(s.error), 400); return; }
+	ValueArray rows;
+	for(const ReviewItem& it : page.items)
+		rows.Add(ItemValue(it));
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("total", page.total);
+	out.Add("offset", page.offset);
+	out.Add("limit", page.limit);
+	out.Add("items", rows);
+	r.Json(out);
+}
+
+static void ItemGet(WebRequest& r)
+{
+	if(!HasRole(r, ReviewerRoles())) { r.Json(Err("reviewer role required"), r.HasUser() ? 403 : 401); return; }
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewItem it;
+	StoreResult s = q.Get(r.PathArg(0), it);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out = ItemValue(it);
+	out.Add("ok", true);
+	r.Json(out);
+}
+
+static void ItemDecide(WebRequest& r)
+{
+	if(!HasRole(r, ReviewerRoles())) { r.Json(Err("reviewer role required"), r.HasUser() ? 403 : 401); return; }
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewItem it;
+	StoreResult s = q.Decide(r.Param("id"), r.Param("decision"), r.Param("label"), r.Param("text"),
+	                         r.User().user_id, r.Param("revision"), it);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out = ItemValue(it);
+	out.Add("ok", true);
+	r.Json(out);
+}
+
+static void ItemEnqueue(WebRequest& r)
+{
+	if(!HasRole(r, AdminRoles())) { r.Json(Err("admin role required"), r.HasUser() ? 403 : 401); return; }
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewItem it;
+	it.id = r.Param("id");
+	it.image_blob = r.Param("image_blob");
+	it.source_ref = r.Param("source_ref");
+	it.proposed_label = r.Param("proposed_label");
+	StoreResult s = q.Enqueue(it);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	r.Json(ItemValue(it), 201);
+}
+
+static void LabelsList(WebRequest& r)
+{
+	if(!HasRole(r, ReviewerRoles())) { r.Json(Err("reviewer role required"), r.HasUser() ? 403 : 401); return; }
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	Vector<ReviewLabel> labels;
+	StoreResult s = q.ListLabels(labels);
+	if(!s) { r.Json(Err(s.error), 400); return; }
+	ValueArray rows;
+	for(const ReviewLabel& l : labels) {
+		ValueMap m;
+		m.Add("id", l.id);
+		m.Add("name", l.name);
+		m.Add("requires_text", l.requires_text);
+		m.Add("revision", l.revision);
+		rows.Add(m);
+	}
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("labels", rows);
+	r.Json(out);
+}
+
+static void LabelPut(WebRequest& r)
+{
+	if(!HasRole(r, AdminRoles())) { r.Json(Err("admin role required"), r.HasUser() ? 403 : 401); return; }
+	ReviewQueue q(r.Site().id, r.Site().data_root);
+	ReviewLabel l;
+	l.id = r.Param("id");
+	l.name = r.Param("name");
+	l.requires_text = r.Param("requires_text") == "1" || r.Param("requires_text") == "true";
+	String revision = r.Param("revision");
+	StoreResult s = q.PutLabel(l, revision.IsEmpty() ? String(RecordAbsent()) : revision);
+	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	ValueMap out;
+	out.Add("ok", true);
+	out.Add("id", l.id);
+	r.Json(out, 201);
+}
+
+class ReviewWebApp : public WebApp {
+public:
+	String         Id() const override { return "ReviewApp"; }
+	String         Title() const override { return "Review queue"; }
+	int            DefaultPort() const override { return 18420; }
+	Vector<String> Roles() const override { return ReviewerRoles(); }
+
+	void Install(EngineSite& site, WebAppContext& ctx) override {
+		site.Router().Add("GET", "api/items", ItemsList);
+		site.Router().Add("GET", "api/items/*", ItemGet);
+		site.Router().Add("POST", "api/items/decide", ItemDecide);
+		site.Router().Add("POST", "api/items/enqueue", ItemEnqueue);
+		site.Router().Add("GET", "api/labels", LabelsList);
+		site.Router().Add("POST", "api/labels", LabelPut);
+		InstallBlobRoutes(site, "review-blobs", BlobStore::DefaultMaxBytes, "reviewer,admin", "reviewer,admin");
+	}
+};
+
+INITBLOCK {
+	RegisterWebapp<ReviewWebApp>("ReviewApp");
+}
+
+END_UPP_NAMESPACE

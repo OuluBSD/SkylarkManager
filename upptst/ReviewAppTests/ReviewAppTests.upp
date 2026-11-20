@@ -1,0 +1,9 @@
+description "ReviewApp self-test: queue paging, each decision, revision conflict, unknown label, label text rules\377";
+
+uses
+	Core,
+	ReviewApp,
+	WebAppHost;
+
+file
+	ReviewAppTests.cpp;

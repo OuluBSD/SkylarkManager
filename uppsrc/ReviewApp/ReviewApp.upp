@@ -1,0 +1,11 @@
+description "Review queue: items with image blob references, reviewer decisions (accept, correct, reject, uncertain), label sets, paged listing, WebApp ReviewApp\377";
+
+uses
+	Core,
+	WebStorage,
+	WebAppHost;
+
+file
+	ReviewApp.h,
+	ReviewApp.cpp,
+	ReviewAppWeb.icpp;
