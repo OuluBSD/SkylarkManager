@@ -208,9 +208,16 @@ static void OpSnap(WebRequest& r)
 	WindowClass wc;
 	StoreResult s = st.GetWindowClass(String(b["window_class"]), wc);
 	if(!s) { r.Json(Err(s.error), ErrorCode(s)); return; }
+	int x = 0, y = 0, max_distance = 0;
+	String error;
+	if(!JsonToInt(b["x"], "x", x, error) || !JsonToInt(b["y"], "y", y, error)
+	   || !JsonToInt(b["max_distance"], "max_distance", max_distance, error)) {
+		r.Json(Err(error), 400);
+		return;
+	}
 	AnnPoint snapped;
 	int index = -1;
-	bool hit = SnapToAnchor(wc, AnnPoint((int)b["x"], (int)b["y"]), (int)b["max_distance"], snapped, index);
+	bool hit = SnapToAnchor(wc, AnnPoint(x, y), max_distance, snapped, index);
 	ValueMap out = PointValue(snapped);
 	out.Add("ok", true);
 	out.Add("snapped", hit);
@@ -238,8 +245,14 @@ static void OpRescale(WebRequest& r)
 	StoreResult s2 = st.GetWindowClass(String(b["to"]), to);
 	if(!s2) { r.Json(Err(s2.error), ErrorCode(s2)); return; }
 	ValueMap rv = b["rect"];
-	AnnRect in((int)rv["x"], (int)rv["y"], (int)rv["w"], (int)rv["h"]), out_rect;
+	int x = 0, y = 0, w = 0, h = 0;
 	String error;
+	if(!JsonToInt(rv["x"], "rect.x", x, error) || !JsonToInt(rv["y"], "rect.y", y, error)
+	   || !JsonToInt(rv["w"], "rect.w", w, error) || !JsonToInt(rv["h"], "rect.h", h, error)) {
+		r.Json(Err(error), 400);
+		return;
+	}
+	AnnRect in(x, y, w, h), out_rect;
 	if(!RescaleRect(from, to, in, out_rect, error)) { r.Json(Err(error), 400); return; }
 	ValueMap out = RectValue(out_rect);
 	out.Add("ok", true);
@@ -262,8 +275,21 @@ static void OpExtrapolate(WebRequest& r)
 	ValueMap c = b["centre"], sd = b["seed"];
 	Vector<AnnPoint> slots;
 	String error;
-	if(!ExtrapolateSlots(AnnPoint((int)c["x"], (int)c["y"]), AnnPoint((int)sd["x"], (int)sd["y"]),
-	                     (double)b["step"], (int)b["count"], slots, error)) {
+	int cx = 0, cy = 0, sx = 0, sy = 0, count = 0;
+	if(!JsonToInt(c["x"], "centre.x", cx, error) || !JsonToInt(c["y"], "centre.y", cy, error)
+	   || !JsonToInt(sd["x"], "seed.x", sx, error) || !JsonToInt(sd["y"], "seed.y", sy, error)
+	   || !JsonToInt(b["count"], "count", count, error)) {
+		r.Json(Err(error), 400);
+		return;
+	}
+	double step = 0;
+	if(!b["step"].IsNull() && !b["step"].Is<double>()) {
+		r.Json(Err("step must be a number"), 400);
+		return;
+	}
+	if(!b["step"].IsNull())
+		step = (double)b["step"];
+	if(!ExtrapolateSlots(AnnPoint(cx, cy), AnnPoint(sx, sy), step, count, slots, error)) {
 		r.Json(Err(error), 400);
 		return;
 	}

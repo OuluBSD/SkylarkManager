@@ -60,6 +60,24 @@ bool ValidateWindowClass(const WindowClass& wc, String& error)
 	return true;
 }
 
+bool JsonToInt(const Value& v, const char *name, int& out, String& error)
+{
+	out = 0;
+	if(v.IsNull())
+		return true;
+	if(!v.Is<double>()) {
+		error = String(name) + " must be a number";
+		return false;
+	}
+	double d = (double)v;
+	if(floor(d) != d || d < -2147483648.0 || d > 2147483647.0) {
+		error = String(name) + " must be a whole number between -2147483648 and 2147483647";
+		return false;
+	}
+	out = (int)d;
+	return true;
+}
+
 bool SnapToAnchor(const WindowClass& wc, AnnPoint p, int max_distance, AnnPoint& snapped, int& anchor_index)
 {
 	if(wc.anchors.GetCount() != 3 || max_distance < 0)

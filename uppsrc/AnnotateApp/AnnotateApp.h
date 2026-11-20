@@ -91,6 +91,11 @@ struct Region : Moveable<Region> {
 // Pure operations. Each returns false with an error when the input is outside the model.
 
 bool ValidateWindowClass(const WindowClass& wc, String& error);
+// JSON numbers arrive as doubles. JsonToInt accepts a field only when it is a whole number inside the int
+// range; an absent (null) field reads as 0, as before. Anything else (a fraction, a value past the int range,
+// a non-number) is refused with an error that names the field, never cast. Note: Value(double) turns NaN and
+// infinity into null, and the JSON parser drops a number beyond the double range, so those read as absent.
+bool JsonToInt(const Value& v, const char *name, int& out, String& error);
 bool SnapToAnchor(const WindowClass& wc, AnnPoint p, int max_distance, AnnPoint& snapped, int& anchor_index);
 bool RescaleRect(const WindowClass& from, const WindowClass& to, const AnnRect& in, AnnRect& out, String& error);
 bool ExtrapolateSlots(AnnPoint centre, AnnPoint seed, double step_degrees, int count,

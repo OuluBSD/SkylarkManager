@@ -90,6 +90,24 @@ CONSOLE_APP_MAIN
 	      "extrapolate: a seed at the centre is refused");
 	Check(!ExtrapolateSlots(AnnPoint(5, 5), AnnPoint(9, 5), 30, 0, slots, error),
 	      "extrapolate: a count of zero is refused");
+
+	// JSON numbers: out-of-range, fractional, non-finite and non-numeric values are refused, never cast to int.
+	// The inputs are the ones the operation endpoints would receive (rescale x, extrapolate centre.x).
+	int jv = 0;
+	String jerr;
+	Check(!JsonToInt(Value(4294967301.0), "rect.x", jv, jerr) && jerr.Find("rect.x") >= 0,
+	      "json: a rescale x of 4294967301 is refused by name, not cast to an int");
+	Check(!JsonToInt(Value(4294967296.0), "centre.x", jv, jerr) && jerr.Find("centre.x") >= 0,
+	      "json: an extrapolate centre.x of 4294967296 is refused by name, not cast to an int");
+	Check(!JsonToInt(Value(2147483648.0), "x", jv, jerr) && !JsonToInt(Value(-2147483649.0), "x", jv, jerr),
+	      "json: values one past either end of the int range are refused");
+	Check(!JsonToInt(Value(1.9), "count", jv, jerr) && jerr.Find("whole number") >= 0,
+	      "json: a fractional count is refused instead of truncated to 1");
+	Check(!JsonToInt(Value("12"), "x", jv, jerr) && jerr.Find("must be a number") >= 0,
+	      "json: a string is refused, not converted");
+	Check(JsonToInt(Value(), "x", jv, jerr) && jv == 0 && JsonToInt(Value(-2147483648.0), "x", jv, jerr) && jv == -2147483647 - 1
+	      && JsonToInt(Value(12.0), "x", jv, jerr) && jv == 12,
+	      "json: an absent field reads as 0, and in-range whole numbers are accepted at both ends");
 	AnnRect card = CentredRect(AnnPoint(100, 200), 20, 10);
 	Check(SameRect(card, 90, 195, 20, 10), "extrapolate: a slot rectangle is centred on its point");
 
