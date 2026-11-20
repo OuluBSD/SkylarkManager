@@ -1,3 +1,4 @@
+#include <limits>
 #include <AnnotateApp/AnnotateApp.h>
 #include <WebAppHost/WebAppHost.h>
 
@@ -90,6 +91,15 @@ CONSOLE_APP_MAIN
 	      "extrapolate: a seed at the centre is refused");
 	Check(!ExtrapolateSlots(AnnPoint(5, 5), AnnPoint(9, 5), 30, 0, slots, error),
 	      "extrapolate: a count of zero is refused");
+	Check(!ExtrapolateSlots(AnnPoint(0, 0), AnnPoint(10, 0), 1e308, 4, slots, error) && error.Find("step") >= 0,
+	      "extrapolate: a step of 1e308 degrees is refused, not allowed to overflow to NaN slots");
+	Check(!ExtrapolateSlots(AnnPoint(0, 0), AnnPoint(10, 0), std::numeric_limits<double>::quiet_NaN(), 4, slots, error),
+	      "extrapolate: a NaN step is refused");
+	Check(!ExtrapolateSlots(AnnPoint(0, 0), AnnPoint(10, 0), std::numeric_limits<double>::infinity(), 4, slots, error),
+	      "extrapolate: an infinite step is refused");
+	Check(!ExtrapolateSlots(AnnPoint(0, 0), AnnPoint(10, 0), 361, 4, slots, error)
+	      && ExtrapolateSlots(AnnPoint(0, 0), AnnPoint(10, 0), -360, 4, slots, error) && slots.GetCount() == 4,
+	      "extrapolate: a step of 361 degrees is refused and a full turn backwards (-360) is accepted");
 
 	// JSON numbers: out-of-range, fractional, non-finite and non-numeric values are refused, never cast to int.
 	// The inputs are the ones the operation endpoints would receive (rescale x, extrapolate centre.x).

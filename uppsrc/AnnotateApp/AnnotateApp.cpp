@@ -151,6 +151,12 @@ bool ExtrapolateSlots(AnnPoint centre, AnnPoint seed, double step_degrees, int c
 		error = "slot count must be between 1 and 64";
 		return false;
 	}
+	// Written as a range test so NaN fails it too. A step beyond one turn is refused: an unbounded step
+	// overflows k * step to infinity, and cos and sin of that are NaN.
+	if(!(step_degrees >= -360.0 && step_degrees <= 360.0)) {
+		error = "slot step must be a finite angle between -360 and 360 degrees";
+		return false;
+	}
 	double dx = seed.x - centre.x, dy = seed.y - centre.y;
 	double radius = sqrt(dx * dx + dy * dy);
 	if(radius <= 0) {
