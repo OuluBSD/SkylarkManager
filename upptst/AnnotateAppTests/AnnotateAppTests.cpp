@@ -195,6 +195,39 @@ CONSOLE_APP_MAIN
 	Check(store.ListRegions("f1", listed) && listed.GetCount() == 1 && listed[0].rect.w == 20,
 	      "store: the regions of a frame are listed");
 
+	// Dependents: region a1 (10,10,20,20) sits on layer "base" of frame f1, whose window class is "src".
+	WindowClass src_now;
+	Check(store.GetWindowClass("src", src_now) && src_now.width == 100, "dependents: the current window class is read back");
+	WindowClass shrunk = Window("src", 25, 25, AnnPoint(0, 0), AnnPoint(25, 0), AnnPoint(0, 25));
+	StoreResult shrink = store.PutWindowClass(shrunk, src_now.revision);
+	Check(!shrink && shrink.error.Find("cannot be resized to 25x25") >= 0 && shrink.error.Find("'a1'") >= 0,
+	      "dependents: a window class cannot shrink under a region that is still on it, and the error names it");
+	WindowClass fits = Window("src", 35, 35, AnnPoint(0, 0), AnnPoint(35, 0), AnnPoint(0, 35));
+	Check((bool)store.PutWindowClass(fits, src_now.revision),
+	      "dependents: a window class may shrink to a size that all its regions still fit");
+
+	// Frames are moveable, not copied: each edit reads the frame into a fresh object with its revision.
+	Frame no_layer;
+	Check((bool)store.GetFrame("f1", no_layer), "dependents: the current frame is read back");
+	no_layer.layers.Clear();
+	StoreResult drop = store.PutFrame(no_layer, no_layer.revision);
+	Check(!drop && drop.error.Find("layer 'base'") >= 0 && drop.error.Find("cannot be removed") >= 0
+	      && drop.error.Find("'a1'") >= 0,
+	      "dependents: a frame cannot drop a layer that a region is on, and the error names the layer and the region");
+
+	Frame more;
+	Check((bool)store.GetFrame("f1", more), "dependents: the frame is read back before adding a layer");
+	FrameLayer extra;
+	extra.id = "extra"; extra.name = "Extra";
+	more.layers.Add(extra);
+	Check((bool)store.PutFrame(more, more.revision), "dependents: a frame may add a layer");
+
+	Frame less;
+	Check((bool)store.GetFrame("f1", less), "dependents: the frame with the added layer is read back");
+	less.layers.Clear();
+	less.layers.Add(base);
+	Check((bool)store.PutFrame(less, less.revision), "dependents: a frame may drop a layer that no region is on");
+
 	WebApp *app = CreateWebapp("AnnotateApp");
 	Check(app && app->Id() == "AnnotateApp" && app->DefaultPort() == 18430,
 	      "webapp: AnnotateApp is registered from its .icpp and creates its app");

@@ -126,6 +126,8 @@ public:
 	StoreResult GetFrame(const String& id, Frame& out);
 	StoreResult ListFrames(Vector<Frame>& out);
 
+	// A window class edit is refused when a region of a frame that uses it would lie outside the new size.
+	// A frame edit is refused when it drops a layer a region is on, or moves regions outside the class.
 	// The region's frame must exist, its layer must belong to that frame and its rectangle must lie
 	// inside the frame's window class.
 	StoreResult PutRegion(const Region& region, const String& expected_revision);

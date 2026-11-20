@@ -236,6 +236,24 @@ StoreResult AnnotateStore::PutWindowClass(const WindowClass& wc, const String& e
 		return error;
 	if(expected_revision.IsEmpty())
 		return "revision required: use the current revision, or RecordAbsent for a new window class";
+	// Regions are checked against their window class only when they are written, so a class edit must
+	// not leave an existing region outside it: a class may shrink only as far as its regions still fit.
+	Vector<Frame> all_frames;
+	StoreResult listed = ListFrames(all_frames);
+	if(!listed)
+		return listed;
+	for(const Frame& f : all_frames) {
+		if(f.window_class != wc.id)
+			continue;
+		Vector<Region> dependents;
+		StoreResult found = ListRegions(f.id, dependents);
+		if(!found)
+			return found;
+		for(const Region& rg : dependents)
+			if(!RectInside(rg.rect, wc.width, wc.height))
+				return "window class '" + wc.id + "' cannot be resized to " + AsString(wc.width) + "x" + AsString(wc.height)
+				       + ": region '" + rg.id + "' of frame '" + f.id + "' would lie outside it";
+	}
 	String revision;
 	return windows.Put(wc.id, StoreAsJson(wc), expected_revision, revision);
 }
@@ -292,6 +310,22 @@ StoreResult AnnotateStore::PutFrame(const Frame& f, const String& expected_revis
 	}
 	if(expected_revision.IsEmpty())
 		return "revision required: use the current revision, or RecordAbsent for a new frame";
+	// The layers and window class that existing regions depend on must stay: a region names its layer,
+	// and its rectangle is kept inside the frame's window class.
+	Vector<Region> dependents;
+	StoreResult found = ListRegions(f.id, dependents);
+	if(!found)
+		return found;
+	for(const Region& rg : dependents) {
+		bool layer_kept = false;
+		for(const FrameLayer& l : f.layers)
+			layer_kept = layer_kept || l.id == rg.layer;
+		if(!layer_kept)
+			return "layer '" + rg.layer + "' of frame '" + f.id + "' cannot be removed: region '" + rg.id + "' is on it";
+		if(!RectInside(rg.rect, wc.width, wc.height))
+			return "frame '" + f.id + "' cannot move to window class '" + f.window_class + "': region '" + rg.id
+			       + "' would lie outside it";
+	}
 	String revision;
 	return frames.Put(f.id, StoreAsJson(f), expected_revision, revision);
 }
