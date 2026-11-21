@@ -6,7 +6,8 @@ uses
 	Skylark,
 	WebEngine,
 	WebAppHost,
-	PrivateHubWorkspace;
+	PrivateHubWorkspace,
+	Science;
 
 file
 	WebAppHostTests.cpp,

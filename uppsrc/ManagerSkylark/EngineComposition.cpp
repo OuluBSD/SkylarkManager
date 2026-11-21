@@ -260,20 +260,6 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	RegisterMetaAccountService("meta", meta.Accounts(), *owned.grants);
 	host.BindSite(cfg.meta_port, "meta");
 
-	String sci_root = AppendFileName(engine_root, "science");
-	RealizeDirectory(sci_root);
-	EngineSite& sci = TheWebEngine().AddSite("science", "Science",
-		origins.Get("science"), sci_root);
-	sci.trusted_proxy_peers <<= trusted_proxy_peers;
-	// Article sidecars are written next to the records (the corpus is git-backed).
-	owned.science.Create(cfg.science_corpus, cfg.science_corpus);
-	InstallScienceSite(sci, *owned.science, ~owned.grants);
-	InstallSessionRoutes(sci);
-	InstallContentPolicyRoutes(sci, true);
-	InstallCommandConsole(sci);
-	host.BindSite(cfg.science_port, "science");
-	// The broker takes ownership of the service it is given.
-	TheWebEngine().Broker().Register("science", new ScienceService(*owned.science));
 
 	// Company: the module owns its store under its own root. The host only
 	// registers the broker surface, so Company data is reached through the broker.
@@ -358,16 +344,18 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.site_dir = site_dir;
 	ws.public_host = cfg.public_host;
 	ws.trusted_proxy_peers <<= trusted_proxy_peers;
-	for(const char *id : { "privatehub", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "science", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		ws.origins.GetAdd(id) = origins.Get(id);
 	ws.SetAppPort("privatehub", cfg.privatehub_port);
 	ws.SetSetting("privatehub", "workspace", cfg.privatehub_workspace);
+	ws.SetAppPort("science", cfg.science_port);
+	ws.SetSetting("science", "corpus", cfg.science_corpus);
 	ws.SetAppPort("atlas", cfg.atlas_port);
 	ws.SetAppPort("multiatlas", cfg.multiatlas_port);
 	ws.SetAppPort("financials", cfg.financials_port);
 	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
 	ws.UseGrants(~owned.grants);
-	for(const char *id : { "privatehub", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "science", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		if(!ws.Enable(id, error))
 			return false;
 	return ws.Compose(host, error);

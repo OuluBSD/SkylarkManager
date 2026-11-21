@@ -2,6 +2,7 @@
 #include <WebStorage/WebStorage.h>
 #include <PrivateHubWorkspace/PrivateHubApp.h>
 #include <PrivateHubWorkspace/PrivateHubService.h>
+#include <Science/ScienceApp.h>
 #include <initializer_list>
 
 using namespace Upp;
@@ -313,6 +314,45 @@ static void TestPrivateHubAdapter()
 	DeleteFolderDeep(scratch);
 }
 
+// The Science adapter, driven directly as the PrivateHub test is: Install refuses a missing corpus setting,
+// installs on a valid corpus with the shared grant store, and RegisterBroker registers the science service.
+static void TestScienceAdapter()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostScience");
+	RealizeDirectory(scratch);
+	String corpus = AppendFileName(scratch, "corpus");
+	RealizeDirectory(corpus);
+	String grants_root = AppendFileName(scratch, "grants");
+	RealizeDirectory(grants_root);
+	WebGrants grants("meta", grants_root);
+	String good_root = AppendFileName(AppendFileName(scratch, "engine"), "science");
+	RealizeDirectory(good_root);
+
+	EngineSite& site = TheWebEngine().AddSite("science", "Science", "http://192.168.1.50:18212", good_root);
+	static ScienceApp *app = new ScienceApp;   // lives for the process: the broker keeps its corpus
+
+	WebAppContext bad_ctx;
+	bad_ctx.site_dir = scratch;
+	bad_ctx.grants = &grants;
+	bad_ctx.broker = &TheWebEngine().Broker();
+	Check(!app->Install(site, bad_ctx, error) && error.Find("no corpus") >= 0,
+	      "science: an Install without a corpus setting is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext ctx;
+	ctx.site_dir = scratch;
+	ctx.settings.Add("corpus", corpus);
+	ctx.grants = &grants;
+	ctx.broker = &TheWebEngine().Broker();
+	Check(app->Install(site, ctx, error), "science: an Install on a valid corpus succeeds (" + error + ")");
+	Check(app->RegisterBroker(ctx, error), "science: the broker registration succeeds (" + error + ")");
+	Check(app->Roles().GetCount() == 1 && app->Roles()[0] == "science-author",
+	      "science: the first role is the science author role");
+
+	DeleteFolderDeep(scratch);
+}
+
 // Fallible Install, the per-app settings, the site directory and WebServer::App.
 static void TestFallibleAndSettings()
 {
@@ -412,6 +452,7 @@ CONSOLE_APP_MAIN
 	TestFlags();
 	TestCompose();
 	TestPrivateHubAdapter();
+	TestScienceAdapter();
 	TestFallibleAndSettings();
 	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";

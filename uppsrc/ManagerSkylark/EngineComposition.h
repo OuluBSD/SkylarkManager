@@ -53,7 +53,6 @@ struct EngineComposition {
 // Backends the composed sites borrow. Owned by the application object so they
 // are destroyed in main, not during static teardown after the engine is gone.
 struct EngineSiteBackends {
-	One<ScienceCorpus>              science;
 	One<WebGrants>                  grants;
 	One<CompanyComposedModule>      company;
 	One<TaskFoundryService>         taskfoundry;

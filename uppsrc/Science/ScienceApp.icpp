@@ -1,0 +1,9 @@
+#include "ScienceApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<ScienceApp>("science");
+}
+
+END_UPP_NAMESPACE
