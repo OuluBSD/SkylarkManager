@@ -1,0 +1,9 @@
+#include "ChannelsApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<ChannelsApp>("channels");
+}
+
+END_UPP_NAMESPACE

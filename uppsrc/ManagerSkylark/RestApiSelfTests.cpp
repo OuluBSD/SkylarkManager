@@ -2,6 +2,7 @@
 #include <GitHubForge/GitHubPlatform.h>
 #include "SfLegacyMigrationCli.h"
 #include <PrivateHubWorkspace/PrivateHubService.h>
+#include "ChannelsApp.h"
 #include <TaskFoundry/TaskFoundryService.h>
 #include "HostExec.h"
 #include "CandidateWorkflow.h"
@@ -538,6 +539,10 @@ bool ManagerSkylarkApp::RunSelfTests(int port)
 	}
 	if(!RunPrivateHubServiceSelfTests(AppendFileName(fixture.path, "privatehub-service"))) {
 		Cerr() << "FAILED: PrivateHub broker service synthetic tests\n";
+		return false;
+	}
+	if(!RunChannelsAppSelfTests(AppendFileName(fixture.path, "channels-app"))) {
+		Cerr() << "FAILED: Channels webapp adapter tests\n";
 		return false;
 	}
 	if(!RunTaskFoundrySelfTests(AppendFileName(fixture.path, "taskfoundry-service"))) {

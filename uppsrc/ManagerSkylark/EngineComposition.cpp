@@ -254,34 +254,6 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		return false;
 	TheWebEngine().Broker().Register("company", new CompanyBrokerSite(*owned.company));
 
-	// The channels site: the read-only frontend over the AgentIPC node. It
-	// reaches the node only through the argv-only client; the node identity's
-	// password is read once from the environment and held in memory.
-	String ch_root = AppendFileName(engine_root, "channels");
-	RealizeDirectory(ch_root);
-	AgentIpcConfig ipc;
-	ipc.direct = cfg.agentipc_direct;
-	ipc.server = cfg.agentipc_server;
-	ipc.user = cfg.agentipc_user;
-	if(!cfg.agentipc_python.IsEmpty() || !cfg.agentipc_client.IsEmpty()) {
-		ipc.client_argv.Add(cfg.agentipc_python.IsEmpty()
-			? GetHomeDirFile(".venvs/agentipc/bin/python") : cfg.agentipc_python);
-		ipc.client_argv.Add(cfg.agentipc_client.IsEmpty()
-			? GetHomeDirFile("OuluLinux/AgentIPC/bin/agentipc") : cfg.agentipc_client);
-	}
-	else
-		ipc.client_argv = AgentIpcDefaultClientArgv();
-	ipc.records_path = AppendFileName(cfg.agentipc_home, "mesh/records.jsonl");
-	ipc.password = GetEnv("MANAGERSKYLARK_AGENTIPC_PASSWORD");
-	EngineSite& ch = TheWebEngine().AddSite("channels", "Channels",
-		origins.Get("channels"), ch_root);
-	ch.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallChannelsSite(ch, ipc);
-	InstallSessionRoutes(ch);
-	InstallContentPolicyRoutes(ch, true);
-	InstallCommandConsole(ch);
-	host.BindSite(cfg.channels_port, "channels");
-
 	// The Company webapp: proposals, work items, reviews and the ledger over the
 	// same store the broker serves. Its session and console come from the engine.
 	String company_site_root = AppendFileName(engine_root, "company-site");
@@ -301,6 +273,27 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 // webapps (their <Name>App.icpp). WebServer composes them on the same ports,
 // origins and trusted peers as ComposeEngineSites did, and on the shared grant store.
 // The backends the sites use stay in their own packages.
+// The AgentIPC config for the Channels webapp: the argv-only client and the read-only node. The node
+// identity's password is read once from the environment and held in memory.
+static AgentIpcConfig BuildAgentIpcConfig(const EngineComposition& cfg)
+{
+	AgentIpcConfig ipc;
+	ipc.direct = cfg.agentipc_direct;
+	ipc.server = cfg.agentipc_server;
+	ipc.user = cfg.agentipc_user;
+	if(!cfg.agentipc_python.IsEmpty() || !cfg.agentipc_client.IsEmpty()) {
+		ipc.client_argv.Add(cfg.agentipc_python.IsEmpty()
+			? GetHomeDirFile(".venvs/agentipc/bin/python") : cfg.agentipc_python);
+		ipc.client_argv.Add(cfg.agentipc_client.IsEmpty()
+			? GetHomeDirFile("OuluLinux/AgentIPC/bin/agentipc") : cfg.agentipc_client);
+	}
+	else
+		ipc.client_argv = AgentIpcDefaultClientArgv();
+	ipc.records_path = AppendFileName(cfg.agentipc_home, "mesh/records.jsonl");
+	ipc.password = GetEnv("MANAGERSKYLARK_AGENTIPC_PASSWORD");
+	return ipc;
+}
+
 bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_port, const String& site_dir,
                     const EngineComposition& cfg, String& error)
 {
@@ -317,9 +310,11 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.site_dir = site_dir;
 	ws.public_host = cfg.public_host;
 	ws.trusted_proxy_peers <<= trusted_proxy_peers;
-	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		ws.origins.GetAdd(id) = origins.Get(id);
 	ws.SetAppPort("meta", cfg.meta_port);
+	ws.SetAppPort("channels", cfg.channels_port);
+	ws.SetAgentIpc(BuildAgentIpcConfig(cfg));
 	ws.SetAppPort("privatehub", cfg.privatehub_port);
 	ws.SetSetting("privatehub", "workspace", cfg.privatehub_workspace);
 	ws.SetAppPort("science", cfg.science_port);
@@ -330,7 +325,7 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.SetAppPort("financials", cfg.financials_port);
 	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
 	ws.UseGrants(~owned.grants);
-	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		if(!ws.Enable(id, error))
 			return false;
 	return ws.Compose(host, error);
