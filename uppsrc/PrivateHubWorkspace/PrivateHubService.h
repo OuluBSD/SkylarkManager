@@ -1,9 +1,9 @@
-#ifndef _reference_ManagerSkylark_PrivateHubService_h_
-#define _reference_ManagerSkylark_PrivateHubService_h_
+#ifndef _PrivateHubWorkspace_PrivateHubService_h_
+#define _PrivateHubWorkspace_PrivateHubService_h_
 
 #include <Core/Core.h>
 #include <WebBroker/WebBroker.h>
-#include <PrivateHubWorkspace/PrivateHubWorkspace.h>
+#include "PrivateHubWorkspace.h"
 
 NAMESPACE_UPP
 

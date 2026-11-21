@@ -1,7 +1,7 @@
 #include "ManagerSkylark.h"
 #include <GitHubForge/GitHubPlatform.h>
 #include "SfLegacyMigrationCli.h"
-#include "PrivateHubService.h"
+#include <PrivateHubWorkspace/PrivateHubService.h>
 #include <TaskFoundry/TaskFoundryService.h>
 #include "HostExec.h"
 #include "CandidateWorkflow.h"

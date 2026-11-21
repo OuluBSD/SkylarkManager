@@ -17,7 +17,7 @@
 #include <Company/CompanyComposed.h>
 #include <Company/CompanySite.h>
 #include <WebAppHost/WebAppHost.h>
-#include "PrivateHubService.h"
+#include <PrivateHubWorkspace/PrivateHubService.h>
 
 NAMESPACE_UPP
 

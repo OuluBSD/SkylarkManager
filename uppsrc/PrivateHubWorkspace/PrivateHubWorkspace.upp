@@ -5,7 +5,8 @@ uses
 	Core,
 	ForgeCore,
 	WebStorage,
-	WebEngine;
+	WebEngine,
+	WebBroker;
 
 file
 	AGENTS.md,
@@ -14,4 +15,6 @@ file
 	PrivateHubMigration.h,
 	PrivateHubMigration.cpp,
 	PrivateHubSite.h,
-	PrivateHubSite.cpp;
+	PrivateHubSite.cpp,
+	PrivateHubService.h,
+	PrivateHubService.cpp;

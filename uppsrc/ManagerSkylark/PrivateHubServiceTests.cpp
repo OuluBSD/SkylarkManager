@@ -1,4 +1,4 @@
-#include "PrivateHubService.h"
+#include <PrivateHubWorkspace/PrivateHubService.h>
 
 NAMESPACE_UPP
 
