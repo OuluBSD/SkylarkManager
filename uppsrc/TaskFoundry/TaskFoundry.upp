@@ -6,7 +6,8 @@ uses
 	WebBroker,
 	WebStorage,
 	WebAccounts,
-	WebEngine;
+	WebEngine,
+	WebAppHost;
 
 file
 	AGENTS.md,
@@ -14,7 +15,10 @@ file
 	TaskFoundryService.cpp,
 	TaskFoundrySite.h,
 	TaskFoundrySite.cpp,
-	TaskFoundrySelfTests.cpp;
+	TaskFoundrySelfTests.cpp,
+	TaskFoundryApp.h,
+	TaskFoundryApp.cpp,
+	TaskFoundryApp.icpp;
 
 mainconfig
 	"" = "MT";

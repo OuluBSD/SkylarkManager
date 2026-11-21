@@ -3,6 +3,7 @@
 #include <PrivateHubWorkspace/PrivateHubApp.h>
 #include <PrivateHubWorkspace/PrivateHubService.h>
 #include <Science/ScienceApp.h>
+#include <TaskFoundry/TaskFoundryApp.h>
 #include <initializer_list>
 
 using namespace Upp;
@@ -353,6 +354,49 @@ static void TestScienceAdapter()
 	DeleteFolderDeep(scratch);
 }
 
+// The TaskFoundry adapter, driven directly as the others are: Install refuses a missing broker and a site root
+// that is not a directory, installs on a valid root with the shared grant store, and RegisterBroker succeeds.
+static void TestTaskFoundryAdapter()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostTaskFoundry");
+	RealizeDirectory(scratch);
+	String grants_root = AppendFileName(scratch, "grants");
+	RealizeDirectory(grants_root);
+	WebGrants grants("meta", grants_root);
+	String good_dir = AppendFileName(scratch, "good");
+	String good_root = AppendFileName(AppendFileName(good_dir, "engine"), "taskfoundry");
+	RealizeDirectory(good_root);
+
+	EngineSite& site = TheWebEngine().AddSite("taskfoundry", "TaskFoundry", "http://192.168.1.50:18213", good_root);
+	static TaskFoundryApp *app = new TaskFoundryApp;   // lives for the process: the site keeps its service
+
+	WebAppContext no_broker;
+	no_broker.site_dir = good_dir;
+	no_broker.grants = &grants;
+	Check(!app->Install(site, no_broker, error) && error.Find("no broker") >= 0,
+	      "taskfoundry: an Install without a broker is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext bad_ctx;
+	bad_ctx.site_dir = AppendFileName(scratch, "bad");   // no engine/taskfoundry directory under it
+	bad_ctx.grants = &grants;
+	bad_ctx.broker = &TheWebEngine().Broker();
+	Check(!app->Install(site, bad_ctx, error) && error.Find("not a directory") >= 0,
+	      "taskfoundry: an Install on a root that is not a directory is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext ctx;
+	ctx.site_dir = good_dir;
+	ctx.grants = &grants;
+	ctx.broker = &TheWebEngine().Broker();
+	Check(app->Install(site, ctx, error), "taskfoundry: an Install on a valid root succeeds (" + error + ")");
+	Check(app->RegisterBroker(ctx, error), "taskfoundry: the broker registration step succeeds (" + error + ")");
+	Check(app->Roles().GetCount() == 1 && app->Roles()[0] == "member", "taskfoundry: the first role is member");
+
+	DeleteFolderDeep(scratch);
+}
+
 // Fallible Install, the per-app settings, the site directory and WebServer::App.
 static void TestFallibleAndSettings()
 {
@@ -453,6 +497,7 @@ CONSOLE_APP_MAIN
 	TestCompose();
 	TestPrivateHubAdapter();
 	TestScienceAdapter();
+	TestTaskFoundryAdapter();
 	TestFallibleAndSettings();
 	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";

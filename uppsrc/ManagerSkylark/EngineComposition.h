@@ -55,7 +55,6 @@ struct EngineComposition {
 struct EngineSiteBackends {
 	One<WebGrants>                  grants;
 	One<CompanyComposedModule>      company;
-	One<TaskFoundryService>         taskfoundry;
 	One<WebServer>                  webapps;   // the registered webapps composed by ComposeWebApps
 };
 

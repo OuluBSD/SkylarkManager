@@ -7,7 +7,8 @@ uses
 	WebEngine,
 	WebAppHost,
 	PrivateHubWorkspace,
-	Science;
+	Science,
+	TaskFoundry;
 
 file
 	WebAppHostTests.cpp,

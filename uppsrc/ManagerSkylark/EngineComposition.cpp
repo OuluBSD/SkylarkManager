@@ -269,18 +269,6 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 		return false;
 	TheWebEngine().Broker().Register("company", new CompanyBrokerSite(*owned.company));
 
-	String tf_root = AppendFileName(engine_root, "taskfoundry");
-	RealizeDirectory(tf_root);
-	EngineSite& tf = TheWebEngine().AddSite("taskfoundry", "TaskFoundry",
-		origins.Get("taskfoundry"), tf_root);
-	tf.trusted_proxy_peers <<= trusted_proxy_peers;
-	owned.taskfoundry.Create(TheWebEngine().Broker(), tf_root);
-	InstallTaskFoundrySite(tf, *owned.taskfoundry, ~owned.grants);
-	InstallSessionRoutes(tf);
-	InstallContentPolicyRoutes(tf, true);
-	InstallCommandConsole(tf);
-	host.BindSite(cfg.taskfoundry_port, "taskfoundry");
-
 	// The channels site: the read-only frontend over the AgentIPC node. It
 	// reaches the node only through the argv-only client; the node identity's
 	// password is read once from the environment and held in memory.
@@ -344,18 +332,19 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.site_dir = site_dir;
 	ws.public_host = cfg.public_host;
 	ws.trusted_proxy_peers <<= trusted_proxy_peers;
-	for(const char *id : { "privatehub", "science", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		ws.origins.GetAdd(id) = origins.Get(id);
 	ws.SetAppPort("privatehub", cfg.privatehub_port);
 	ws.SetSetting("privatehub", "workspace", cfg.privatehub_workspace);
 	ws.SetAppPort("science", cfg.science_port);
 	ws.SetSetting("science", "corpus", cfg.science_corpus);
+	ws.SetAppPort("taskfoundry", cfg.taskfoundry_port);
 	ws.SetAppPort("atlas", cfg.atlas_port);
 	ws.SetAppPort("multiatlas", cfg.multiatlas_port);
 	ws.SetAppPort("financials", cfg.financials_port);
 	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
 	ws.UseGrants(~owned.grants);
-	for(const char *id : { "privatehub", "science", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		if(!ws.Enable(id, error))
 			return false;
 	return ws.Compose(host, error);
