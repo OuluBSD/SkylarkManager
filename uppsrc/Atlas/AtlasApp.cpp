@@ -3,9 +3,10 @@
 
 NAMESPACE_UPP
 
-void AtlasApp::Install(EngineSite& site, WebAppContext& ctx)
+bool AtlasApp::Install(EngineSite& site, WebAppContext& ctx, String& error)
 {
 	InstallAtlasSite(site);
+	return true;
 }
 
 END_UPP_NAMESPACE

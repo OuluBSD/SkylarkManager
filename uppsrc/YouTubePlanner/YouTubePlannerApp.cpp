@@ -3,9 +3,10 @@
 
 NAMESPACE_UPP
 
-void YouTubePlannerApp::Install(EngineSite& site, WebAppContext& ctx)
+bool YouTubePlannerApp::Install(EngineSite& site, WebAppContext& ctx, String& error)
 {
 	InstallYouTubePlannerSite(site);
+	return true;
 }
 
 END_UPP_NAMESPACE

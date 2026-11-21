@@ -17,8 +17,10 @@ public:
 	WebGrants*      grants = nullptr;        // shared grant store (MetaAccount layout)
 	WebBroker*      broker = nullptr;        // the engine's cross-site broker
 	AgentIpcConfig* agentipc = nullptr;      // optional; set by the program
+	VectorMap<String, String> settings;      // this app's settings from WebServer::SetSetting; set per app
 
 	String SiteRoot(const String& id) const;
+	String Setting(const String& key) const; // empty when the app has no such setting
 };
 
 // One website hosted by WebServer. An app owns its backend; the host owns the
@@ -32,9 +34,11 @@ public:
 	virtual int            DefaultPort() const = 0;
 	virtual Vector<String> Roles() const { return Vector<String>(); }   // first role is used by --set-<id>-user
 	virtual Vector<String> Requires() const { return Vector<String>(); } // ids installed before this app
+	virtual String         SiteDir() const { return Id(); }             // directory under <site_dir>/engine
 	virtual void           AddArgs(CommandLineArguments& cla) const {}  // app-specific flags
-	virtual void           Install(EngineSite& site, WebAppContext& ctx) = 0;
-	virtual void           RegisterBroker(WebAppContext& ctx) {}        // called after Install
+	// Both return false with error set to refuse the composition (WebServer::Compose returns false).
+	virtual bool           Install(EngineSite& site, WebAppContext& ctx, String& error) = 0;
+	virtual bool           RegisterBroker(WebAppContext& ctx, String& error) { return true; } // after Install
 	virtual bool           ContentPolicy() const { return true; }       // false: no content policy routes
 };
 
@@ -78,6 +82,8 @@ public:
 
 	bool           Enable(const String& name, String& error);  // registry name; refused when unknown
 	Vector<String> EnabledIds() const;
+	WebApp*        App(const String& id) const;                 // enabled app with this id, or nullptr
+	void           SetSetting(const String& id, const String& key, const String& value); // WebAppContext::settings
 	void           SetAgentIpc(const AgentIpcConfig& cfg);
 	void           SetAppPort(const String& id, int listen_port);   // overrides DefaultPort(), as --<id>-port does
 	void           UseGrants(WebGrants* shared);                    // borrowed grant store; not created or owned here
@@ -109,12 +115,11 @@ public:
 	Vector<String>            trusted_proxy_peers; // copied to every composed site
 
 private:
-	WebApp* FindApp(const String& id) const;
-
 	Vector<String>            names;    // registry names, enable order
 	Vector<WebApp*>           apps;     // parallel to names
 	VectorMap<String, int>    app_ports;
 	VectorMap<String, String> set_users;
+	VectorMap<String, VectorMap<String, String>> app_settings;
 	One<WebGrants>            grants;
 	WebGrants*                shared_grants = nullptr;
 	AgentIpcConfig            agentipc;

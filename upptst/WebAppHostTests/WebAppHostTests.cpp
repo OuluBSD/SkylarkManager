@@ -261,6 +261,42 @@ static const int BLOB_STOCK_PORT = 18320;
 static One<WebServerHost> *s_blob_host = nullptr;   // kept for the life of the process; see main
 static void BlobHostMain() { (*s_blob_host)->Run(); }
 
+// Fallible Install, the per-app settings, the site directory and WebServer::App.
+static void TestFallibleAndSettings()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostSettings");
+	RealizeDirectory(scratch);
+
+	WebServer refuse;
+	refuse.Enable("RefusingApp", error);
+	Check(refuse.ParseArgs(Words({ "--site-dir", scratch, "--public-host", "192.168.1.50" }), error),
+	      "settings: flags for a refusing app parse");
+	One<WebServerHost> host;
+	host.Create();
+	Check(!refuse.Compose(*host, error) && error.Find("synthetic install refusal") >= 0,
+	      "settings: an Install that returns false refuses the composition with its error");
+
+	WebServer s;
+	s.Enable("SettingsApp", error);
+	s.SetSetting("settings", "label", "from-server");
+	Check(s.ParseArgs(Words({ "--site-dir", scratch, "--public-host", "192.168.1.50" }), error),
+	      "settings: flags for a settings app parse");
+	WebAppTestLog().Clear();
+	Check(s.Compose(*host, error), "settings: the settings app composes (" + error + ")");
+	Check(FindIndex(WebAppTestLog(), String("setting:from-server")) >= 0,
+	      "settings: the app reads the setting its server set for it");
+	Check(FindIndex(WebAppTestLog(), String("unset:")) >= 0,
+	      "settings: an unset key reads as empty");
+	EngineSite *site = TheWebEngine().FindSite("settings");
+	Check(site && site->data_root == AppendFileName(AppendFileName(scratch, "engine"), "settings-dir"),
+	      "settings: the site root comes from SiteDir(), not the id");
+	Check(s.App("settings") != nullptr && s.App("zeta") == nullptr,
+	      "settings: App() finds an enabled app and refuses a disabled one");
+
+	DeleteFolderDeep(scratch);
+}
+
 static void TestBlobRoutes()
 {
 	String error;
@@ -323,6 +359,7 @@ CONSOLE_APP_MAIN
 	TestOrderAndRefusals();
 	TestFlags();
 	TestCompose();
+	TestFallibleAndSettings();
 	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";
 	if(failures) {

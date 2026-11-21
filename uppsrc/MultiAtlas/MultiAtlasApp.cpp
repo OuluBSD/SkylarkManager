@@ -3,9 +3,10 @@
 
 NAMESPACE_UPP
 
-void MultiAtlasApp::Install(EngineSite& site, WebAppContext& ctx)
+bool MultiAtlasApp::Install(EngineSite& site, WebAppContext& ctx, String& error)
 {
 	InstallMultiAtlasSite(site);
+	return true;
 }
 
 END_UPP_NAMESPACE

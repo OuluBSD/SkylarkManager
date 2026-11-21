@@ -12,6 +12,12 @@ String WebAppContext::SiteRoot(const String& id) const
 	return AppendFileName(AppendFileName(site_dir, "engine"), id);
 }
 
+String WebAppContext::Setting(const String& key) const
+{
+	int i = settings.Find(key);
+	return i < 0 ? String() : settings[i];
+}
+
 ArrayMap<String, WebAppNewFn>& WebAppFactories()
 {
 	static ArrayMap<String, WebAppNewFn> factories;
@@ -59,12 +65,17 @@ WebServer::~WebServer()
 		delete app;
 }
 
-WebApp* WebServer::FindApp(const String& id) const
+WebApp* WebServer::App(const String& id) const
 {
 	for(WebApp *app : apps)
 		if(app->Id() == id)
 			return app;
 	return nullptr;
+}
+
+void WebServer::SetSetting(const String& id, const String& key, const String& value)
+{
+	app_settings.GetAdd(id).GetAdd(key) = value;
 }
 
 bool WebServer::Enable(const String& name, String& error)
@@ -184,7 +195,7 @@ int WebServer::PortFor(const String& id) const
 	int i = app_ports.Find(id);
 	if(i >= 0)
 		return app_ports[i];
-	WebApp *app = FindApp(id);
+	WebApp *app = App(id);
 	return app ? app->DefaultPort() : 0;
 }
 
@@ -293,19 +304,24 @@ bool WebServer::Compose(WebEngineHost& host, String& error)
 	ctx.agentipc = has_agentipc ? &agentipc : nullptr;
 
 	for(const String& id : order) {
-		WebApp *app = FindApp(id);
+		WebApp *app = App(id);
 		if(TheWebEngine().FindSite(id)) {
 			error = "site '" + id + "' is already composed";
 			return false;
 		}
-		String root = ctx.SiteRoot(id);
+		String root = ctx.SiteRoot(app->SiteDir());
 		RealizeDirectory(root);
 		int oi = origins.Find(id);
 		String origin = oi >= 0 ? origins[oi] : PublicOrigin(public_host, PortFor(id));
 		EngineSite& site = TheWebEngine().AddSite(id, app->Title(), origin, root);
 		site.trusted_proxy_peers <<= trusted_proxy_peers;
-		app->Install(site, ctx);
-		app->RegisterBroker(ctx);
+		ctx.settings.Clear();
+		int si = app_settings.Find(id);
+		if(si >= 0)
+			for(int k = 0; k < app_settings[si].GetCount(); k++)
+				ctx.settings.Add(app_settings[si].GetKey(k), app_settings[si][k]);
+		if(!app->Install(site, ctx, error) || !app->RegisterBroker(ctx, error))
+			return false;
 		InstallSessionRoutes(site);
 		if(app->ContentPolicy())
 			InstallContentPolicyRoutes(site, true);
@@ -317,7 +333,7 @@ bool WebServer::Compose(WebEngineHost& host, String& error)
 
 bool WebServer::SetUser(const String& id, const String& username, const String& password, String& error)
 {
-	WebApp *app = FindApp(id);
+	WebApp *app = App(id);
 	if(!app) {
 		error = "webapp '" + id + "' is not enabled";
 		return false;

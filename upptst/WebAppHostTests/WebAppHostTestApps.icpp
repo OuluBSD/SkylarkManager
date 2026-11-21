@@ -10,10 +10,11 @@ Vector<String>& WebAppTestLog()
 
 class TestWebApp : public WebApp {
 public:
-	void Install(EngineSite& site, WebAppContext& ctx) override {
+	bool Install(EngineSite& site, WebAppContext& ctx, String& error) override {
 		if(!ctx.grants || !ctx.broker)
 			WebAppTestLog().Add("missing-context");
 		WebAppTestLog().Add(Id());
+		return true;
 	}
 };
 
@@ -107,14 +108,39 @@ public:
 	int DefaultPort() const override { return 8081; }
 };
 
+class RefusingApp : public TestWebApp {
+public:
+	String Id() const override { return "refusing"; }
+	String Title() const override { return "Refusing"; }
+	int DefaultPort() const override { return 18312; }
+	bool Install(EngineSite& site, WebAppContext& ctx, String& error) override {
+		error = "synthetic install refusal";
+		return false;
+	}
+};
+
+class SettingsApp : public TestWebApp {
+public:
+	String Id() const override { return "settings"; }
+	String Title() const override { return "Settings"; }
+	int DefaultPort() const override { return 18313; }
+	String SiteDir() const override { return "settings-dir"; }
+	bool Install(EngineSite& site, WebAppContext& ctx, String& error) override {
+		WebAppTestLog().Add("setting:" + ctx.Setting("label"));
+		WebAppTestLog().Add("unset:" + ctx.Setting("absent"));
+		return true;
+	}
+};
+
 class BlobTestApp : public WebApp {
 public:
 	String Id() const override { return "blobtest"; }
 	String Title() const override { return "Blob test"; }
 	int DefaultPort() const override { return 18315; }
 	Vector<String> Roles() const override { Vector<String> r; r.Add("editor"); return r; }
-	void Install(EngineSite& site, WebAppContext& ctx) override {
+	bool Install(EngineSite& site, WebAppContext& ctx, String& error) override {
 		InstallBlobRoutes(site, "blobs", 1024 * 1024, "editor", "editor");
+		return true;
 	}
 };
 
@@ -132,6 +158,8 @@ INITBLOCK {
 	RegisterWebapp<PortTwoApp>("PortTwoApp");
 	RegisterWebapp<StockPortApp>("StockPortApp");
 	RegisterWebapp<BlobTestApp>("BlobTestApp");
+	RegisterWebapp<RefusingApp>("RefusingApp");
+	RegisterWebapp<SettingsApp>("SettingsApp");
 }
 
 END_UPP_NAMESPACE
