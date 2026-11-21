@@ -54,7 +54,6 @@ struct EngineComposition {
 // are destroyed in main, not during static teardown after the engine is gone.
 struct EngineSiteBackends {
 	One<WebGrants>                  grants;
-	One<CompanyComposedModule>      company;
 	One<WebServer>                  webapps;   // the registered webapps composed by ComposeWebApps
 };
 
@@ -115,9 +114,9 @@ bool SetMultiAtlasPassword(const String& username, const String& role,
                            const String& password, String& error);
 
 // Creates or updates a Company user (the Company record and its WebAccounts
-// login) with one role, through the store ComposeEngineSites opened. Requires
-// ComposeEngineSites to have run; owned is the same backends object.
-bool SetCompanyPassword(EngineSiteBackends& owned, const String& username, const String& role,
+// login) with one role, through the store of the composed Company webapp. Requires the
+// webapps to have been composed (ComposeWebApps).
+bool SetCompanyPassword(WebServer& ws, const String& username, const String& role,
                         const String& password, String& error);
 
 // Engine gateway handler ids: the SKYLARK catch-alls in WebEngine/Host.cpp.

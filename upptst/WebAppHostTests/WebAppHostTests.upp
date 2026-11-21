@@ -9,7 +9,8 @@ uses
 	PrivateHubWorkspace,
 	Science,
 	TaskFoundry,
-	MetaAccount;
+	MetaAccount,
+	Company;
 
 file
 	WebAppHostTests.cpp,

@@ -1,0 +1,9 @@
+#include "CompanyApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<CompanyApp>("company");
+}
+
+END_UPP_NAMESPACE

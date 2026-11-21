@@ -7,7 +7,9 @@ uses
 	WebStorage,
 	WebAuth,
 	WebAccounts,
-	WebEngine;
+	WebEngine,
+	WebBroker,
+	WebAppHost;
 
 file
 	AGENTS.md,
@@ -27,7 +29,10 @@ file
 	CompanySite.h,
 	CompanySite.cpp,
 	CompanyViews.h,
-	CompanyPages.cpp;
+	CompanyPages.cpp,
+	CompanyApp.h,
+	CompanyApp.cpp,
+	CompanyApp.icpp;
 
 mainconfig
 	"" = "MT";

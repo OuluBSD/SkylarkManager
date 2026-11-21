@@ -387,7 +387,7 @@ bool ManagerSkylarkApp::Initialize(const Vector<String>& args)
 				return false;
 			String error;
 			String co_role = cla.GetArg("company-role").IsEmpty() ? String("admin") : cla.GetArg("company-role");
-			if(!SetCompanyPassword(engine_backends, co_user, co_role, password, error)) {
+			if(!SetCompanyPassword(*engine_backends.webapps, co_user, co_role, password, error)) {
 				Cerr() << "Failed to write Company credentials: " << error << "\n";
 				return false;
 			}

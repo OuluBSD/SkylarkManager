@@ -5,6 +5,7 @@
 #include <Science/ScienceApp.h>
 #include <TaskFoundry/TaskFoundryApp.h>
 #include <MetaAccount/MetaAccountApp.h>
+#include <Company/CompanyApp.h>
 #include <initializer_list>
 
 using namespace Upp;
@@ -441,6 +442,61 @@ static void TestMetaAccountAdapter()
 	DeleteFolderDeep(scratch);
 }
 
+// The Company adapter, driven directly: Install refuses a missing store setting and a site root that is not a
+// directory, installs on a valid root (the store is its own folder), RegisterBroker succeeds, and the roles
+// stay the existing ones: a known role provisions a user, an unknown role and no role are refused.
+static void TestCompanyAdapter()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostCompany");
+	RealizeDirectory(scratch);
+	String good_dir = AppendFileName(scratch, "good");
+	String good_site = AppendFileName(AppendFileName(good_dir, "engine"), "company-site");
+	RealizeDirectory(good_site);
+	String store_root = AppendFileName(AppendFileName(good_dir, "engine"), "company");
+
+	EngineSite& site = TheWebEngine().AddSite("company", "Company", "http://192.168.1.50:18219", good_site);
+	static CompanyApp *app = new CompanyApp;   // lives for the process: the broker keeps the module
+
+	Check(!app->ContentPolicy() && app->SiteDir() == "company-site",
+	      "company: no content policy routes, and the site lives in company-site");
+
+	WebAppContext no_store;
+	no_store.site_dir = good_dir;
+	no_store.broker = &TheWebEngine().Broker();
+	Check(!app->Install(site, no_store, error) && error.Find("no store setting") >= 0,
+	      "company: an Install without a store setting is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext bad_ctx;
+	bad_ctx.site_dir = AppendFileName(scratch, "bad");   // no engine/company-site directory under it
+	bad_ctx.settings.Add("store", store_root);
+	bad_ctx.broker = &TheWebEngine().Broker();
+	Check(!app->Install(site, bad_ctx, error) && error.Find("not a directory") >= 0,
+	      "company: an Install on a root that is not a directory is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext ctx;
+	ctx.site_dir = good_dir;
+	ctx.settings.Add("store", store_root);
+	ctx.broker = &TheWebEngine().Broker();
+	Check(app->Install(site, ctx, error), "company: an Install on a valid root succeeds (" + error + ")");
+	Check(app->RegisterBroker(ctx, error), "company: the broker registration succeeds (" + error + ")");
+
+	Check(SetCompanyUser(app->Store(), "tester", "synthetic-password", Words({ COMPANY_ROLE_ADMIN }), error),
+	      "company: a known role provisions a user (" + error + ")");
+	error.Clear();
+	Check(!SetCompanyUser(app->Store(), "outsider", "synthetic-password", Words({ "no-such-role" }), error) &&
+	      error.Find("unknown role") >= 0,
+	      "company: an unknown role is refused (" + error + ")");
+	error.Clear();
+	Check(!SetCompanyUser(app->Store(), "nobody", "synthetic-password", Vector<String>(), error) &&
+	      error.Find("at least one role") >= 0,
+	      "company: a user with no role is refused (" + error + ")");
+
+	DeleteFolderDeep(scratch);
+}
+
 // Fallible Install, the per-app settings, the site directory and WebServer::App.
 static void TestFallibleAndSettings()
 {
@@ -543,6 +599,7 @@ CONSOLE_APP_MAIN
 	TestScienceAdapter();
 	TestTaskFoundryAdapter();
 	TestMetaAccountAdapter();
+	TestCompanyAdapter();
 	TestFallibleAndSettings();
 	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";

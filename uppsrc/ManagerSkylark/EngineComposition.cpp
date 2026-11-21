@@ -1,5 +1,6 @@
 #include "EngineComposition.h"
 #include "CommandManifestRoutes.h"
+#include <Company/CompanyApp.h>
 #ifdef flagPOSIX
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -200,33 +201,6 @@ bool IsTrustedManagerProxyPeer(const String& peer)
 	return FindIndex(peers, peer) >= 0;
 }
 
-// The Company module, as the broker sees it. The host owns the adapter; the
-// module owns the store. The host never reaches the store, only Handle().
-class CompanyBrokerSite : public IBrokerService {
-public:
-	explicit CompanyBrokerSite(CompanyComposedModule& module) : module(module) {}
-	String AuditOperation(const String& op) const override {
-		if(op == COMPANY_BROKER_CREATE_DRAFT || op == COMPANY_BROKER_STATUS ||
-		   op == COMPANY_BROKER_LEDGER_SUMMARY || op == COMPANY_BROKER_LEDGER_RECENT ||
-		   op == COMPANY_BROKER_LEDGER_BALANCES || op == COMPANY_BROKER_CONTRACTS_LIST)
-			return op;
-		return "unclassified";
-	}
-
-	BrokerResult Handle(const BrokerCallContext& ctx, const BrokerCall& call) override {
-		CompanyBrokerResult r = module.Handle(call.op, ctx.scopes, ctx.caller_id, call.payload);
-		BrokerResult out;
-		out.ok = r.ok;
-		out.status = r.status;
-		out.payload = r.payload;
-		out.error = r.error;
-		return out;
-	}
-
-private:
-	CompanyComposedModule& module;
-};
-
 bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const String& site_dir,
                         const EngineComposition& cfg, String& error)
 {
@@ -246,25 +220,6 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	RealizeDirectory(grants_root);
 	owned.grants.Create("meta", grants_root);
 
-	// Company: the module owns its store under its own root. The host only
-	// registers the broker surface, so Company data is reached through the broker.
-	String company_root = cfg.company_root.IsEmpty() ? AppendFileName(engine_root, "company") : cfg.company_root;
-	owned.company.Create();
-	if(!owned.company->Open(company_root, cfg.company_repos, error))
-		return false;
-	TheWebEngine().Broker().Register("company", new CompanyBrokerSite(*owned.company));
-
-	// The Company webapp: proposals, work items, reviews and the ledger over the
-	// same store the broker serves. Its session and console come from the engine.
-	String company_site_root = AppendFileName(engine_root, "company-site");
-	RealizeDirectory(company_site_root);
-	EngineSite& co = TheWebEngine().AddSite("company", "Company",
-		origins.Get("company"), company_site_root);
-	co.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallCompanySite(co, owned.company->Store());
-	InstallSessionRoutes(co);
-	InstallCommandConsole(co);
-	host.BindSite(cfg.company_port, "company");
 	RegisterComposedBrokerCommands();
 	return true;
 }
@@ -310,8 +265,19 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.site_dir = site_dir;
 	ws.public_host = cfg.public_host;
 	ws.trusted_proxy_peers <<= trusted_proxy_peers;
-	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "company", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		ws.origins.GetAdd(id) = origins.Get(id);
+	ws.SetAppPort("company", cfg.company_port);
+	{
+		// Company's store is its own folder under the engine root (or --company-root); its site root is
+		// company-site, so the two never share a root.
+		String store_root = cfg.company_root.IsEmpty() ? AppendFileName(AppendFileName(site_dir, "engine"), "company") : cfg.company_root;
+		ws.SetSetting("company", "store", store_root);
+		String repos;
+		for(int i = 0; i < cfg.company_repos.GetCount(); i++)
+			repos << (i ? "," : "") << cfg.company_repos[i];
+		ws.SetSetting("company", "repos", repos);
+	}
 	ws.SetAppPort("meta", cfg.meta_port);
 	ws.SetAppPort("channels", cfg.channels_port);
 	ws.SetAgentIpc(BuildAgentIpcConfig(cfg));
@@ -325,7 +291,7 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.SetAppPort("financials", cfg.financials_port);
 	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
 	ws.UseGrants(~owned.grants);
-	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "channels", "company", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		if(!ws.Enable(id, error))
 			return false;
 	return ws.Compose(host, error);
@@ -412,16 +378,17 @@ bool SetMultiAtlasPassword(const String& username, const String& role, const Str
 	return SetEngineUser("multiatlas", username, password, roles, error);
 }
 
-bool SetCompanyPassword(EngineSiteBackends& owned, const String& username, const String& role,
+bool SetCompanyPassword(WebServer& ws, const String& username, const String& role,
                         const String& password, String& error)
 {
-	if(!owned.company) {
+	CompanyApp *app = dynamic_cast<CompanyApp*>(ws.App("company"));
+	if(!app || !app->Installed()) {
 		error = "company module is not composed";
 		return false;
 	}
 	Vector<String> roles;
 	roles.Add(role);
-	return SetCompanyUser(owned.company->Store(), username, password, roles, error);
+	return SetCompanyUser(app->Store(), username, password, roles, error);
 }
 
 bool IsEngineGatewayHandler(const String& id)
