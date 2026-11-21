@@ -5,7 +5,8 @@ uses
 	Core/SSL,
 	Skylark,
 	WebEngine,
-	WebAppHost;
+	WebAppHost,
+	PrivateHubWorkspace;
 
 file
 	WebAppHostTests.cpp,

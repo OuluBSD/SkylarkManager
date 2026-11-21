@@ -17,7 +17,6 @@
 #include <Company/CompanyComposed.h>
 #include <Company/CompanySite.h>
 #include <WebAppHost/WebAppHost.h>
-#include <PrivateHubWorkspace/PrivateHubService.h>
 
 NAMESPACE_UPP
 
@@ -54,7 +53,6 @@ struct EngineComposition {
 // Backends the composed sites borrow. Owned by the application object so they
 // are destroyed in main, not during static teardown after the engine is gone.
 struct EngineSiteBackends {
-	One<PrivateHubWorkspaceBackend> privatehub;
 	One<ScienceCorpus>              science;
 	One<WebGrants>                  grants;
 	One<CompanyComposedModule>      company;

@@ -1,5 +1,7 @@
 #include <WebAppHost/WebAppHost.h>
 #include <WebStorage/WebStorage.h>
+#include <PrivateHubWorkspace/PrivateHubApp.h>
+#include <PrivateHubWorkspace/PrivateHubService.h>
 #include <initializer_list>
 
 using namespace Upp;
@@ -261,6 +263,56 @@ static const int BLOB_STOCK_PORT = 18320;
 static One<WebServerHost> *s_blob_host = nullptr;   // kept for the life of the process; see main
 static void BlobHostMain() { (*s_blob_host)->Run(); }
 
+// The PrivateHub adapter, driven directly: its Install refuses a site root that is not a directory, and
+// its broker registration holds the data root, so a rival registration on the same root is refused.
+// The adapter is driven directly because WebServer::Compose adds the site before Install runs.
+static void TestPrivateHubAdapter()
+{
+	String error;
+	String scratch = GetTempFileName("WebAppHostPrivateHub");
+	RealizeDirectory(scratch);
+
+	// A bad root: the engine's privatehub directory is a plain file, so Install refuses it.
+	String bad_dir = AppendFileName(scratch, "bad");
+	RealizeDirectory(AppendFileName(bad_dir, "engine"));
+	SaveFile(AppendFileName(AppendFileName(bad_dir, "engine"), "privatehub"), "not a directory");
+
+	// A valid root: the site is added the way WebServer adds it, then the adapter installs on it.
+	String good_dir = AppendFileName(scratch, "good");
+	String good_root = AppendFileName(AppendFileName(good_dir, "engine"), "privatehub");
+	RealizeDirectory(good_root);
+	String workspace = AppendFileName(scratch, "workspace");
+	RealizeDirectory(workspace);
+
+	EngineSite& site = TheWebEngine().AddSite("privatehub", "PrivateHub", "http://192.168.1.50:18211", good_root);
+	static PrivateHubApp *app = new PrivateHubApp;   // lives for the process: the broker keeps its backend
+
+	WebAppContext bad_ctx;
+	bad_ctx.site_dir = bad_dir;
+	bad_ctx.settings.Add("workspace", workspace);
+	Check(!app->Install(site, bad_ctx, error) && error.Find("not a directory") >= 0,
+	      "privatehub: an Install on a root that is not a directory is refused (" + error + ")");
+
+	error.Clear();
+	WebAppContext ctx;
+	ctx.site_dir = good_dir;
+	ctx.settings.Add("workspace", workspace);
+	ctx.broker = &TheWebEngine().Broker();
+	Check(app->Install(site, ctx, error), "privatehub: an Install on a valid root succeeds (" + error + ")");
+	Check(app->RegisterBroker(ctx, error), "privatehub: the broker registration succeeds (" + error + ")");
+	Check(DirectoryExists(AppendFileName(good_root, "broker")), "privatehub: the broker data root is created under the site");
+
+	WebBroker rival;
+	String rival_error;
+	String broker_root = AppendFileName(good_root, "broker");
+	PrivateHubWorkspaceBackend rival_backend(workspace, good_root);
+	Check(!RegisterPrivateHubService(rival, "privatehub", rival_backend, broker_root, rival_error) &&
+	      !rival_error.IsEmpty(),
+	      "privatehub: a rival registration on the adapter's data root is refused (" + rival_error + ")");
+
+	DeleteFolderDeep(scratch);
+}
+
 // Fallible Install, the per-app settings, the site directory and WebServer::App.
 static void TestFallibleAndSettings()
 {
@@ -359,6 +411,7 @@ CONSOLE_APP_MAIN
 	TestOrderAndRefusals();
 	TestFlags();
 	TestCompose();
+	TestPrivateHubAdapter();
 	TestFallibleAndSettings();
 	TestBlobRoutes();
 	Cout() << "WebAppHost self-tests: " << (checks - failures) << "/" << checks << " checks passed\n";
