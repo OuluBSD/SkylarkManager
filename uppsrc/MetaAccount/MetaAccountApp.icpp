@@ -1,0 +1,9 @@
+#include "MetaAccountApp.h"
+
+NAMESPACE_UPP
+
+INITBLOCK {
+	RegisterWebapp<MetaAccountApp>("meta");
+}
+
+END_UPP_NAMESPACE

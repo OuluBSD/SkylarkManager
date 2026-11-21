@@ -240,26 +240,11 @@ bool ComposeEngineSites(WebEngineHost& host, EngineSiteBackends& owned, const St
 	String engine_root = AppendFileName(site_dir, "engine");
 	RealizeDirectory(engine_root);
 
-
-	// The shared meta grant store (Science, TaskFoundry and the meta site use
-	// it). Created first: the meta and science installs below need it.
+	// The shared meta grant store (the meta, Science and TaskFoundry webapps use
+	// it through WebServer). Created before the sites that remain here need it.
 	String grants_root = AppendFileName(engine_root, "grants");
 	RealizeDirectory(grants_root);
 	owned.grants.Create("meta", grants_root);
-
-	// The meta-account site: ecosystem identities and the consent page. Its
-	// accounts are what client sites (TaskFoundry) link to for consent grants.
-	String meta_root = AppendFileName(engine_root, "meta");
-	RealizeDirectory(meta_root);
-	EngineSite& meta = TheWebEngine().AddSite("meta", "MetaAccount",
-		origins.Get("meta"), meta_root);
-	meta.trusted_proxy_peers <<= trusted_proxy_peers;
-	InstallMetaAccountSite(meta, *owned.grants);
-	InstallSessionRoutes(meta);
-	InstallCommandConsole(meta);
-	RegisterMetaAccountService("meta", meta.Accounts(), *owned.grants);
-	host.BindSite(cfg.meta_port, "meta");
-
 
 	// Company: the module owns its store under its own root. The host only
 	// registers the broker surface, so Company data is reached through the broker.
@@ -332,8 +317,9 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.site_dir = site_dir;
 	ws.public_host = cfg.public_host;
 	ws.trusted_proxy_peers <<= trusted_proxy_peers;
-	for(const char *id : { "privatehub", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		ws.origins.GetAdd(id) = origins.Get(id);
+	ws.SetAppPort("meta", cfg.meta_port);
 	ws.SetAppPort("privatehub", cfg.privatehub_port);
 	ws.SetSetting("privatehub", "workspace", cfg.privatehub_workspace);
 	ws.SetAppPort("science", cfg.science_port);
@@ -344,7 +330,7 @@ bool ComposeWebApps(WebEngineHost& host, EngineSiteBackends& owned, int stock_po
 	ws.SetAppPort("financials", cfg.financials_port);
 	ws.SetAppPort("youtubeplanner", cfg.youtubeplanner_port);
 	ws.UseGrants(~owned.grants);
-	for(const char *id : { "privatehub", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
+	for(const char *id : { "privatehub", "meta", "science", "taskfoundry", "atlas", "multiatlas", "financials", "youtubeplanner" })
 		if(!ws.Enable(id, error))
 			return false;
 	return ws.Compose(host, error);

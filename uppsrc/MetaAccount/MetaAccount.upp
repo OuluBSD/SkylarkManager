@@ -8,11 +8,15 @@ uses
 	WebBroker,
 	WebAccounts,
 	WebEngine,
-	WebsiteTemplates;
+	WebsiteTemplates,
+	WebAppHost;
 
 file
 	AGENTS.md,
 	MetaInbox.h,
 	MetaInbox.cpp,
 	MetaAccountSite.h,
-	MetaAccountSite.cpp;
+	MetaAccountSite.cpp,
+	MetaAccountApp.h,
+	MetaAccountApp.cpp,
+	MetaAccountApp.icpp;

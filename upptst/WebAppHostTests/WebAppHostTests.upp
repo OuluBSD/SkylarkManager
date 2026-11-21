@@ -8,7 +8,8 @@ uses
 	WebAppHost,
 	PrivateHubWorkspace,
 	Science,
-	TaskFoundry;
+	TaskFoundry,
+	MetaAccount;
 
 file
 	WebAppHostTests.cpp,
